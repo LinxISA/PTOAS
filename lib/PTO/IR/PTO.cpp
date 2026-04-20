@@ -8328,78 +8328,102 @@ mlir::LogicalResult mlir::pto::TSubSCOp::verify() {
     return emitOpError() << "expects src0, src1, and dst to have the same rank";
   return mlir::success();
 }
+
+static LogicalResult verifyTransposeElementTypes(Operation *op, Type srcTy,
+                                                 Type tmpTy, Type dstTy,
+                                                 StringRef mismatchMessage,
+                                                 unsigned &elemBytes) {
+  if (failed(verifyTileBufCommon(op, srcTy, "src")) ||
+      failed(verifyTileBufCommon(op, tmpTy, "tmp")) ||
+      failed(verifyTileBufCommon(op, dstTy, "dst"))) {
+    return failure();
+  }
+
+  Type srcElem = getElemTy(srcTy);
+  Type tmpElem = getElemTy(tmpTy);
+  Type dstElem = getElemTy(dstTy);
+  if (!srcElem || !tmpElem || !dstElem || srcElem != dstElem ||
+      srcElem != tmpElem) {
+    return op->emitError() << mismatchMessage;
+  }
+
+  elemBytes = srcElem.getIntOrFloatBitWidth() / 8;
+  if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4) {
+    return op->emitError()
+           << "expects transpose element size to be 1, 2, or 4 bytes";
+  }
+
+  auto isAllowedWidthType = [&](Type ty) {
+    if (elemBytes == 4)
+      return ty.isInteger(32) || ty.isF32();
+    if (elemBytes == 2)
+      return ty.isInteger(16) || ty.isF16() || ty.isBF16();
+    return ty.isInteger(8);
+  };
+  if (!isAllowedWidthType(srcElem)) {
+    return op->emitError()
+           << "expects transpose element type to match the supported set for "
+              "its width";
+  }
+
+  return success();
+}
+
+static LogicalResult verifyA5TransposeAlignedMajor(Operation *op, Type ty,
+                                                   StringRef name,
+                                                   unsigned elemBytes) {
+  auto tb = mlir::dyn_cast<pto::TileBufType>(ty);
+  if (!tb)
+    return success();
+  auto shape = getShapeVec(ty);
+  if (shape.size() != 2)
+    return success();
+  bool rowMajor =
+      tb.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
+  int64_t major = rowMajor ? shape[1] : shape[0];
+  if (major != ShapedType::kDynamic &&
+      (major * static_cast<int64_t>(elemBytes)) % 32 != 0) {
+    return op->emitError()
+           << "expects " << name
+           << " major dimension times element size to be 32-byte aligned on A5";
+  }
+  return success();
+}
+
 mlir::LogicalResult mlir::pto::TTransOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
     Type srcTy = getSrc().getType();
     Type tmpTy = getTmp().getType();
     Type dstTy = getDst().getType();
-    if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
-        failed(verifyTileBufCommon(*this, tmpTy, "tmp")) ||
-        failed(verifyTileBufCommon(*this, dstTy, "dst")))
+    unsigned elemBytes = 0;
+    if (failed(verifyTransposeElementTypes(
+            getOperation(), srcTy, tmpTy, dstTy,
+            "expects src and dst to have the same element type", elemBytes))) {
       return failure();
-    Type srcElem = getElemTy(srcTy);
-    Type tmpElem = getElemTy(tmpTy);
-    Type dstElem = getElemTy(dstTy);
-    if (!srcElem || !tmpElem || !dstElem || srcElem != dstElem || srcElem != tmpElem)
-      return emitOpError() << "expects src and dst to have the same element type";
+    }
     if (auto srcTb = dyn_cast<pto::TileBufType>(srcTy)) {
       if (srcTb.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::RowMajor))
         return emitOpError() << "expects A2/A3 transpose src to use the row_major blayout";
     }
-    unsigned elemBytes = srcElem.getIntOrFloatBitWidth() / 8;
-    if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4)
-      return emitOpError() << "expects transpose element size to be 1, 2, or 4 bytes";
-    auto isAllowedWidthType = [&](Type ty) {
-      if (elemBytes == 4)
-        return ty.isInteger(32) || ty.isF32();
-      if (elemBytes == 2)
-        return ty.isInteger(16) || ty.isF16() || ty.isBF16();
-      return ty.isInteger(8);
-    };
-    if (!isAllowedWidthType(srcElem))
-      return emitOpError() << "expects transpose element type to match the supported set for its width";
     return mlir::success();
   };
   auto verifyA5 = [&]() -> LogicalResult {
     Type srcTy = getSrc().getType();
     Type tmpTy = getTmp().getType();
     Type dstTy = getDst().getType();
-    if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
-        failed(verifyTileBufCommon(*this, tmpTy, "tmp")) ||
-        failed(verifyTileBufCommon(*this, dstTy, "dst")))
+    unsigned elemBytes = 0;
+    if (failed(verifyTransposeElementTypes(
+            getOperation(), srcTy, tmpTy, dstTy,
+            "expects src, tmp, and dst to have the same element type",
+            elemBytes))) {
       return failure();
-    Type srcElem = getElemTy(srcTy);
-    Type tmpElem = getElemTy(tmpTy);
-    Type dstElem = getElemTy(dstTy);
-    if (!srcElem || !tmpElem || !dstElem || srcElem != dstElem || srcElem != tmpElem)
-      return emitOpError() << "expects src, tmp, and dst to have the same element type";
-    unsigned elemBytes = srcElem.getIntOrFloatBitWidth() / 8;
-    if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4)
-      return emitOpError() << "expects transpose element size to be 1, 2, or 4 bytes";
-    auto isAllowedWidthType = [&](Type ty) {
-      if (elemBytes == 4)
-        return ty.isInteger(32) || ty.isF32();
-      if (elemBytes == 2)
-        return ty.isInteger(16) || ty.isF16() || ty.isBF16();
-      return ty.isInteger(8);
     };
-    if (!isAllowedWidthType(srcElem))
-      return emitOpError() << "expects transpose element type to match the supported set for its width";
-    auto checkAlignedMajor = [&](Type ty, StringRef name) -> LogicalResult {
-      auto tb = mlir::dyn_cast<pto::TileBufType>(ty);
-      if (!tb)
-        return success();
-      auto shape = getShapeVec(ty);
-      if (shape.size() != 2)
-        return success();
-      bool rowMajor = tb.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
-      int64_t major = rowMajor ? shape[1] : shape[0];
-      if (major != ShapedType::kDynamic && (major * static_cast<int64_t>(elemBytes)) % 32 != 0)
-        return emitOpError() << "expects " << name << " major dimension times element size to be 32-byte aligned on A5";
-      return success();
-    };
-    if (failed(checkAlignedMajor(srcTy, "src")) || failed(checkAlignedMajor(dstTy, "dst")))
+    if (failed(verifyA5TransposeAlignedMajor(getOperation(), srcTy, "src",
+                                             elemBytes)) ||
+        failed(verifyA5TransposeAlignedMajor(getOperation(), dstTy, "dst",
+                                             elemBytes))) {
       return failure();
+    }
     return mlir::success();
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);

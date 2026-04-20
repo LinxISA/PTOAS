@@ -256,6 +256,7 @@ struct Encoder {
                                const ptobc::v0::OpInfo &info,
                                const ptobc::v0::OpcodeAndVariant &variantInfo,
                                llvm::SmallVectorImpl<uint64_t> &imms);
+  uint64_t encodeConstId(mlir::arith::ConstantOp cst);
   void encodeKnownOpOperands(mlir::Operation &op, Buffer &out,
                              const ptobc::v0::OpInfo &info,
                              const ptobc::v0::OpcodeAndVariant &variantInfo,
@@ -294,6 +295,58 @@ void Encoder::encodeBlock(mlir::Block& block, Buffer& out) {
   }
 }
 
+static uint8_t encodeCmpIPredicate(mlir::arith::CmpIPredicate predicate) {
+  switch (predicate) {
+  case mlir::arith::CmpIPredicate::eq:
+    return 0;
+  case mlir::arith::CmpIPredicate::ne:
+    return 1;
+  case mlir::arith::CmpIPredicate::slt:
+    return 2;
+  case mlir::arith::CmpIPredicate::sle:
+    return 3;
+  case mlir::arith::CmpIPredicate::sgt:
+    return 4;
+  case mlir::arith::CmpIPredicate::sge:
+    return 5;
+  default:
+    throw std::runtime_error(
+        "unsupported arith.cmpi predicate (v0 supports only eq/ne/slt/sle/sgt/sge)");
+  }
+}
+
+static void encodeEventImmediates(mlir::Operation &op, Buffer &out,
+                                  llvm::SmallVectorImpl<uint64_t> &imms) {
+  auto src = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("src_op");
+  auto dst = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("dst_op");
+  auto event = op.getAttrOfType<mlir::pto::EventAttr>("event_id");
+  if (!src || !dst || !event)
+    throw std::runtime_error("event op missing src_op/dst_op/event_id attrs");
+  uint8_t srcValue = uint8_t(src.getOpType());
+  uint8_t dstValue = uint8_t(dst.getOpType());
+  uint8_t eventValue = uint8_t(event.getEvent());
+  out.appendU8(srcValue);
+  out.appendU8(dstValue);
+  out.appendU8(eventValue);
+  imms.append({srcValue, dstValue, eventValue});
+}
+
+uint64_t Encoder::encodeConstId(mlir::arith::ConstantOp cst) {
+  mlir::Attribute attr = cst.getValue();
+  uint64_t typeId = internType(file, cst.getType());
+  if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
+    const llvm::APInt &value = intAttr.getValue();
+    if (value.getBitWidth() <= 64)
+      return internConstInt64(typeId, value.getSExtValue());
+    return internConstIntBits(typeId, value);
+  }
+  if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(attr)) {
+    return internConstFloatBits(typeId, floatAttr.getValue().bitcastToAPInt());
+  }
+  throw std::runtime_error(
+      "unsupported arith.constant attribute kind for compact v0");
+}
+
 void Encoder::encodeKnownOpImmediates(
     mlir::Operation &op, Buffer &out, const ptobc::v0::OpInfo &info,
     const ptobc::v0::OpcodeAndVariant &variantInfo,
@@ -305,69 +358,20 @@ void Encoder::encodeKnownOpImmediates(
     auto cmp = llvm::dyn_cast<mlir::arith::CmpIOp>(&op);
     if (!cmp)
       throw std::runtime_error("imm_kind=cmpi_pred but op is not arith.cmpi");
-    uint8_t predicate = 0;
-    switch (cmp.getPredicate()) {
-    case mlir::arith::CmpIPredicate::eq:
-      predicate = 0;
-      break;
-    case mlir::arith::CmpIPredicate::ne:
-      predicate = 1;
-      break;
-    case mlir::arith::CmpIPredicate::slt:
-      predicate = 2;
-      break;
-    case mlir::arith::CmpIPredicate::sle:
-      predicate = 3;
-      break;
-    case mlir::arith::CmpIPredicate::sgt:
-      predicate = 4;
-      break;
-    case mlir::arith::CmpIPredicate::sge:
-      predicate = 5;
-      break;
-    default:
-      throw std::runtime_error(
-          "unsupported arith.cmpi predicate (v0 supports only eq/ne/slt/sle/sgt/sge)");
-    }
+    uint8_t predicate = encodeCmpIPredicate(cmp.getPredicate());
     out.appendU8(predicate);
     imms.push_back(predicate);
     return;
   }
   case 0x02: {
-    auto src = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("src_op");
-    auto dst = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("dst_op");
-    auto event = op.getAttrOfType<mlir::pto::EventAttr>("event_id");
-    if (!src || !dst || !event)
-      throw std::runtime_error("event op missing src_op/dst_op/event_id attrs");
-    uint8_t srcValue = uint8_t(src.getOpType());
-    uint8_t dstValue = uint8_t(dst.getOpType());
-    uint8_t eventValue = uint8_t(event.getEvent());
-    out.appendU8(srcValue);
-    out.appendU8(dstValue);
-    out.appendU8(eventValue);
-    imms.append({srcValue, dstValue, eventValue});
+    encodeEventImmediates(op, out, imms);
     return;
   }
   case 0x05: {
     auto cst = llvm::dyn_cast<mlir::arith::ConstantOp>(&op);
     if (!cst)
       throw std::runtime_error("imm_kind=const_id but op is not arith.constant");
-
-    mlir::Attribute attr = cst.getValue();
-    uint64_t constId = 0;
-    if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
-      uint64_t typeId = internType(file, cst.getType());
-      const llvm::APInt &value = intAttr.getValue();
-      constId = value.getBitWidth() <= 64 ? internConstInt64(typeId, value.getSExtValue())
-                                          : internConstIntBits(typeId, value);
-    } else if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(attr)) {
-      uint64_t typeId = internType(file, cst.getType());
-      constId = internConstFloatBits(typeId,
-                                     floatAttr.getValue().bitcastToAPInt());
-    } else {
-      throw std::runtime_error(
-          "unsupported arith.constant attribute kind for compact v0");
-    }
+    uint64_t constId = encodeConstId(cst);
     writeULEB128(constId, out.bytes);
     imms.push_back(constId);
     return;

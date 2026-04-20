@@ -9908,6 +9908,44 @@ struct SCFExecuteRegionInline
 struct SCFExecuteRegionToCF : public OpRewritePattern<scf::ExecuteRegionOp> {
   using OpRewritePattern::OpRewritePattern;
 
+  static SmallVector<BlockArgument>
+  addExecuteRegionContinuationArguments(PatternRewriter &rewriter,
+                                        scf::ExecuteRegionOp op,
+                                        Block *continueBlock, Location loc) {
+    SmallVector<BlockArgument> contArgs;
+    contArgs.reserve(op.getNumResults());
+    for (Type type : op.getResultTypes())
+      contArgs.push_back(continueBlock->addArgument(type, loc));
+    return contArgs;
+  }
+
+  static void replaceExecuteRegionResults(scf::ExecuteRegionOp op,
+                                          ArrayRef<BlockArgument> contArgs) {
+    for (auto result : llvm::enumerate(op.getResults()))
+      result.value().replaceAllUsesWith(contArgs[result.index()]);
+  }
+
+  static SmallVector<Block *> collectExecuteRegionBlocks(scf::ExecuteRegionOp op) {
+    SmallVector<Block *> movedBlocks;
+    movedBlocks.reserve(op.getRegion().getBlocks().size());
+    for (Block &block : op.getRegion())
+      movedBlocks.push_back(&block);
+    return movedBlocks;
+  }
+
+  static void rewriteExecuteRegionYields(PatternRewriter &rewriter, Location loc,
+                                         ArrayRef<Block *> movedBlocks,
+                                         Block *continueBlock) {
+    for (Block *block : movedBlocks) {
+      auto yield = dyn_cast<scf::YieldOp>(block->getTerminator());
+      if (!yield)
+        continue;
+      rewriter.setInsertionPoint(yield);
+      rewriter.create<cf::BranchOp>(loc, continueBlock, yield.getOperands());
+      rewriter.eraseOp(yield);
+    }
+  }
+
   LogicalResult matchAndRewrite(scf::ExecuteRegionOp op,
                                 PatternRewriter &rewriter) const override {
     if (isTriviallyInlineableExecuteRegion(op))
@@ -9930,20 +9968,11 @@ struct SCFExecuteRegionToCF : public OpRewritePattern<scf::ExecuteRegionOp> {
     // arguments for the execute_region results.
     auto execIt = Block::iterator(op.getOperation());
     Block *continueBlock = rewriter.splitBlock(curBlock, std::next(execIt));
+    SmallVector<BlockArgument> contArgs =
+        addExecuteRegionContinuationArguments(rewriter, op, continueBlock, loc);
+    replaceExecuteRegionResults(op, contArgs);
 
-    SmallVector<BlockArgument> contArgs;
-    contArgs.reserve(op.getNumResults());
-    for (Type t : op.getResultTypes())
-      contArgs.push_back(continueBlock->addArgument(t, loc));
-
-    for (auto it : llvm::enumerate(op.getResults()))
-      it.value().replaceAllUsesWith(contArgs[it.index()]);
-
-    // Capture blocks before moving the region.
-    SmallVector<Block *> movedBlocks;
-    movedBlocks.reserve(op.getRegion().getBlocks().size());
-    for (Block &b : op.getRegion())
-      movedBlocks.push_back(&b);
+    SmallVector<Block *> movedBlocks = collectExecuteRegionBlocks(op);
     Block *entryBlock = &op.getRegion().front();
 
     // Inline the execute_region blocks into the parent region right before the
@@ -9951,15 +9980,7 @@ struct SCFExecuteRegionToCF : public OpRewritePattern<scf::ExecuteRegionOp> {
     rewriter.inlineRegionBefore(op.getRegion(), *parentRegion,
                                 continueBlock->getIterator());
 
-    // Replace all scf.yield terminators with a branch to the continuation.
-    for (Block *b : movedBlocks) {
-      auto yield = dyn_cast<scf::YieldOp>(b->getTerminator());
-      if (!yield)
-        continue;
-      rewriter.setInsertionPoint(yield);
-      rewriter.create<cf::BranchOp>(loc, continueBlock, yield.getOperands());
-      rewriter.eraseOp(yield);
-    }
+    rewriteExecuteRegionYields(rewriter, loc, movedBlocks, continueBlock);
 
     // Replace execute_region itself with a branch to the inlined entry block.
     rewriter.setInsertionPoint(op);
@@ -10046,6 +10067,21 @@ struct SCFIndexSwitchToCF : public OpRewritePattern<scf::IndexSwitchOp> {
     }
   }
 
+  static LogicalResult populateIndexSwitchCaseBlocks(
+      PatternRewriter &rewriter, Location loc, scf::IndexSwitchOp op,
+      ArrayRef<Block *> caseBlocks, Block *defaultBlock,
+      Block *continueBlock) {
+    unsigned numCases = op.getCases().size();
+    for (unsigned i = 0; i < numCases; ++i) {
+      if (failed(cloneYieldingBlockAndBranchTo(
+              rewriter, loc, op.getCaseBlock(i), caseBlocks[i], continueBlock))) {
+        return failure();
+      }
+    }
+    return cloneYieldingBlockAndBranchTo(rewriter, loc, op.getDefaultBlock(),
+                                         defaultBlock, continueBlock);
+  }
+
   LogicalResult matchAndRewrite(scf::IndexSwitchOp op,
                                 PatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
@@ -10074,15 +10110,10 @@ struct SCFIndexSwitchToCF : public OpRewritePattern<scf::IndexSwitchOp> {
     populateIndexSwitchCheckBlocks(rewriter, loc, selector, cases, checkBlocks,
                                    caseBlocks, defaultBlock);
 
-    // Fill case blocks and default block with cloned bodies + branch to cont.
-    for (unsigned i = 0; i < numCases; ++i) {
-      if (failed(cloneYieldingBlockAndBranchTo(
-              rewriter, loc, op.getCaseBlock(i), caseBlocks[i], continueBlock)))
-        return rewriter.notifyMatchFailure(op, "expected scf.yield terminator");
-    }
-    if (failed(cloneYieldingBlockAndBranchTo(rewriter, loc, op.getDefaultBlock(),
-                                             defaultBlock, continueBlock)))
+    if (failed(populateIndexSwitchCaseBlocks(rewriter, loc, op, caseBlocks,
+                                             defaultBlock, continueBlock))) {
       return rewriter.notifyMatchFailure(op, "expected scf.yield terminator");
+    }
 
     // Replace the original switch op with a branch into the check chain.
     Block *entryDest = numCases ? checkBlocks[0] : defaultBlock;

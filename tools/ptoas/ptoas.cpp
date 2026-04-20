@@ -109,9 +109,8 @@ static LogicalResult reorderEmitCFunctions(ModuleOp module) {
   }
 
   SmallVector<emitc::FuncOp> sortedDefinitions;
-  while (!ready.empty()) {
-    Operation *next = ready.front();
-    ready.erase(ready.begin());
+  for (size_t readyIndex = 0; readyIndex < ready.size(); ++readyIndex) {
+    Operation *next = ready[readyIndex];
     auto nextFunc = cast<emitc::FuncOp>(next);
     sortedDefinitions.push_back(nextFunc);
 
@@ -618,6 +617,18 @@ static bool isGeneratedGlobalTensorDecl(llvm::StringRef trimmed,
                       [](char c) { return std::isdigit(c); });
 }
 
+static void appendNullInitializedGlobalTensorDecl(std::string &out,
+                                                  llvm::StringRef line,
+                                                  llvm::StringRef decl) {
+  size_t indentLen = line.find_first_not_of(" \t");
+  if (indentLen == std::string::npos)
+    indentLen = 0;
+  llvm::StringRef indent = line.take_front(indentLen);
+  out.append(indent.str());
+  out.append(decl.str());
+  out.append("(nullptr);");
+}
+
 static void rewriteHoistedGlobalTensorDecls(std::string &cpp) {
   // When `declareVariablesAtTop` is enabled, the C++ emitter hoists SSA value
   // declarations to the top of the function and emits assignments later. This
@@ -645,14 +656,7 @@ static void rewriteHoistedGlobalTensorDecls(std::string &cpp) {
     llvm::StringRef decl;
     llvm::StringRef varName;
     if (isGeneratedGlobalTensorDecl(trimmed, decl, varName)) {
-      size_t indentLen = line.find_first_not_of(" \t");
-      if (indentLen == std::string::npos)
-        indentLen = 0;
-      llvm::StringRef indent = line.take_front(indentLen);
-
-      out.append(indent.str());
-      out.append(decl.str());
-      out.append("(nullptr);");
+      appendNullInitializedGlobalTensorDecl(out, line, decl);
       rewritten = true;
     }
 

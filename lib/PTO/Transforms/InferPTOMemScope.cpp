@@ -458,19 +458,56 @@ LogicalResult pto::inferAndPropagateUbufMemScope(memref::AllocOp op) {
   return success();
 }
 
-void InferPTOMemScopePass::runOnOperation() {
-  SmallVector<func::FuncOp> deviceFuncList;
-  getOperation()->walk([&](func::FuncOp func) {
-    deviceFuncList.push_back(func);
-    return;
+static SmallVector<func::FuncOp> collectDeviceFunctions(Operation *rootOp) {
+  SmallVector<func::FuncOp> deviceFuncs;
+  rootOp->walk([&](func::FuncOp func) { deviceFuncs.push_back(func); });
+  return deviceFuncs;
+}
+
+static SmallVector<gpu::GPUFuncOp> collectGpuFunctions(Operation *rootOp) {
+  SmallVector<gpu::GPUFuncOp> gpuFuncs;
+  rootOp->walk([&](gpu::GPUModuleOp gpuModule) {
+    gpuModule->walk(
+        [&](gpu::GPUFuncOp gpuFunc) -> void { gpuFuncs.push_back(gpuFunc); });
+  });
+  return gpuFuncs;
+}
+
+static void inferDeviceFunctionOperandScopes(func::FuncOp func,
+                                             InferPTOMemScopePass &pass) {
+  func->walk([&](mlir::pto::TMatmulOp op) {
+    if (failed(pto::inferAndPropagateMemScopeForMatmulDps(op)))
+      pass.signalPassFailure();
   });
 
-  SmallVector<gpu::GPUFuncOp> gpuFuncList;
-  getOperation()->walk([&](gpu::GPUModuleOp gpuModule) {
-    gpuModule->walk([&](gpu::GPUFuncOp gpuFunc) -> void {
-      gpuFuncList.push_back(gpuFunc);
-    });
+  func->walk([&](mlir::pto::TMatmulAccOp op) {
+    if (failed(pto::inferAndPropagateMemScopeForMatmulAccDps(op)))
+      pass.signalPassFailure();
   });
+
+  func->walk([&](mlir::pto::TMatmulBiasOp op) {
+    if (failed(pto::inferAndPropagateMemScopeForMatmulBiasDps(op)))
+      pass.signalPassFailure();
+  });
+
+  func->walk([&](mlir::pto::TMovOp op) {
+    if (failed(pto::inferAndPropagateMemScopeForMovDps(op)))
+      pass.signalPassFailure();
+  });
+}
+
+static void inferRemainingAllocScopes(func::FuncOp func,
+                                      InferPTOMemScopePass &pass) {
+  func->walk([&](memref::AllocOp op) {
+    if (failed(pto::inferAndPropagateUbufMemScope(op)))
+      pass.signalPassFailure();
+  });
+}
+
+void InferPTOMemScopePass::runOnOperation() {
+  Operation *rootOp = getOperation();
+  SmallVector<func::FuncOp> deviceFuncList = collectDeviceFunctions(rootOp);
+  SmallVector<gpu::GPUFuncOp> gpuFuncList = collectGpuFunctions(rootOp);
 
   for (auto func : gpuFuncList) {
     if (failed(inferAndPropagateMemScopeForGpuFunc(func)))
@@ -479,36 +516,14 @@ void InferPTOMemScopePass::runOnOperation() {
 
   // Infer and propagate memory scope for device functions.
   for (auto func : deviceFuncList) {
-    // Set the memory scope of values related to `pto::MmadL1Op` to L1 or L0C.
-    func->walk([&](mlir::pto::TMatmulOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMatmulDps(op)))
-        signalPassFailure();
-    });
-
-    func->walk([&](mlir::pto::TMatmulAccOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMatmulAccDps(op)))
-        signalPassFailure();
-    });
-
-    func->walk([&](mlir::pto::TMatmulBiasOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMatmulBiasDps(op)))
-        signalPassFailure();
-    });
-
-    func->walk([&](mlir::pto::TMovOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMovDps(op)))
-        signalPassFailure();
-    });
+    inferDeviceFunctionOperandScopes(func, *this);
 
     // Set device function arguments' memory scope to GM.
     if (failed(pto::inferAndPropagateMemScopeForFunc(func)))
       signalPassFailure();
 
     // Finally, set the remaining memory scope in the device kernel to UB.
-    func->walk([&](memref::AllocOp op) {
-      if (failed(pto::inferAndPropagateUbufMemScope(op)))
-        signalPassFailure();
-    });
+    inferRemainingAllocScopes(func, *this);
   }
 
   for (auto func : deviceFuncList) {

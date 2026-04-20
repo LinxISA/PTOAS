@@ -8505,72 +8505,94 @@ mlir::LogicalResult mlir::pto::TPrintOp::verify() {
 static LogicalResult verifyMatmulCommon(Operation *op, Value lhs, Value rhs,
                                        Value biasOpt, Type maybeDstElemTy,
                                        Type maybeResultElemTy) {
-  // ---- case A: tensor/memref (ShapedType) ----
-  if (auto lhsTy = dyn_cast<ShapedType>(lhs.getType())) {
+  auto verifyShapedMatmulOperands = [&](ShapedType lhsTy) -> LogicalResult {
     auto rhsTy = dyn_cast<ShapedType>(rhs.getType());
-    if (!rhsTy || !lhsTy.hasRank() || !rhsTy.hasRank())
-      return op->emitOpError("expects lhs and rhs to be ranked tensors or memrefs");
+    if (!rhsTy || !lhsTy.hasRank() || !rhsTy.hasRank()) {
+      return op->emitOpError(
+          "expects lhs and rhs to be ranked tensors or memrefs");
+    }
 
-    if (lhsTy.getElementType() != rhsTy.getElementType())
+    if (lhsTy.getElementType() != rhsTy.getElementType()) {
       return op->emitOpError()
              << "expects lhs and rhs to have the same element type, but got lhs="
              << lhsTy.getElementType() << " rhs=" << rhsTy.getElementType();
+    }
 
     if (biasOpt) {
       auto biasTy = dyn_cast<ShapedType>(biasOpt.getType());
       if (!biasTy || !biasTy.hasRank())
         return op->emitOpError("expects bias to be a ranked tensor or memref");
-      if (biasTy.getElementType() != lhsTy.getElementType())
+      if (biasTy.getElementType() != lhsTy.getElementType()) {
         return op->emitOpError()
                << "expects bias to have the same element type as lhs and rhs, but got bias="
                << biasTy.getElementType() << " vs " << lhsTy.getElementType();
+      }
     }
 
-    if (maybeDstElemTy && maybeDstElemTy != lhsTy.getElementType())
+    if (maybeDstElemTy && maybeDstElemTy != lhsTy.getElementType()) {
       return op->emitOpError()
              << "expects dst to have the same element type as lhs and rhs, but got dst="
              << maybeDstElemTy << " vs " << lhsTy.getElementType();
+    }
 
-    if (maybeResultElemTy && maybeResultElemTy != lhsTy.getElementType())
+    if (maybeResultElemTy && maybeResultElemTy != lhsTy.getElementType()) {
       return op->emitOpError()
              << "expects result to have the same element type as lhs and rhs, but got result="
              << maybeResultElemTy << " vs " << lhsTy.getElementType();
+    }
 
     return success();
+  };
+  if (auto lhsTy = dyn_cast<ShapedType>(lhs.getType()))
+    return verifyShapedMatmulOperands(lhsTy);
+
+  auto verifyTileMatmulOperands = [&](TileType lhsTile,
+                                      TileType rhsTile) -> LogicalResult {
+    if (lhsTile.getElementType() != rhsTile.getElementType()) {
+      return op->emitOpError()
+             << "expects lhs and rhs tiles to have the same element type, but got lhs="
+             << lhsTile.getElementType() << " rhs=" << rhsTile.getElementType();
+    }
+
+    if ((int64_t)lhsTile.getShape().size() != 2 ||
+        (int64_t)rhsTile.getShape().size() != 2) {
+      return op->emitOpError("expects lhs and rhs tiles to be 2D");
+    }
+
+    if (lhsTile.getShape()[1] != rhsTile.getShape()[0]) {
+      return op->emitOpError()
+             << "expects lhs dim1 to equal rhs dim0, but got "
+             << lhsTile.getShape()[1] << " vs " << rhsTile.getShape()[0];
+    }
+
+    if (biasOpt) {
+      auto biasTile = dyn_cast<TileType>(biasOpt.getType());
+      if (!biasTile) {
+        return op->emitOpError(
+            "expects bias to be !pto.tile when lhs and rhs are !pto.tile");
+      }
+      if (biasTile.getElementType() != lhsTile.getElementType()) {
+        return op->emitOpError(
+            "expects bias to have the same element type as lhs and rhs");
+      }
+    }
+
+    if (maybeDstElemTy && maybeDstElemTy != lhsTile.getElementType())
+      return op->emitOpError()
+             << "expects dst to have the same element type as lhs and rhs";
+    if (maybeResultElemTy && maybeResultElemTy != lhsTile.getElementType())
+      return op->emitOpError()
+             << "expects result to have the same element type as lhs and rhs";
+    return success();
+  };
+
+  auto lhsTile = dyn_cast<TileType>(lhs.getType());
+  auto rhsTile = dyn_cast<TileType>(rhs.getType());
+  if (!lhsTile || !rhsTile) {
+    return op->emitOpError(
+        "expects lhs and rhs to be ranked tensors, memrefs, or !pto.tile");
   }
-
-  // ---- case B: tile ----
-  auto lhsTile = dyn_cast<mlir::pto::TileType>(lhs.getType());
-  auto rhsTile = dyn_cast<mlir::pto::TileType>(rhs.getType());
-  if (!lhsTile || !rhsTile)
-    return op->emitOpError("expects lhs and rhs to be ranked tensors, memrefs, or !pto.tile");
-
-  if (lhsTile.getElementType() != rhsTile.getElementType())
-    return op->emitOpError() << "expects lhs and rhs tiles to have the same element type, but got lhs="
-                             << lhsTile.getElementType() << " rhs=" << rhsTile.getElementType();
-
-  if ((int64_t)lhsTile.getShape().size() != 2 || (int64_t)rhsTile.getShape().size() != 2)
-    return op->emitOpError("expects lhs and rhs tiles to be 2D");
-
-  if (lhsTile.getShape()[1] != rhsTile.getShape()[0])
-    return op->emitOpError() << "expects lhs dim1 to equal rhs dim0, but got "
-                             << lhsTile.getShape()[1] << " vs " << rhsTile.getShape()[0];
-
-  if (biasOpt) {
-    auto biasTile = dyn_cast<mlir::pto::TileType>(biasOpt.getType());
-    if (!biasTile)
-      return op->emitOpError("expects bias to be !pto.tile when lhs and rhs are !pto.tile");
-    if (biasTile.getElementType() != lhsTile.getElementType())
-      return op->emitOpError("expects bias to have the same element type as lhs and rhs");
-  }
-
-  if (maybeDstElemTy && maybeDstElemTy != lhsTile.getElementType())
-    return op->emitOpError() << "expects dst to have the same element type as lhs and rhs";
-
-  if (maybeResultElemTy && maybeResultElemTy != lhsTile.getElementType())
-    return op->emitOpError() << "expects result to have the same element type as lhs and rhs";
-
-  return success();
+  return verifyTileMatmulOperands(lhsTile, rhsTile);
 }
 
 LogicalResult mlir::pto::TMatmulOp::verify() {
@@ -8777,6 +8799,24 @@ static void flattenAddExpr(AffineExpr expr, SmallVectorImpl<AffineExpr> &terms) 
   terms.push_back(expr);
 }
 
+static bool tryExtractMulStride(AffineExpr expr, SmallVectorImpl<int64_t> &strides) {
+  auto mul = expr.dyn_cast<AffineBinaryOpExpr>();
+  if (!mul || mul.getKind() != AffineExprKind::Mul)
+    return false;
+
+  auto tryUpdateStride = [&](AffineExpr dimExpr, AffineExpr cstExpr) {
+    auto dim = dimExpr.dyn_cast<AffineDimExpr>();
+    auto cst = cstExpr.dyn_cast<AffineConstantExpr>();
+    if (!dim || !cst)
+      return false;
+    strides[dim.getPosition()] = cst.getValue();
+    return true;
+  };
+
+  return tryUpdateStride(mul.getLHS(), mul.getRHS()) ||
+         tryUpdateStride(mul.getRHS(), mul.getLHS());
+}
+
 // Helper: 从 AffineMap 中提取 Strides
 static void decomposeStridedLayout(AffineMap map, SmallVectorImpl<int64_t> &strides) {
   // 1. 初始化
@@ -8790,29 +8830,8 @@ static void decomposeStridedLayout(AffineMap map, SmallVectorImpl<int64_t> &stri
 
   // 3. 分析每一项
   for (auto term : terms) {
-    // 情况 A: dN * Const 或 Const * dN
-    if (auto mul = term.dyn_cast<AffineBinaryOpExpr>()) {
-      if (mul.getKind() == AffineExprKind::Mul) {
-        AffineExpr lhs = mul.getLHS();
-        AffineExpr rhs = mul.getRHS();
-
-        // 尝试匹配 LHS=Dim, RHS=Const
-        if (auto dim = lhs.dyn_cast<AffineDimExpr>()) {
-          if (auto cst = rhs.dyn_cast<AffineConstantExpr>()) {
-            strides[dim.getPosition()] = cst.getValue();
-            continue;
-          }
-        }
-        
-        // 尝试匹配 LHS=Const, RHS=Dim (乘法交换律)
-        if (auto dim = rhs.dyn_cast<AffineDimExpr>()) {
-          if (auto cst = lhs.dyn_cast<AffineConstantExpr>()) {
-            strides[dim.getPosition()] = cst.getValue();
-            continue;
-          }
-        }
-      }
-    }
+    if (tryExtractMulStride(term, strides))
+      continue;
     // 情况 B: 单独的 dN (隐含 Stride = 1)
     else if (auto dim = term.dyn_cast<AffineDimExpr>()) {
       strides[dim.getPosition()] = 1;
@@ -8957,6 +8976,71 @@ static void printLayout(AsmPrinter &printer, Attribute layoutAttr) {
   printer << ">";
 }
 
+static ArrayAttr getSubsetSizeAttr(DictionaryAttr attributes,
+                                   OpaqueProperties properties) {
+  if (properties) {
+    const auto *prop = properties.as<SubsetOp::Properties *>();
+    if (prop && prop->sizes)
+      return prop->sizes;
+  }
+  if (attributes)
+    return attributes.getAs<ArrayAttr>("sizes");
+  return ArrayAttr();
+}
+
+static SmallVector<int64_t> getSubsetResultShape(ArrayAttr sizeAttr) {
+  SmallVector<int64_t> resultShape;
+  resultShape.reserve(sizeAttr.size());
+  for (auto attr : sizeAttr)
+    resultShape.push_back(llvm::cast<IntegerAttr>(attr).getInt());
+  return resultShape;
+}
+
+static SmallVector<int64_t> inferSubsetValidShape(TileBufType sourceType,
+                                                  ArrayRef<int64_t> resultShape,
+                                                  ValueRange operands) {
+  SmallVector<int64_t> validShape;
+  validShape.reserve(resultShape.size());
+  constexpr int64_t kDynamicValidDim = -1;
+  ArrayRef<int64_t> parentValid = sourceType.getValidShape();
+  for (size_t i = 0, e = resultShape.size(); i < e; ++i) {
+    int64_t sizeDim = resultShape[i];
+    int64_t vdim = sizeDim;
+
+    if (parentValid.size() == resultShape.size()) {
+      int64_t pv = parentValid[i];
+      if (pv < 0) {
+        vdim = kDynamicValidDim;
+      } else {
+        int64_t off = 0;
+        if (operands.size() > 1 + i) {
+          auto offOpt = getConstIndexValue(operands[1 + i]);
+          if (!offOpt) {
+            validShape.push_back(kDynamicValidDim);
+            continue;
+          }
+          off = *offOpt;
+          int64_t diff = 0;
+          if (pv > 0) {
+            int64_t offMod = off % pv;
+            if (offMod < 0)
+              offMod += pv;
+            diff = pv - offMod;
+          }
+          if (diff < 0)
+            diff = 0;
+          vdim = std::min<int64_t>(sizeDim, diff);
+        } else {
+          vdim = kDynamicValidDim;
+        }
+      }
+    }
+
+    validShape.push_back(vdim);
+  }
+  return validShape;
+}
+
 // ---- TileBuf ---
 
 
@@ -9053,92 +9137,26 @@ LogicalResult SubViewOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location, ValueRange operands,
     DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
     SmallVectorImpl<Type> &inferredReturnTypes) {
-
-  // 1. 获取 Source Type
-  if (operands.empty()) return failure();
+  if (operands.empty())
+    return failure();
   auto sourceType = llvm::dyn_cast<TileBufType>(operands[0].getType());
-  if (!sourceType) return failure();
-
-  // 2. 获取 subview 逻辑窗口（sizes）
-  ArrayAttr sizeAttr;
-  if (properties) {
-    const auto *prop = properties.as<SubViewOp::Properties *>();
-    if (prop) sizeAttr = prop->sizes;
-  }
-  if (!sizeAttr && attributes) {
-    sizeAttr = attributes.getAs<ArrayAttr>("sizes");
-  }
-  if (!sizeAttr) return failure();
-
-  SmallVector<int64_t> subviewShape;
-  for (auto attr : sizeAttr) {
-    int64_t dim = llvm::cast<IntegerAttr>(attr).getInt();
-    subviewShape.push_back(dim);
-  }
-
-  // Design: subview 的结果 tile 类型显式表达逻辑子窗口 shape（sizes）。
-  ArrayRef<int64_t> parentShape = sourceType.getShape();
-  if (subviewShape.size() != parentShape.size())
+  if (!sourceType)
     return failure();
 
-  // Derive valid shape from explicit valid_row/valid_col when provided.
-  // Otherwise default to subview shape (no parent valid-shape inheritance).
-  SmallVector<int64_t> validShape;
-  constexpr int64_t kDynamicValidDim = -1;
-  int64_t rank = static_cast<int64_t>(subviewShape.size());
-  Value explicitVRow;
-  Value explicitVCol;
+  ArrayAttr sizeAttr = getSubsetSizeAttr(attributes, properties);
+  if (!sizeAttr)
+    return failure();
 
-  // Robustly decode optional valid operands using AttrSizedOperandSegments:
-  //   [source, offsets..., valid_row?, valid_col?]
-  if (attributes) {
-    if (auto segAttr =
-            attributes.getAs<DenseI32ArrayAttr>("operandSegmentSizes")) {
-      ArrayRef<int32_t> segs = segAttr.asArrayRef();
-      if (segs.size() == 4) {
-        int32_t srcSeg = segs[0];
-        int32_t offSeg = segs[1];
-        int32_t vRowSeg = segs[2];
-        int32_t vColSeg = segs[3];
-        if (srcSeg == 1 && offSeg >= 0 && (vRowSeg == 0 || vRowSeg == 1) &&
-            (vColSeg == 0 || vColSeg == 1)) {
-          size_t idx = static_cast<size_t>(srcSeg + offSeg);
-          if (vRowSeg == 1 && idx < operands.size())
-            explicitVRow = operands[idx++];
-          if (vColSeg == 1 && idx < operands.size())
-            explicitVCol = operands[idx];
-        }
-      }
-    }
-  }
-
-  // Fallback for legacy callers that may not provide operandSegmentSizes.
-  if (!explicitVRow && !explicitVCol && rank == 2) {
-    size_t expectedWithoutValid = static_cast<size_t>(1 + rank);
-    if (operands.size() >= expectedWithoutValid + 2) {
-      explicitVRow = operands[expectedWithoutValid];
-      explicitVCol = operands[expectedWithoutValid + 1];
-    }
-  }
-
-  for (size_t i = 0, e = subviewShape.size(); i < e; ++i) {
-    int64_t vdim = subviewShape[i];
-    Value explicitV = (i == 0) ? explicitVRow : (i == 1 ? explicitVCol : Value());
-    if (explicitV) {
-      auto cst = getConstIndexValue(explicitV);
-      vdim = cst ? std::min<int64_t>(*cst, subviewShape[i]) : kDynamicValidDim;
-    }
-    validShape.push_back(vdim);
-  }
-
-  // 3. 继承 Config (若为空使用默认)
+  SmallVector<int64_t> resultShape = getSubsetResultShape(sizeAttr);
+  SmallVector<int64_t> validShape =
+      inferSubsetValidShape(sourceType, resultShape, operands);
   auto cfg = sourceType.getConfigAttr();
-  if (!cfg) cfg = TileBufConfigAttr::getDefault(context);
+  if (!cfg)
+    cfg = TileBufConfigAttr::getDefault(context);
 
-  // 4. 构建 Result Type
   auto canonicalValidShape = canonicalizeTileBufValidShape(validShape);
   auto resultType = TileBufType::get(
-      context, subviewShape, sourceType.getElementType(),
+      context, resultShape, sourceType.getElementType(),
       sourceType.getMemorySpace(), canonicalValidShape, cfg);
 
   inferredReturnTypes.push_back(resultType);
@@ -9174,37 +9192,46 @@ static bool getConstIndex(Value v, int64_t &out) {
   return false;
 }
 
+template <typename EnumAttrT>
+static bool readEnumLikeAttrI32(Attribute attr, int32_t &out) {
+  if (auto enumAttr = dyn_cast<EnumAttrT>(attr)) {
+    out = static_cast<int32_t>(enumAttr.getValue());
+    return true;
+  }
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+    out = static_cast<int32_t>(intAttr.getInt());
+    return true;
+  }
+  return false;
+}
+
+static int64_t getSubsetInnerElemBytes(Type elemTy) {
+  if (auto ft = elemTy.dyn_cast<FloatType>()) {
+    if (ft.isF16() || ft.isBF16())
+      return 2;
+    if (ft.isF32())
+      return 4;
+    if (ft.isF64())
+      return 8;
+    return -1;
+  }
+  if (auto it = elemTy.dyn_cast<IntegerType>()) {
+    int64_t bytes = it.getWidth() / 8;
+    return bytes > 0 ? bytes : 1;
+  }
+  return -1;
+}
+
 static LogicalResult computeInnerShape(TileBufConfigAttr cfg, Type elemTy,
                                        int64_t &innerRows, int64_t &innerCols,
                                        bool &boxed, int32_t &bl, int32_t &sl) {
-  auto readBLayoutI32 = [](Attribute attr, int32_t &out) -> bool {
-    if (auto a = dyn_cast<BLayoutAttr>(attr)) {
-      out = (int32_t)a.getValue();
-      return true;
-    }
-    if (auto a = dyn_cast<IntegerAttr>(attr)) {
-      out = (int32_t)a.getInt();
-      return true;
-    }
-    return false;
-  };
-  auto readSLayoutI32 = [](Attribute attr, int32_t &out) -> bool {
-    if (auto a = dyn_cast<SLayoutAttr>(attr)) {
-      out = (int32_t)a.getValue();
-      return true;
-    }
-    if (auto a = dyn_cast<IntegerAttr>(attr)) {
-      out = (int32_t)a.getInt();
-      return true;
-    }
-    return false;
-  };
   bl = 0;
   sl = 0;
   int32_t fr = 512;
-  (void)readBLayoutI32(cfg.getBLayout(), bl);
-  (void)readSLayoutI32(cfg.getSLayout(), sl);
-  if (auto attr = dyn_cast<IntegerAttr>(cfg.getSFractalSize())) fr = (int32_t)attr.getInt();
+  (void)readEnumLikeAttrI32<BLayoutAttr>(cfg.getBLayout(), bl);
+  (void)readEnumLikeAttrI32<SLayoutAttr>(cfg.getSLayout(), sl);
+  if (auto attr = dyn_cast<IntegerAttr>(cfg.getSFractalSize()))
+    fr = static_cast<int32_t>(attr.getInt());
 
   boxed = (sl != 0);
   if (!boxed) {
@@ -9213,15 +9240,7 @@ static LogicalResult computeInnerShape(TileBufConfigAttr cfg, Type elemTy,
     return success();
   }
 
-  int64_t elemBytes = -1;
-  if (auto ft = elemTy.dyn_cast<FloatType>()) {
-    if (ft.isF16() || ft.isBF16()) elemBytes = 2;
-    else if (ft.isF32()) elemBytes = 4;
-    else if (ft.isF64()) elemBytes = 8;
-  } else if (auto it = elemTy.dyn_cast<IntegerType>()) {
-    int64_t bytes = it.getWidth() / 8;
-    elemBytes = bytes > 0 ? bytes : 1;
-  }
+  int64_t elemBytes = getSubsetInnerElemBytes(elemTy);
   if (elemBytes <= 0) return failure();
 
   if (fr == 1024) {

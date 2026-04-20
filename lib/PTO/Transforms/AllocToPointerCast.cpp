@@ -99,6 +99,19 @@ static SmallVector<uint64_t> getAllocatedOffsets(memref::AllocOp op,
   return offsets;
 }
 
+static SmallVector<Value> buildOffsetConstants(PatternRewriter &rewriter,
+                                               Location loc,
+                                               ArrayRef<uint64_t> offsets) {
+  SmallVector<Value> addrs;
+  addrs.reserve(offsets.size());
+  for (uint64_t offset : offsets) {
+    auto constantIntOffsetOp =
+        rewriter.create<arith::ConstantIntOp>(loc, offset, 64);
+    addrs.push_back(constantIntOffsetOp);
+  }
+  return addrs;
+}
+
 static std::pair<Value, Value> getDynamicValidShapeValues(memref::AllocOp op) {
   Value vRow;
   Value vCol;
@@ -119,13 +132,8 @@ LogicalResult MemrefAllocaOpToPointerCastOpPattern::matchAndRewrite(
   TileBufConfigAttr configAttr = inferBindTileConfig(op);
   SmallVector<uint64_t> offsets = getAllocatedOffsets(
       op, currentMemRefType, buffer2Offsets, fallbackNextOffset);
-  SmallVector<Value> addrs;
-  addrs.reserve(offsets.size());
-  for (uint64_t offset : offsets) {
-    auto constantIntOffsetOp =
-        rewriter.create<arith::ConstantIntOp>(op->getLoc(), offset, 64);
-    addrs.push_back(constantIntOffsetOp);
-  }
+  SmallVector<Value> addrs =
+      buildOffsetConstants(rewriter, op.getLoc(), offsets);
 
   auto [vRow, vCol] = getDynamicValidShapeValues(op);
   auto ptoPointerCastOp = rewriter.create<pto::PointerCastOp>(

@@ -514,15 +514,23 @@ ParseResult mlir::pto::TDivSOp::parse(OpAsmParser &parser, OperationState &resul
   OpAsmParser::UnresolvedOperand op0, op1, dst;
   Type ty0, ty1, dstTy;
 
-  if (parser.parseKeyword("ins") || parser.parseLParen() ||
-      parser.parseOperand(op0) || parser.parseComma() ||
-      parser.parseOperand(op1) || parser.parseColonType(ty0) ||
-      parser.parseComma() || parser.parseType(ty1) || parser.parseRParen())
+  auto parseInputs = [&]() -> ParseResult {
+    return success(parser.parseKeyword("ins") || parser.parseLParen() ||
+                   parser.parseOperand(op0) || parser.parseComma() ||
+                   parser.parseOperand(op1) || parser.parseColonType(ty0) ||
+                   parser.parseComma() || parser.parseType(ty1) ||
+                   parser.parseRParen());
+  };
+  auto parseOutputs = [&]() -> ParseResult {
+    return success(parser.parseKeyword("outs") || parser.parseLParen() ||
+                   parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
+                   parser.parseRParen());
+  };
+
+  if (failed(parseInputs()))
     return failure();
 
-  if (parser.parseKeyword("outs") || parser.parseLParen() ||
-      parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
-      parser.parseRParen())
+  if (failed(parseOutputs()))
     return failure();
 
   NamedAttrList attrs;
@@ -6006,15 +6014,22 @@ ParseResult mlir::pto::TMrgSortOp::parse(OpAsmParser &parser, OperationState &re
 mlir::LogicalResult mlir::pto::TMrgSortOp::verify() {
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
-  if (isFormat1()) {
-    Type srcTy = getSrc().getType();
-    Type dstTy = getDst().getType();
-    if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(dstTy))
-      return emitOpError() << "format1 expects PTO shaped-like types for src/dst";
-    if (getElemTy(srcTy) != getElemTy(dstTy))
-      return emitOpError() << "expects src/dst to have the same element type";
-    if (!getElemTy(srcTy).isF16() && !getElemTy(srcTy).isF32())
-      return emitOpError() << "expects element type to be f16 or f32";
+
+  auto verifyBlockLen = [&](Value blockLen) -> LogicalResult {
+    if (!blockLen)
+      return success();
+    auto cstOp = blockLen.getDefiningOp<arith::ConstantOp>();
+    if (!cstOp)
+      return success();
+    auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(cstOp.getValue());
+    if (!intAttr)
+      return success();
+    int64_t v = intAttr.getValue().getSExtValue();
+    if (v <= 0 || (v % 64) != 0)
+      return emitOpError() << "expects blockLen > 0 and multiple of 64";
+    return success();
+  };
+  auto verifyFormat1Shape = [&](Type srcTy, Type dstTy) -> LogicalResult {
     auto ss = getShapeVec(srcTy);
     auto ds = getShapeVec(dstTy);
     if (ss.size() != 2 || ds.size() != 2)
@@ -6023,23 +6038,48 @@ mlir::LogicalResult mlir::pto::TMrgSortOp::verify() {
       return emitOpError() << "expects src rows == 1";
     if (ds[0] != mlir::ShapedType::kDynamic && ds[0] != 1)
       return emitOpError() << "expects dst rows == 1";
-    if (ss[1] != mlir::ShapedType::kDynamic && ds[1] != mlir::ShapedType::kDynamic && ss[1] != ds[1])
+    if (ss[1] != mlir::ShapedType::kDynamic &&
+        ds[1] != mlir::ShapedType::kDynamic && ss[1] != ds[1]) {
       return emitOpError() << "expects src/dst cols to match";
-    if (getBlockLen()) {
-      if (auto cstOp = getBlockLen().getDefiningOp<arith::ConstantOp>()) {
-        if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(cstOp.getValue())) {
-          int64_t v = intAttr.getValue().getSExtValue();
-          if (v <= 0 || (v % 64) != 0)
-            return emitOpError() << "expects blockLen > 0 and multiple of 64";
-        }
-      }
     }
+    return success();
+  };
+  auto verifyFormat1 = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+    if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(dstTy))
+      return emitOpError() << "format1 expects PTO shaped-like types for src/dst";
+    if (getElemTy(srcTy) != getElemTy(dstTy))
+      return emitOpError() << "expects src/dst to have the same element type";
+    if (!getElemTy(srcTy).isF16() && !getElemTy(srcTy).isF32())
+      return emitOpError() << "expects element type to be f16 or f32";
+    if (failed(verifyFormat1Shape(srcTy, dstTy)))
+      return failure();
+    if (failed(verifyBlockLen(getBlockLen())))
+      return failure();
     return mlir::success();
-  }
-  if (isFormat2()) {
-    for (Value v : getSrcs())
-      if (!isPTOShapedLike(v.getType()))
-        return emitOpError() << "format2 expects PTO shaped-like type for each src";
+  };
+  auto verifyFormat2Executed = [&]() -> FailureOr<VectorType> {
+    auto excutedTy = mlir::dyn_cast<mlir::VectorType>(getExcuted().getType());
+    if (!excutedTy || excutedTy.getRank() != 1 || excutedTy.getNumElements() != 4 ||
+        !excutedTy.getElementType().isInteger(16)) {
+      emitOpError() << "format2 excuted must be vector<4xi16>";
+      return failure();
+    }
+    return excutedTy;
+  };
+  auto verifyFormat2Srcs = [&](Type elemTy) -> LogicalResult {
+    for (Value src : getSrcs()) {
+      if (!isPTOShapedLike(src.getType()))
+        return emitOpError()
+               << "format2 expects PTO shaped-like type for each src";
+      if (getElemTy(src.getType()) != elemTy)
+        return emitOpError()
+               << "format2 expects src/dst/tmp element types to match";
+    }
+    return success();
+  };
+  auto verifyFormat2 = [&]() -> LogicalResult {
     if (getSrcs().size() < 2u || getSrcs().size() > 4u)
       return emitOpError() << "format2 expects 2 to 4 srcs";
     if (getDsts().size() != 1u || !getTmp() || !getExcuted())
@@ -6048,10 +6088,8 @@ mlir::LogicalResult mlir::pto::TMrgSortOp::verify() {
     Type tmpTy = getTmp().getType();
     if (!isPTOShapedLike(dstTy) || !isPTOShapedLike(tmpTy))
       return emitOpError() << "format2 dst/tmp must be PTO shaped-like";
-    auto excutedTy = mlir::dyn_cast<mlir::VectorType>(getExcuted().getType());
-    if (!excutedTy || excutedTy.getRank() != 1 || excutedTy.getNumElements() != 4 ||
-        !excutedTy.getElementType().isInteger(16))
-      return emitOpError() << "format2 excuted must be vector<4xi16>";
+    if (failed(verifyFormat2Executed()))
+      return failure();
     Type elemTy = getElemTy(dstTy);
     if (elemTy != getElemTy(tmpTy))
       return emitOpError() << "format2 expects dst/tmp element types to match";
@@ -6059,13 +6097,13 @@ mlir::LogicalResult mlir::pto::TMrgSortOp::verify() {
     auto tmpShape = getShapeVec(tmpTy);
     if (dstShape != tmpShape)
       return emitOpError() << "format2 expects dst/tmp shapes to match";
-    for (Value src : getSrcs()) {
-      Type srcTy = src.getType();
-      if (getElemTy(srcTy) != elemTy)
-        return emitOpError() << "format2 expects src/dst/tmp element types to match";
-    }
-    return mlir::success();
-  }
+    return verifyFormat2Srcs(elemTy);
+  };
+
+  if (isFormat1())
+    return verifyFormat1();
+  if (isFormat2())
+    return verifyFormat2();
   return emitOpError() << "tmrgsort expects format1 (1 src + blockLen + 1 dst) or "
                           "format2 (2 to 4 srcs + tmp, outs dst, excuted)";
 }
@@ -9227,6 +9265,37 @@ static int64_t getSubsetInnerElemBytes(Type elemTy) {
   return -1;
 }
 
+static LogicalResult computeFractalInnerShape(int32_t fractalSize,
+                                              int32_t sLayout,
+                                              int64_t elemBytes,
+                                              int64_t &innerRows,
+                                              int64_t &innerCols) {
+  if (fractalSize == 1024) {
+    innerRows = 16;
+    innerCols = 16;
+    return success();
+  }
+  if (fractalSize == 32) {
+    innerRows = 16;
+    innerCols = 2;
+    return success();
+  }
+  if (fractalSize != 512)
+    return failure();
+
+  if (sLayout == 1) {
+    innerRows = 16;
+    innerCols = 32 / elemBytes;
+    return success();
+  }
+  if (sLayout == 2) {
+    innerRows = 32 / elemBytes;
+    innerCols = 16;
+    return success();
+  }
+  return failure();
+}
+
 static LogicalResult computeInnerShape(TileBufConfigAttr cfg, Type elemTy,
                                        int64_t &innerRows, int64_t &innerCols,
                                        bool &boxed, int32_t &bl, int32_t &sl) {
@@ -9246,31 +9315,9 @@ static LogicalResult computeInnerShape(TileBufConfigAttr cfg, Type elemTy,
   }
 
   int64_t elemBytes = getSubsetInnerElemBytes(elemTy);
-  if (elemBytes <= 0) return failure();
-
-  if (fr == 1024) {
-    innerRows = 16;
-    innerCols = 16;
-    return success();
-  }
-  if (fr == 32) {
-    innerRows = 16;
-    innerCols = 2;
-    return success();
-  }
-  if (fr == 512) {
-    if (sl == 1) {
-      innerRows = 16;
-      innerCols = 32 / elemBytes;
-      return success();
-    }
-    if (sl == 2) {
-      innerRows = 32 / elemBytes;
-      innerCols = 16;
-      return success();
-    }
-  }
-  return failure();
+  if (elemBytes <= 0)
+    return failure();
+  return computeFractalInnerShape(fr, sl, elemBytes, innerRows, innerCols);
 }
 
 mlir::LogicalResult mlir::pto::SubViewOp::verify() {

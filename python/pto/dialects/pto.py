@@ -12,6 +12,13 @@ from pathlib import Path
 
 from mlir import ir as _ods_ir
 
+try:
+    from mlir.dialects._ods_common import (
+        get_op_result_or_value as _ods_get_op_result_or_value,
+    )
+except ImportError:
+    _ods_get_op_result_or_value = None
+
 from . import _pto_ops_gen as _pto_ops_gen
 
 
@@ -43,7 +50,11 @@ def _export_generated_symbols():
 
 
 def get_op_result_or_value(value):
-    return getattr(_pto_ops_gen, "_get_op_result_or_value")(value)
+    if _ods_get_op_result_or_value is None:
+        raise RuntimeError(
+            "missing get_op_result_or_value helper in mlir.dialects._ods_common"
+        )
+    return _ods_get_op_result_or_value(value)
 
 
 _export_generated_symbols()

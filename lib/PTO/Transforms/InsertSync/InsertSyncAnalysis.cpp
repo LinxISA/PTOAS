@@ -81,7 +81,8 @@ void InsertSyncAnalysis::DealWithLoopSync(LoopInstanceElement *nowElement) {
   }
 
   SyncIRs backSyncIr;
-  assert(syncIR_.size() >= nowElement->endId);
+  const size_t syncIRSize = syncIR_.size();
+  assert(syncIRSize >= nowElement->endId);
   for (unsigned i = nowElement->beginId; i < nowElement->endId; i++) {
     if (auto *compound = dyn_cast<CompoundInstanceElement>(syncIR_[i].get())) {
       InsertBackForSync(compound, backSyncIr, nowElement);
@@ -165,8 +166,10 @@ void InsertSyncAnalysis::InsertSeqSync(
   for (int i = end - 1; i >= begin; i--) {
     auto &frontPtr = syncElement[i];
     unsigned frontIndex = frontPtr->GetIndex();
-    assert(frontIndex < syncIR_.size());
-    assert(syncIR_[frontIndex] != nullptr);
+    const size_t totalSyncIR = syncIR_.size();
+    assert(frontIndex < totalSyncIR);
+    auto *frontSyncElement = syncIR_[frontIndex].get();
+    assert(frontSyncElement != nullptr);
 
     if (auto *frontCompound =
             dyn_cast<CompoundInstanceElement>(frontPtr.get())) {
@@ -248,7 +251,8 @@ unsigned InsertSyncAnalysis::InsertBranchSync(
     return (branchElement->endId - branchElement->beginId);
   } else if (branchElement->getBranchKind() == KindOfBranch::ELSE_BEGIN &&
              index != begin) {
-    assert(nowCompound->GetIndex() > branchElement->branchId);
+    const unsigned compoundIndex = nowCompound->GetIndex();
+    assert(compoundIndex > branchElement->branchId);
     return (branchElement->branchId - branchElement->beginId);
   }
   return 0;
@@ -389,7 +393,8 @@ void InsertSyncAnalysis::InsertSyncOperation(
   }
 
   syncIndex_++;
-  assert(syncOperations_.size() == syncIndex_);
+  const size_t syncOperationSize = syncOperations_.size();
+  assert(syncOperationSize == syncIndex_);
 }
 
 // ==============================================================================
@@ -469,9 +474,15 @@ void InsertSyncAnalysis::UpdateSyncRecord(const SyncOperation *sync,
 void InsertSyncAnalysis::UpdateSyncRecordInfo(
     CompoundInstanceElement *frontCompound, SyncRecordList &syncRecordList) {
   (void)frontCompound;
-  assert(!syncOperations_.empty());
+  const bool hasSyncOperations = !syncOperations_.empty();
+  assert(hasSyncOperations);
+  if (!hasSyncOperations)
+    return;
   auto &syncPair = syncOperations_.back();
-  assert(!syncPair.empty());
+  const bool hasSyncPair = !syncPair.empty();
+  assert(hasSyncPair);
+  if (!hasSyncPair)
+    return;
 
   auto *newSync = syncPair[0].get();
   for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++) {

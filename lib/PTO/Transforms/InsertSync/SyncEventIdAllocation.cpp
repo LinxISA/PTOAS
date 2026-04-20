@@ -138,8 +138,10 @@ void SyncEventIdAllocation::SetEventId(SyncOperation *sync) {
   SmallVector<bool> eventIdLifetimeAvailableStatus = GetEventPool(sync, poolSize);
   SmallVector<bool> eventIdIdleStatus = GetEventIdIdleStatus(sync, poolSize);
   
-  assert(eventIdLifetimeAvailableStatus.size() == poolSize);
-  assert(eventIdIdleStatus.size() == poolSize);
+  const size_t lifetimeStatusSize = eventIdLifetimeAvailableStatus.size();
+  const size_t idleStatusSize = eventIdIdleStatus.size();
+  assert(lifetimeStatusSize == poolSize);
+  assert(idleStatusSize == poolSize);
 
   // Apply per-(src,dst) reservations by marking the "reserved tail" as
   // unavailable. Historically this pass treated reserved IDs as being at the
@@ -162,7 +164,10 @@ void SyncEventIdAllocation::SetEventId(SyncOperation *sync) {
   } else if (reallocatedPipePair.count(ScopePair(sync)) &&
              (canAllocaEventId.size() < idSize)) {
     // Reallocate strategy: reduce usage to 1
-    assert(canAllocaEventId.size() > 0);
+    const bool hasAllocatableEventId = !canAllocaEventId.empty();
+    assert(hasAllocatableEventId);
+    if (!hasAllocatableEventId)
+      return;
     SetEventPool(sync, canAllocaEventId[0]);
     sync->eventIdNum = 1;
   }
@@ -233,8 +238,12 @@ SmallVector<bool> SyncEventIdAllocation::GetEventIdIdleStatus(SyncOperation *syn
 SmallVector<bool> SyncEventIdAllocation::GetEventPool(const SyncOperation *sync,
                                                       size_t eventIdNum) {
   SmallVector<bool> eventIdPool(eventIdNum, true);
-  assert(sync->GetSyncIndex() < syncOperations_.size());
-  auto &syncPair = syncOperations_[sync->GetSyncIndex()];
+  const unsigned syncIndex = sync->GetSyncIndex();
+  const size_t syncOperationSize = syncOperations_.size();
+  assert(syncIndex < syncOperationSize);
+  if (syncIndex >= syncOperationSize)
+    return eventIdPool;
+  auto &syncPair = syncOperations_[syncIndex];
   auto *setFlag = syncPair[0].get();
   auto *waitFlag = syncPair[1].get();
  
@@ -298,7 +307,10 @@ void SyncEventIdAllocation::FindUseEventID(unsigned int begin, unsigned int end,
 bool SyncEventIdAllocation::CheckSyncLifeCycleConflict(
     SmallVector<unsigned int> &syncLifeCycle, unsigned int begin,
     unsigned int end, SmallVector<bool> &eventId, unsigned i) const {
-  assert((syncLifeCycle.size() & 0x1) == 0 && "sync_life_cycle error.");
+  const size_t lifeCycleSize = syncLifeCycle.size();
+  assert((lifeCycleSize & 0x1) == 0 && "sync_life_cycle error.");
+  if ((lifeCycleSize & 0x1) != 0)
+    return false;
   if (syncLifeCycle[0] <= begin) {
     return true; // Conflict!
   }
@@ -330,8 +342,12 @@ void SyncEventIdAllocation::UpdateEventId(
  
 void SyncEventIdAllocation::SetEventPool(const SyncOperation *sync,
                                          unsigned eventId) {
-  assert(sync->GetSyncIndex() < syncOperations_.size());
-  auto &syncPair = syncOperations_[sync->GetSyncIndex()];
+  const unsigned syncIndex = sync->GetSyncIndex();
+  const size_t syncOperationSize = syncOperations_.size();
+  assert(syncIndex < syncOperationSize);
+  if (syncIndex >= syncOperationSize)
+    return;
+  auto &syncPair = syncOperations_[syncIndex];
   
   // [Fix] 遍历组内所有 SyncOperation，为它们统一分配 Event ID
   // 这样无论是 Then-Set, Else-Set 还是 Wait，都会得到相同的 ID
@@ -629,7 +645,10 @@ void SyncEventIdAllocation::IgnoreBackHeadAndTailSync() {
 }
  
 bool SyncEventIdAllocation::TryWidenByOtherSync(const SyncOperation *sync) {
-  assert(!sync->isBarrierType());
+  const bool isBarrierSync = sync->isBarrierType();
+  assert(!isBarrierSync);
+  if (isBarrierSync)
+    return false;
   auto &syncPair = syncOperations_[sync->GetSyncIndex()];
   SyncOperation *setSync = syncPair[0].get();
   SyncOperation *waitSync = syncPair[1].get();

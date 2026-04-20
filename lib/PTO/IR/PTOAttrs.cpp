@@ -127,8 +127,7 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
   if (succeeded(p.parseOptionalGreater()))
     return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
 
-  bool parsedGreater = false;
-  while (!parsedGreater) {
+  for (;;) {
     StringRef key;
     if (p.parseKeyword(&key)) return {};
     if (p.parseEqual()) return {};
@@ -162,8 +161,7 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
       return {};
     }
 
-    parsedGreater = succeeded(p.parseOptionalGreater());
-    if (parsedGreater)
+    if (succeeded(p.parseOptionalGreater()))
       break;
     if (p.parseComma()) return {};
   }

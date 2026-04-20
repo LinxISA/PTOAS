@@ -431,7 +431,11 @@ void PTOIRTranslator::UpdateForOpInfo(scf::ForOp forOp) {
   assert(forBeginPtr != nullptr && "Sync IR Construction failed.");
   
   if (!forOp.getInitArgs().empty()) {
-    assert(forOp.getInitArgs().size() == forOp.getRegionIterArgs().size());
+    const size_t initArgCount = forOp.getInitArgs().size();
+    const size_t regionIterArgCount = forOp.getRegionIterArgs().size();
+    assert(initArgCount == regionIterArgCount);
+    if (initArgCount != regionIterArgCount)
+      return;
     for (auto [i, arg] : llvm::enumerate(forOp.getInitArgs())) {
       UpdateAliasBufferInfo(forOp.getRegionIterArgs()[i], arg);
     }
@@ -539,7 +543,11 @@ void PTOIRTranslator::UpdateYieldOpInfo(scf::YieldOp yieldOp) {
   auto *parentOp = yieldOp->getParentOp();
   if (!parentOp || isa<scf::WhileOp>(parentOp)) return;
  
-  assert(parentOp->getResults().size() == yieldOp->getOpOperands().size());
+  const size_t parentResultCount = parentOp->getResults().size();
+  const size_t yieldOperandCount = yieldOp->getOpOperands().size();
+  assert(parentResultCount == yieldOperandCount);
+  if (parentResultCount != yieldOperandCount)
+    return;
   for (auto [yieldVal, resultVal] : llvm::zip(yieldOp->getOpOperands(), parentOp->getResults())) {
     UpdateAliasBufferInfo(resultVal, yieldVal.get());
   }

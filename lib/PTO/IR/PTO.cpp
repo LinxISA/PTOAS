@@ -448,36 +448,15 @@ static mlir::Type parsePTOTypeAllowNoBang(mlir::OpAsmParser &parser) {
 
   mlir::MLIRContext *ctx = parser.getContext();
 
-  auto parseShapeElemForOpParser =
-      [&](llvm::SmallVectorImpl<int64_t> &shape, mlir::Type &elem) -> mlir::LogicalResult {
-        if (failed(parser.parseLess()))
-          return failure();
-        if (failed(parser.parseDimensionList(shape, /*allowDynamic=*/true)))
-          return failure();
-        if (failed(parser.parseType(elem)))
-          return failure();
-        if (failed(parser.parseGreater()))
-          return failure();
-        return success();
-      };
-
-  if (head == "pto.tile_view") {
+  auto parseShapeElemForOpParser = [&](auto buildType) -> mlir::Type {
     llvm::SmallVector<int64_t, 4> shape;
     mlir::Type elem;
-    if (failed(parseShapeElemForOpParser(shape, elem)))
+    if (failed(parseShapeAndElem(parser, shape, elem, /*allowDynamic=*/true)))
       return mlir::Type();
-    return mlir::pto::PartitionTensorViewType::get(ctx, shape, elem);
-  }
+    return buildType(shape, elem);
+  };
 
-  if (head == "pto.tile") {
-    llvm::SmallVector<int64_t, 4> shape;
-    mlir::Type elem;
-    if (failed(parseShapeElemForOpParser(shape, elem)))
-      return mlir::Type();
-    return mlir::pto::TileType::get(ctx, shape, elem);
-  }
-
-  if (head == "pto.ptr") {
+  auto parsePtrTypeForOpParser = [&]() -> mlir::Type {
     if (failed(parser.parseLess()))
       return mlir::Type();
     mlir::Type elem;
@@ -494,15 +473,20 @@ static mlir::Type parsePTOTypeAllowNoBang(mlir::OpAsmParser &parser) {
     if (failed(parser.parseGreater()))
       return mlir::Type();
     return mlir::pto::PtrType::get(ctx, elem);
-  }
+  };
 
-  if (head == "pto.tensor_view") {
-    llvm::SmallVector<int64_t, 4> shape;
-    mlir::Type elem;
-    if (failed(parseShapeElemForOpParser(shape, elem)))
-      return mlir::Type();
-    return mlir::pto::TensorViewType::get(ctx, shape, elem);
-  }
+  if (head == "pto.tile_view")
+    return parseShapeElemForOpParser([&](auto shape, Type elem) {
+      return mlir::pto::PartitionTensorViewType::get(ctx, shape, elem);
+    });
+  if (head == "pto.tile")
+    return parseShapeElemForOpParser(
+        [&](auto shape, Type elem) { return mlir::pto::TileType::get(ctx, shape, elem); });
+  if (head == "pto.ptr")
+    return parsePtrTypeForOpParser();
+  if (head == "pto.tensor_view")
+    return parseShapeElemForOpParser(
+        [&](auto shape, Type elem) { return mlir::pto::TensorViewType::get(ctx, shape, elem); });
 
   return mlir::Type();
 }
@@ -3848,24 +3832,26 @@ ParseResult mlir::pto::TColSumOp::parse(OpAsmParser &parser, OperationState &res
   if (parser.parseKeyword("ins") || parser.parseLParen() || parser.parseOperand(src))
     return failure();
 
-  // Check for optional tmp operand (format 2)
-  if (succeeded(parser.parseOptionalComma())) {
-    // Format 2: ins(%src, %tmp {isBinary = ...}: type, type)
+  auto parseColSumInsWithTmp = [&]() -> ParseResult {
     if (parser.parseOperand(tmp))
       return failure();
     hasTmp = true;
-
-    // Parse attributes (isBinary)
     if (parser.parseOptionalAttrDict(result.attributes))
       return failure();
-
-    // Parse types: : type, type
-    if (parser.parseColonType(srcTy) || parser.parseComma() || parser.parseType(tmpTy))
-      return failure();
-  } else {
-    // Format 1: ins(%src : type)
+    return success(parser.parseColonType(srcTy) || parser.parseComma() ||
+                   parser.parseType(tmpTy));
+  };
+  auto parseColSumInsWithoutTmp = [&]() -> ParseResult {
     if (parser.parseColonType(srcTy))
       return failure();
+    return success();
+  };
+
+  if (succeeded(parser.parseOptionalComma())) {
+    if (failed(parseColSumInsWithTmp()))
+      return failure();
+  } else if (failed(parseColSumInsWithoutTmp())) {
+    return failure();
   }
 
   if (parser.parseRParen())
@@ -3886,8 +3872,6 @@ ParseResult mlir::pto::TColSumOp::parse(OpAsmParser &parser, OperationState &res
   // Resolve operands
   if (parser.resolveOperand(src, srcTy, result.operands))
     return failure();
-
-  int32_t tmpSize = hasTmp ? 1 : 0;
 
   if (hasTmp) {
     if (parser.resolveOperand(tmp, tmpTy, result.operands))
@@ -3925,67 +3909,64 @@ void mlir::pto::TColSumOp::print(OpAsmPrinter &p) {
   }
 }
 
+static LogicalResult verifyTColSumCommon(TColSumOp op,
+                                         bool requireNonZeroSrc,
+                                         llvm::function_ref<bool(Type)> isValidElemType,
+                                         StringRef invalidElemTypeMessage) {
+  Type srcTy = op.getSrc().getType();
+  Type dstTy = op.getDst().getType();
+  if (failed(verifyNDStyleVecTile(op, srcTy, "src")) ||
+      failed(verifyNDStyleVecTile(op, dstTy, "dst")))
+    return failure();
+
+  bool hasTmp = static_cast<bool>(op.getTmp());
+  bool hasIsBinary = static_cast<bool>(op.getIsBinaryAttr());
+  if (hasTmp != hasIsBinary) {
+    if (hasTmp)
+      return op.emitOpError("tmp operand requires isBinary attribute");
+    return op.emitOpError("isBinary attribute requires tmp operand");
+  }
+
+  if (op.getTmp()) {
+    Type tmpTy = op.getTmp().getType();
+    if (failed(verifyNDStyleVecTile(op, tmpTy, "tmp")))
+      return failure();
+    if (getElemTy(srcTy) != getElemTy(dstTy) ||
+        getElemTy(srcTy) != getElemTy(tmpTy)) {
+      return op.emitOpError("expects src/tmp/dst element types to match");
+    }
+  }
+
+  if (getElemTy(srcTy) != getElemTy(dstTy))
+    return op.emitOpError("expects src/dst element types to match");
+  if (failed(verifyColReductionValidRegion(op, srcTy, dstTy, requireNonZeroSrc)))
+    return failure();
+
+  Type elem = getElemTy(srcTy);
+  if (!isValidElemType(elem))
+    return op.emitOpError(invalidElemTypeMessage);
+  return success();
+}
+
 LogicalResult pto::TColSumOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    Type srcTy = getSrc().getType();
-    Type dstTy = getDst().getType();
-    if (failed(verifyNDStyleVecTile(*this, srcTy, "src")) ||
-        failed(verifyNDStyleVecTile(*this, dstTy, "dst")))
-      return failure();
-    bool hasTmp = (bool)getTmp();
-    bool hasIsBinary = (bool)getIsBinaryAttr();
-    if (hasTmp != hasIsBinary) {
-      if (hasTmp)
-        return emitOpError("tmp operand requires isBinary attribute");
-      return emitOpError("isBinary attribute requires tmp operand");
-    }
-    if (getTmp()) {
-      Type tmpTy = getTmp().getType();
-      if (failed(verifyNDStyleVecTile(*this, tmpTy, "tmp")))
-        return failure();
-      if (getElemTy(srcTy) != getElemTy(dstTy) || getElemTy(srcTy) != getElemTy(tmpTy))
-        return emitOpError("expects src/tmp/dst element types to match");
-    }
-    if (getElemTy(srcTy) != getElemTy(dstTy))
-      return emitOpError("expects src/dst element types to match");
-    if (failed(verifyColReductionValidRegion(*this, srcTy, dstTy,
-                                             /*requireNonZeroSrc=*/false)))
-      return failure();
-    Type elem = getElemTy(srcTy);
-    if (!(elem.isF16() || elem.isF32() || elem.isInteger(16) || elem.isInteger(32)))
-      return emitOpError("expects A2/A3 tcolsum element type to be f16/f32/i16/i32");
-    return success();
+    return verifyTColSumCommon(
+        *this, /*requireNonZeroSrc=*/false,
+        [](Type elem) {
+          return elem.isF16() || elem.isF32() || elem.isInteger(16) ||
+                 elem.isInteger(32);
+        },
+        "expects A2/A3 tcolsum element type to be f16/f32/i16/i32");
   };
   auto verifyA5 = [&]() -> LogicalResult {
-    Type srcTy = getSrc().getType();
-    Type dstTy = getDst().getType();
-    if (failed(verifyNDStyleVecTile(*this, srcTy, "src")) ||
-        failed(verifyNDStyleVecTile(*this, dstTy, "dst")))
-      return failure();
-    bool hasTmp = (bool)getTmp();
-    bool hasIsBinary = (bool)getIsBinaryAttr();
-    if (hasTmp != hasIsBinary) {
-      if (hasTmp)
-        return emitOpError("tmp operand requires isBinary attribute");
-      return emitOpError("isBinary attribute requires tmp operand");
-    }
-    if (getTmp()) {
-      Type tmpTy = getTmp().getType();
-      if (failed(verifyNDStyleVecTile(*this, tmpTy, "tmp")))
-        return failure();
-      if (getElemTy(srcTy) != getElemTy(dstTy) || getElemTy(srcTy) != getElemTy(tmpTy))
-        return emitOpError("expects src/tmp/dst element types to match");
-    }
-    if (getElemTy(srcTy) != getElemTy(dstTy))
-      return emitOpError("expects src/dst element types to match");
-    if (failed(verifyColReductionValidRegion(*this, srcTy, dstTy,
-                                             /*requireNonZeroSrc=*/true)))
-      return failure();
-    Type elem = getElemTy(srcTy);
-    if (!(elem.isF16() || elem.isF32() || elem.isBF16() || elem.isInteger(8) ||
-          elem.isInteger(16) || elem.isInteger(32)))
-      return emitOpError("expects A5 tcolsum element type to be i8/i16/i32/f16/bf16/f32");
-    return success();
+    return verifyTColSumCommon(
+        *this, /*requireNonZeroSrc=*/true,
+        [](Type elem) {
+          return elem.isF16() || elem.isF32() || elem.isBF16() ||
+                 elem.isInteger(8) || elem.isInteger(16) ||
+                 elem.isInteger(32);
+        },
+        "expects A5 tcolsum element type to be i8/i16/i32/f16/bf16/f32");
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }

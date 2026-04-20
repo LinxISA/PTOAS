@@ -1825,6 +1825,38 @@ struct ArithFloatMinMaxToEmitCBase {
                          Type ty) {
     return makeEmitCOpaqueConstant(rewriter, loc, ty, "0.0f");
   }
+
+  static Value buildCmpLt(ConversionPatternRewriter &rewriter, Location loc,
+                          Value lhs, Value rhs) {
+    return rewriter
+        .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
+                              emitc::CmpPredicate::lt, lhs, rhs)
+        .getResult();
+  }
+
+  static Value buildNaNAwarePrimaryValue(ConversionPatternRewriter &rewriter,
+                                         Location loc, Type dstTy, Value lhs,
+                                         Value rhs, bool selectMax) {
+    Value cmpLt = buildCmpLt(rewriter, loc, lhs, rhs);
+    return rewriter
+        .create<emitc::ConditionalOp>(loc, dstTy, cmpLt, selectMax ? rhs : lhs,
+                                      selectMax ? lhs : rhs)
+        .getResult();
+  }
+
+  static Value buildNaNSelectResult(ConversionPatternRewriter &rewriter,
+                                    Location loc, Type dstTy, Value lhs,
+                                    Value rhs, Value primaryValue) {
+    Value lhsNaN = isNaN(rewriter, loc, lhs);
+    Value rhsNaN = isNaN(rewriter, loc, rhs);
+    Value rhsOrPrimary = rewriter
+                             .create<emitc::ConditionalOp>(loc, dstTy, rhsNaN,
+                                                           lhs, primaryValue)
+                             .getResult();
+    return rewriter
+        .create<emitc::ConditionalOp>(loc, dstTy, lhsNaN, rhs, rhsOrPrimary)
+        .getResult();
+  }
 };
 
 struct ArithMaxNumFToEmitC : public OpConversionPattern<arith::MaxNumFOp>,
@@ -1836,31 +1868,12 @@ struct ArithMaxNumFToEmitC : public OpConversionPattern<arith::MaxNumFOp>,
     Type dstTy = getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();
-
-    Value lhsNaN = isNaN(rewriter, loc, adaptor.getLhs());
-    Value rhsNaN = isNaN(rewriter, loc, adaptor.getRhs());
-
-    Value cmpLt = rewriter
-                      .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
-                                            emitc::CmpPredicate::lt,
-                                            adaptor.getLhs(), adaptor.getRhs())
-                      .getResult();
-    Value maxNoNaN =
-        rewriter
-            .create<emitc::ConditionalOp>(loc, dstTy, cmpLt, adaptor.getRhs(),
-                                          adaptor.getLhs())
-            .getResult();
-
-    Value rhsOrMax =
-        rewriter
-            .create<emitc::ConditionalOp>(loc, dstTy, rhsNaN, adaptor.getLhs(),
-                                          maxNoNaN)
-            .getResult();
-    Value res =
-        rewriter
-            .create<emitc::ConditionalOp>(loc, dstTy, lhsNaN, adaptor.getRhs(),
-                                          rhsOrMax)
-            .getResult();
+    Value maxNoNaN = buildNaNAwarePrimaryValue(rewriter, loc, dstTy,
+                                               adaptor.getLhs(),
+                                               adaptor.getRhs(),
+                                               /*selectMax=*/true);
+    Value res = buildNaNSelectResult(rewriter, loc, dstTy, adaptor.getLhs(),
+                                     adaptor.getRhs(), maxNoNaN);
     rewriter.replaceOp(op, res);
     return success();
   }
@@ -1875,31 +1888,12 @@ struct ArithMinNumFToEmitC : public OpConversionPattern<arith::MinNumFOp>,
     Type dstTy = getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();
-
-    Value lhsNaN = isNaN(rewriter, loc, adaptor.getLhs());
-    Value rhsNaN = isNaN(rewriter, loc, adaptor.getRhs());
-
-    Value cmpLt = rewriter
-                      .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
-                                            emitc::CmpPredicate::lt,
-                                            adaptor.getLhs(), adaptor.getRhs())
-                      .getResult();
-    Value minNoNaN =
-        rewriter
-            .create<emitc::ConditionalOp>(loc, dstTy, cmpLt, adaptor.getLhs(),
-                                          adaptor.getRhs())
-            .getResult();
-
-    Value rhsOrMin =
-        rewriter
-            .create<emitc::ConditionalOp>(loc, dstTy, rhsNaN, adaptor.getLhs(),
-                                          minNoNaN)
-            .getResult();
-    Value res =
-        rewriter
-            .create<emitc::ConditionalOp>(loc, dstTy, lhsNaN, adaptor.getRhs(),
-                                          rhsOrMin)
-            .getResult();
+    Value minNoNaN = buildNaNAwarePrimaryValue(rewriter, loc, dstTy,
+                                               adaptor.getLhs(),
+                                               adaptor.getRhs(),
+                                               /*selectMax=*/false);
+    Value res = buildNaNSelectResult(rewriter, loc, dstTy, adaptor.getLhs(),
+                                     adaptor.getRhs(), minNoNaN);
     rewriter.replaceOp(op, res);
     return success();
   }
@@ -4510,21 +4504,30 @@ static LogicalResult extractSyncTripletTokens(Operation *op,
                                              std::string &dstTok,
                                              std::string &evtTok,
                                              ConversionPatternRewriter &rewriter) {
-  if (tryExtractSyncTokensFromNamedAttrs(op, "src_pipe", "dst_pipe", "event_id",
-                                         srcTok, dstTok, evtTok) ||
-      tryExtractSyncTokensFromNamedAttrs(op, "srcPipe", "dstPipe", "eventId",
-                                         srcTok, dstTok, evtTok) ||
-      tryExtractSyncTokensFromNamedAttrs(op, "src", "dst", "event", srcTok,
-                                         dstTok, evtTok)) {
-    return success();
-  }
-
-  for (StringRef attrName : {"args", "pipes", "sync", "triplet", "attrs"}) {
-    if (tryExtractSyncTokensFromArrayAttr(op, attrName, srcTok, dstTok,
-                                          evtTok)) {
-      return success();
+  auto tryNamedAttrSpellings = [&]() {
+    return tryExtractSyncTokensFromNamedAttrs(op, "src_pipe", "dst_pipe",
+                                              "event_id", srcTok, dstTok,
+                                              evtTok) ||
+           tryExtractSyncTokensFromNamedAttrs(op, "srcPipe", "dstPipe",
+                                              "eventId", srcTok, dstTok,
+                                              evtTok) ||
+           tryExtractSyncTokensFromNamedAttrs(op, "src", "dst", "event",
+                                              srcTok, dstTok, evtTok);
+  };
+  auto tryArraySpellings = [&]() {
+    for (StringRef attrName : {"args", "pipes", "sync", "triplet", "attrs"}) {
+      if (tryExtractSyncTokensFromArrayAttr(op, attrName, srcTok, dstTok,
+                                            evtTok)) {
+        return true;
+      }
     }
-  }
+    return false;
+  };
+
+  if (tryNamedAttrSpellings())
+    return success();
+  if (tryArraySpellings())
+    return success();
 
   if (tryExtractFallbackSyncTokens(op, srcTok, dstTok, evtTok))
     return success();

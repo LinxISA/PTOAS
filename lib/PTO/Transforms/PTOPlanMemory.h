@@ -505,6 +505,10 @@ private:
 
   /// Start plan.
   PlanStatus PlanMemAddressOfWholeLocalBuffer();
+  PlanStatus PlanSingleLocalBuffer(StorageEntry *rootStorageEntry,
+                                   size_t align, size_t maxBits);
+  PlanStatus PlanReusableLocalBuffer(StorageEntry *rootStorageEntry,
+                                     size_t align, size_t maxBits);
 
   /// Plan a single local buffer without reuse.
   PlanStatus PlanSingleLocalBuffer(StorageEntry *rootStorageEntry, size_t align,

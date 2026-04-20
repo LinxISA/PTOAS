@@ -6,11 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 #ifndef MLIR_DIALECT_PTO_TRANSFORMS_INJECTSYNC_SYNCEVENTIDALLOCATION_H
 #define MLIR_DIALECT_PTO_TRANSFORMS_INJECTSYNC_SYNCEVENTIDALLOCATION_H
  
@@ -18,10 +13,10 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
 #include <cstdint>
- 
+
 namespace mlir {
 namespace pto {
- 
+
 constexpr const uint kTotalEventIdNum = 8;
 constexpr const uint kBlockSyncAllCubeEventId = 14;
 constexpr const uint kBlockSyncAllVectorEventId = 15;
@@ -42,12 +37,12 @@ public:
       : syncIR_(syncIR), syncOperations_(syncOperations) {
     reserveBlockAllEventIds();
   };
- 
+
   ~SyncEventIdAllocation() = default;
- 
+
   /// 分配入口
   void Allocate(uint32_t runNum = 0);
- 
+
 private:
   void AllocateEventId(InstanceElement *e);
   size_t GetCompilerAvailableEventIdNum(const SyncOperation *sync);
@@ -87,6 +82,7 @@ private:
   llvm::LogicalResult ChangeNoEventIdSyncToPipeAll();
   void MoveOutBackwardMatchSync(const SyncOperation *reallocatedSync);
   bool TryWidenByOtherSync(const SyncOperation *sync);
+  bool tryWidenPipePair(int pipePair);
   bool tryWidenOnFirstFound();
   SyncOperation *FindWidenSync(const SyncOperation *setSync,
                                const SyncOperation *waitSync);
@@ -117,8 +113,8 @@ private:
       reservedEventIdNum;
   uint64_t reservedBlockSyncEventIdNum{0};
 };
- 
+
 } // namespace pto
 } // namespace mlir
- 
+
 #endif // MLIR_DIALECT_PTO_TRANSFORMS_INJECTSYNC_SYNCEVENTIDALLOCATION_H

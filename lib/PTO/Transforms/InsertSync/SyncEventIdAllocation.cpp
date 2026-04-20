@@ -6,17 +6,12 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 #include "PTO/Transforms/InsertSync/SyncEventIdAllocation.h"
 #include "PTO/Transforms/InsertSync/SyncCommon.h"
 #include <algorithm>
- 
+
 #define DEBUG_TYPE "pto-inject-sync"
- 
+
 using namespace mlir;
 using namespace mlir::pto;
 
@@ -62,18 +57,24 @@ void SyncEventIdAllocation::Allocate(uint32_t runNum) {
   }
 }
  
+bool SyncEventIdAllocation::tryWidenPipePair(int pipePair) {
+  for (const auto &element : syncIR_) {
+    for (SyncOperation *sync : element->pipeAfter) {
+      if (!sync->isSyncSetType() || sync->uselessSync ||
+          ScopePair(sync) != pipePair) {
+        continue;
+      }
+      if (TryWidenByOtherSync(sync))
+        return true;
+    }
+  }
+  return false;
+}
+
 bool SyncEventIdAllocation::tryWidenOnFirstFound() {
   for (auto pipePair : reallocatedPipePair) {
-    for (auto &e : syncIR_) {
-      for (auto &sync : e->pipeAfter) {
-        if (sync->isSyncSetType() && !sync->uselessSync &&
-            (ScopePair(sync) == pipePair)) {
-          if (TryWidenByOtherSync(sync)) {
-            return true;
-          }
-        }
-      }
-    }
+    if (tryWidenPipePair(pipePair))
+      return true;
   }
   return false;
 }
@@ -164,9 +165,7 @@ void SyncEventIdAllocation::SetEventId(SyncOperation *sync) {
   } else if (reallocatedPipePair.count(ScopePair(sync)) &&
              (canAllocaEventId.size() < idSize)) {
     // Reallocate strategy: reduce usage to 1
-    const bool hasAllocatableEventId = !canAllocaEventId.empty();
-    assert(hasAllocatableEventId);
-    if (!hasAllocatableEventId)
+    if (canAllocaEventId.empty())
       return;
     SetEventPool(sync, canAllocaEventId[0]);
     sync->eventIdNum = 1;
@@ -432,7 +431,8 @@ void SyncEventIdAllocation::UpdateBackwardMatchSync(
 void SyncEventIdAllocation::SetUseEventID(unsigned int begin, unsigned int end,
                                           const SyncOperation *setFlag,
                                           unsigned int eventId) {
-  assert(begin < end);
+  if (begin >= end)
+    return;
   int scopePair = ScopePair(setFlag);
   const size_t poolSize =
       getEventIdPoolSize(setFlag, reservedBlockSyncEventIdNum);
@@ -645,9 +645,7 @@ void SyncEventIdAllocation::IgnoreBackHeadAndTailSync() {
 }
  
 bool SyncEventIdAllocation::TryWidenByOtherSync(const SyncOperation *sync) {
-  const bool isBarrierSync = sync->isBarrierType();
-  assert(!isBarrierSync);
-  if (isBarrierSync)
+  if (sync->isBarrierType())
     return false;
   auto &syncPair = syncOperations_[sync->GetSyncIndex()];
   SyncOperation *setSync = syncPair[0].get();

@@ -95,6 +95,15 @@ static int runDecode(const CommandLineOptions &options) {
   return 0;
 }
 
+static int dispatch(const CommandLineOptions &options) {
+  if (options.cmd == "encode")
+    return runEncode(options);
+  if (options.cmd == "decode")
+    return runDecode(options);
+  usage();
+  return 2;
+}
+
 int main(int argc, char **argv) {
   auto options = parseCommandLine(argc, argv);
   if (!options) {
@@ -103,12 +112,7 @@ int main(int argc, char **argv) {
   }
 
   try {
-    if (options->cmd == "encode")
-      return runEncode(*options);
-    if (options->cmd == "decode")
-      return runDecode(*options);
-    usage();
-    return 2;
+    return dispatch(*options);
   } catch (const std::exception& e) {
     std::cerr << "ERROR: " << e.what() << "\n";
     return 1;

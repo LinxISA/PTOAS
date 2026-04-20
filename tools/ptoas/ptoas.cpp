@@ -405,7 +405,6 @@ static bool rewriteMarkerCallToMember(std::string &cpp, llvm::StringRef marker,
         return replacement;
       });
 }
-
 static void rewriteMarkerCallsToMembers(
     std::string &cpp, llvm::ArrayRef<MarkerRewriteSpec> rewrites) {
   bool changed = true;
@@ -420,7 +419,7 @@ static void rewriteMarkerCallsToMembers(
 }
 
 static void rewriteTileGetSetValueMarkers(std::string &cpp) {
-  static const MarkerRewriteSpec kTileMarkerRewrites[] = {
+  static constexpr MarkerRewriteSpec kTileMarkerRewrites[] = {
       {"PTOAS__TILE_SET_VALUE", "SetValue", 3},
       {"PTOAS__TILE_GET_VALUE", "GetValue", 2},
       {"PTOAS__TILE_DATA", "data", 1},
@@ -430,11 +429,27 @@ static void rewriteTileGetSetValueMarkers(std::string &cpp) {
 }
 
 static void rewriteAsyncEventMarkers(std::string &cpp) {
-  static const MarkerRewriteSpec kAsyncEventMarkerRewrites[] = {
+  static constexpr MarkerRewriteSpec kAsyncEventMarkerRewrites[] = {
       {"PTOAS__ASYNC_EVENT_WAIT", "Wait", 2},
       {"PTOAS__ASYNC_EVENT_TEST", "Test", 2},
   };
   rewriteMarkerCallsToMembers(cpp, kAsyncEventMarkerRewrites);
+}
+
+static void rewritePtrScalarMarkers(std::string &cpp) {
+  static constexpr MarkerSubscriptRewriteSpec kPtrScalarMarkerRewrites[] = {
+      {"PTOAS__PTR_LOAD", 2, false},
+      {"PTOAS__PTR_STORE", 3, true},
+  };
+  rewriteMarkerCallsToSubscripts(cpp, kPtrScalarMarkerRewrites);
+}
+
+static void rewriteEventIdArrayMarkers(std::string &cpp) {
+  static constexpr MarkerSubscriptRewriteSpec kEventIdArrayMarkerRewrites[] = {
+      {"PTOAS__EVENTID_ARRAY_LOAD", 2, false},
+      {"PTOAS__EVENTID_ARRAY_STORE", 3, true},
+  };
+  rewriteMarkerCallsToSubscripts(cpp, kEventIdArrayMarkerRewrites);
 }
 
 // --------------------------------------------------------------------------
@@ -540,7 +555,7 @@ static void rewriteMarkerCallsToSubscripts(
 }
 
 static void rewritePtrScalarMarkers(std::string &cpp) {
-  static const MarkerSubscriptRewriteSpec kPtrMarkerRewrites[] = {
+  static constexpr MarkerSubscriptRewriteSpec kPtrMarkerRewrites[] = {
       {"PTOAS__PTR_LOAD", 2, false},
       {"PTOAS__PTR_STORE", 3, true},
   };
@@ -548,13 +563,12 @@ static void rewritePtrScalarMarkers(std::string &cpp) {
 }
 
 static void rewriteEventIdArrayMarkers(std::string &cpp) {
-  static const MarkerSubscriptRewriteSpec kEventIdMarkerRewrites[] = {
+  static constexpr MarkerSubscriptRewriteSpec kEventIdMarkerRewrites[] = {
       {"PTOAS__EVENTID_ARRAY_LOAD", 2, false},
       {"PTOAS__EVENTID_ARRAY_STORE", 3, true},
   };
   rewriteMarkerCallsToSubscripts(cpp, kEventIdMarkerRewrites);
 }
-
 static bool rewriteAddPtrTraceMarkers(std::string &cpp, bool showTrace) {
   size_t searchPos = 0;
   bool changed = false;

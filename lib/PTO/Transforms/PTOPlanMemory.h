@@ -518,6 +518,14 @@ private:
   PlanStatus PlanReusableLocalBuffer(StorageEntry *rootStorageEntry,
                                      size_t align, size_t maxBits);
 
+  /// Plan a single local buffer without reuse.
+  PlanStatus PlanSingleLocalBuffer(StorageEntry *rootStorageEntry, size_t align,
+                                   size_t maxBits);
+
+  /// Plan a reusable local buffer scope.
+  PlanStatus PlanReusableLocalBuffer(StorageEntry *rootStorageEntry,
+                                     size_t align, size_t maxBits);
+
   /// Plan memory only by level0 to report failure info.
   void PlanMemAddressForLevel0(StorageEntry *rootStorageEntry);
 

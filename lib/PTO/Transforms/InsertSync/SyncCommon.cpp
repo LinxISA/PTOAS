@@ -34,7 +34,6 @@ constexpr size_t kDualUnitFlagConditions = 2;
 constexpr size_t kFirstConditionIndex = 0;
 constexpr size_t kSecondConditionIndex = 1;
 } // namespace
-
 SmallVector<const void *>
 mlir::pto::canonicalizeSyncDepRoots(const SmallVector<Value> &roots) {
   SmallVector<const void *> result;

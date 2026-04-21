@@ -436,22 +436,6 @@ static void rewriteAsyncEventMarkers(std::string &cpp) {
   rewriteMarkerCallsToMembers(cpp, kAsyncEventMarkerRewrites);
 }
 
-static void rewritePtrScalarMarkers(std::string &cpp) {
-  static constexpr MarkerSubscriptRewriteSpec kPtrScalarMarkerRewrites[] = {
-      {"PTOAS__PTR_LOAD", 2, false},
-      {"PTOAS__PTR_STORE", 3, true},
-  };
-  rewriteMarkerCallsToSubscripts(cpp, kPtrScalarMarkerRewrites);
-}
-
-static void rewriteEventIdArrayMarkers(std::string &cpp) {
-  static constexpr MarkerSubscriptRewriteSpec kEventIdArrayMarkerRewrites[] = {
-      {"PTOAS__EVENTID_ARRAY_LOAD", 2, false},
-      {"PTOAS__EVENTID_ARRAY_STORE", 3, true},
-  };
-  rewriteMarkerCallsToSubscripts(cpp, kEventIdArrayMarkerRewrites);
-}
-
 // --------------------------------------------------------------------------
 // EmitC cleanup: drop empty emitc.expression ops.
 //

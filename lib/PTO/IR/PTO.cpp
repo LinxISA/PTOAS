@@ -3429,7 +3429,6 @@ LogicalResult pto::TConcatidxOp::verify() {
 
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
-
 LogicalResult pto::TAndSOp::verify() {
   auto verifyCommon = [&]() -> FailureOr<Type> {
     return verifyDistinctRowMajorUnaryTileOpCommon(getOperation(), getSrc(),

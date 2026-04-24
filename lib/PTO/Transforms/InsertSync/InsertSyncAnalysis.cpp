@@ -198,15 +198,38 @@ unsigned InsertSyncAnalysis::InsertLoopSync(
     const std::optional<unsigned> &forEndIndex) {
   if (loopElement->getLoopKind() == KindOfLoop::LOOP_END) {
     SyncRecordList syncRecordForList = syncRecordList;
+    SyncRecordList syncRecordBefore = syncRecordList;
     unsigned newBegin =
         std::max(begin, index - (loopElement->endId - loopElement->beginId));
     unsigned newEnd = index;
     InsertSeqSync(nowCompound, syncElement, static_cast<int>(newBegin),
                   static_cast<int>(newEnd), syncRecordForList, forEndIndex);
-    // A loop may execute zero iterations at runtime. Keep correctness for both
-    // paths by not promoting any loop-body-derived sync state into the outer
-    // state. In particular, syncFinder participates in alreadySync inference
-    // later, so propagating it would still be unsound under zero-trip loops.
+
+    // A loop may execute zero iterations. Propagate `syncFinder` from the
+    // body so outer pair-finding can still see producers that live inside
+    // the body (required for post-loop drain waits / pre-loop seeds — see
+    // issue #564 regression on the Qwen3 K-loop pipelined GEMM). Mark any
+    // entry introduced by the body as conditional so that
+    // UpdateSyncRecord's transitive-elevation step skips it; this preserves
+    // the zero-trip invariant that motivated issue #533.
+    //
+    // Do NOT propagate `alreadySync`: any claim that the body itself
+    // completed a synchronization is unsound when the body runs zero times.
+    for (size_t b = 0; b < syncRecordList.size(); ++b) {
+      const auto &beforeFinder = syncRecordBefore[b].syncFinder;
+      for (auto &kv : syncRecordForList[b].syncFinder) {
+        int idx = kv.first;
+        if (!beforeFinder.lookup(idx) && kv.second) {
+          syncRecordList[b].syncFinderIsConditional[idx] = true;
+        }
+      }
+      syncRecordList[b].syncFinder = syncRecordForList[b].syncFinder;
+      for (auto &kv : syncRecordForList[b].syncFinderIsConditional) {
+        if (kv.second) {
+          syncRecordList[b].syncFinderIsConditional[kv.first] = true;
+        }
+      }
+    }
     return (loopElement->endId - loopElement->beginId);
   }
   return 0;
@@ -237,10 +260,28 @@ unsigned InsertSyncAnalysis::InsertBranchSync(
                     static_cast<int>(branchEnd), syncRecordElseList, forEndIndex);
       MergeAlreadySync(syncRecordList, syncRecordIfList, syncRecordElseList);
     } else {
-      // No else-branch: do not promote `alreadySync`, but keep syncFinder
-      // updates from the then-branch.
-      for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++)
-        syncRecordList[bufferIdx].syncFinder = syncRecordIfList[bufferIdx].syncFinder;
+      // No else-branch: do not promote `alreadySync` (the zero-branch path
+      // sees none), but keep `syncFinder` updates from the then-branch so
+      // outer pair-finding can still observe producers/consumers declared
+      // inside the branch. Finder entries introduced by the then-branch are
+      // tagged as conditional to block `UpdateSyncRecord`'s transitive
+      // elevation on the zero-branch path (same invariant as the loop-body
+      // case; see issue #533).
+      for (size_t b = 0; b < syncRecordList.size(); ++b) {
+        const auto &beforeFinder = syncRecordList[b].syncFinder;
+        for (auto &kv : syncRecordIfList[b].syncFinder) {
+          int idx = kv.first;
+          if (!beforeFinder.lookup(idx) && kv.second) {
+            syncRecordList[b].syncFinderIsConditional[idx] = true;
+          }
+        }
+        syncRecordList[b].syncFinder = syncRecordIfList[b].syncFinder;
+        for (auto &kv : syncRecordIfList[b].syncFinderIsConditional) {
+          if (kv.second) {
+            syncRecordList[b].syncFinderIsConditional[kv.first] = true;
+          }
+        }
+      }
     }
     return (branchElement->endId - branchElement->beginId);
   } else if (branchElement->getBranchKind() == KindOfBranch::ELSE_BEGIN &&
@@ -451,7 +492,14 @@ void InsertSyncAnalysis::UpdateSyncRecord(const SyncOperation *sync,
       (nowPipeValue == waitPipeValue);
   if (!canTransitivelyEliminate) return;
 
+  // Guard against zero-trip / zero-branch unsoundness: a `syncFinder` bit that
+  // was set inside a loop body or a no-else branch is tagged as conditional
+  // and must NOT be used to transitively elevate `alreadySync` here. If the
+  // may-not-execute region runs zero times, the WAIT behind this finder bit
+  // never fires, so pairing it with an outer SET would wrongly skip a later
+  // barrier. See issue #533 (missing post-loop MTE2->V barrier).
   if (recordFinder[sync->GetSyncIndex()] &&
+      !syncRecord.syncFinderIsConditional.lookup(sync->GetSyncIndex()) &&
       (sync->GetType() == SyncOperation::TYPE::SET_EVENT ||
        sync->GetType() == SyncOperation::TYPE::SYNC_BLOCK_SET)) {
     recordAlready[static_cast<unsigned>(setPipeValue)] = true;

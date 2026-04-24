@@ -32,6 +32,16 @@ struct SyncRecord {
 
   // Record the pairing status of set/wait within a syncIndex.
   llvm::DenseMap<int, bool> syncFinder;
+
+  // For each syncIndex present in `syncFinder`, marks whether that entry was
+  // populated inside a region that may not execute at runtime — a loop body
+  // (which may iterate zero times) or an if-branch without a matching else.
+  // `UpdateSyncRecord` must NOT use such entries to transitively elevate
+  // `alreadySync` via a subsequently visited SET_EVENT, because on the
+  // zero-trip / zero-branch path no matching WAIT actually ran. Outer
+  // producer/consumer pair-finding still sees the underlying `syncFinder`
+  // bit, so cross-region drains and seeds are emitted as before.
+  llvm::DenseMap<int, bool> syncFinderIsConditional;
 };
  
 using SyncRecordList = std::array<SyncRecord, MAX_MULTI_BUFFER_NUM>;

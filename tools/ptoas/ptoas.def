@@ -186,9 +186,6 @@ static void moveEmitCFunctions(Block &body, ArrayRef<emitc::FuncOp> desiredOrder
 
 static LogicalResult reorderEmitCFunctions(ModuleOp module) {
   EmitCFunctionBuckets buckets = collectEmitCFunctions(module);
-  if (buckets.declarations.empty() && buckets.definitions.size() <= 1)
-    return success();
-
   auto sortedDefinitionsOr = topologicallySortEmitCDefinitions(buckets.definitions);
   if (failed(sortedDefinitionsOr))
     return failure();

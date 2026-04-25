@@ -514,23 +514,15 @@ ParseResult mlir::pto::TDivSOp::parse(OpAsmParser &parser, OperationState &resul
   OpAsmParser::UnresolvedOperand op0, op1, dst;
   Type ty0, ty1, dstTy;
 
-  auto parseInputs = [&]() -> ParseResult {
-    return success(parser.parseKeyword("ins") || parser.parseLParen() ||
-                   parser.parseOperand(op0) || parser.parseComma() ||
-                   parser.parseOperand(op1) || parser.parseColonType(ty0) ||
-                   parser.parseComma() || parser.parseType(ty1) ||
-                   parser.parseRParen());
-  };
-  auto parseOutputs = [&]() -> ParseResult {
-    return success(parser.parseKeyword("outs") || parser.parseLParen() ||
-                   parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
-                   parser.parseRParen());
-  };
-
-  if (failed(parseInputs()))
+  if (parser.parseKeyword("ins") || parser.parseLParen() ||
+      parser.parseOperand(op0) || parser.parseComma() ||
+      parser.parseOperand(op1) || parser.parseColonType(ty0) ||
+      parser.parseComma() || parser.parseType(ty1) || parser.parseRParen())
     return failure();
 
-  if (failed(parseOutputs()))
+  if (parser.parseKeyword("outs") || parser.parseLParen() ||
+      parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
+      parser.parseRParen())
     return failure();
 
   NamedAttrList attrs;
@@ -3843,8 +3835,10 @@ ParseResult mlir::pto::TColSumOp::parse(OpAsmParser &parser, OperationState &res
     hasTmp = true;
     if (parser.parseOptionalAttrDict(result.attributes))
       return failure();
-    return success(parser.parseColonType(srcTy) || parser.parseComma() ||
-                   parser.parseType(tmpTy));
+    if (parser.parseColonType(srcTy) || parser.parseComma() ||
+        parser.parseType(tmpTy))
+      return failure();
+    return success();
   };
   auto parseColSumInsWithoutTmp = [&]() -> ParseResult {
     if (parser.parseColonType(srcTy))

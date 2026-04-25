@@ -1,0 +1,4 @@
+interface:
+  display_name: "Publish PTOAS PR"
+  short_description: "Stage, push, and open a PTOAS pull request"
+  default_prompt: "Use $ptoas-publish-pr to publish intended PTOAS changes as a GitHub pull request."

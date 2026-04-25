@@ -1,0 +1,4 @@
+interface:
+  display_name: "PTO ISA CPU Sim Kernel Test"
+  short_description: "Run PTOAS kernels in local PTO ISA CPU sim"
+  default_prompt: "Use $pto-isa-cpu-sim-kernel-test to validate a ptoas-generated kernel with the local pto-isa CPU simulator."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "PTOAS Project Development"
+  short_description: "Keep PTOAS code, docs, and tests synchronized"
+  default_prompt: "Use $ptoas-project-development when modifying PTOAS source, docs, or tests."

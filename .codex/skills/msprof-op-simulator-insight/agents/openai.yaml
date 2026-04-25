@@ -1,0 +1,4 @@
+interface:
+  display_name: "Msprof Op Simulator Insight"
+  short_description: "Collect and export msprof simulator Insight traces"
+  default_prompt: "Use $msprof-op-simulator-insight to collect and export MindStudio Insight simulator files."

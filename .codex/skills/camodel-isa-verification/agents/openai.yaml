@@ -1,0 +1,4 @@
+interface:
+  display_name: "CA Model ISA Verification"
+  short_description: "Verify PTO-ISA behavior with CANN CA model logs"
+  default_prompt: "Use $camodel-isa-verification to create and analyze CA model ISA verification tests."

@@ -1,0 +1,28 @@
+# AI Assistant Rules for PTOAS
+
+This directory contains project-specific rules for AI-assisted development.
+
+## Scope
+
+When you change any user-visible behavior, keep these layers synchronized:
+
+1. **ODS / Dialect definitions**: `include/PTO/IR/*.td`
+2. **C++ implementation & verifiers**: `lib/PTO/IR`, `lib/PTO/Transforms`
+3. **CLI / tool behavior**: `tools/ptoas`
+4. **Python bindings / samples** (if affected): `python/`, `test/samples`
+5. **Docs**: `README.md`, `docs/`
+6. **Tests**: `test/`
+
+## Rules
+
+See `.codex/rules/` for specific guidance:
+
+- `cross-layer-sync.md`
+- `testing-and-examples.md`
+- `wsl-first.md`
+
+## File headers
+
+- New source or script files must include the PR386 OAT.3 license header at the top of the file.
+- When touching an existing source/script file that still lacks that header, add it in the same change.
+

@@ -1,0 +1,54 @@
+// RUN: ptoas --mlir-print-ir-before=pto-view-to-memref %s 2>&1 | FileCheck %s
+
+module {
+  func.func @new_format_static(%src: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c32 = arith.constant 32 : index
+
+    %tv = pto.make_tensor_view %src, shape = [%c16, %c32], strides = [%c32, %c1]
+          : !pto.tensor_view<?x?xf32>
+    %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32]
+          : !pto.tensor_view<?x?xf32>
+
+    %tile = pto.alloc_tile
+            : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%sv : !pto.partition_tensor_view<16x32xf32>)
+              outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @old_format_static(%src: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c32 = arith.constant 32 : index
+
+    %tv = pto.make_tensor_view %src, shape = [%c16, %c32], strides = [%c32, %c1]
+          : !pto.tensor_view<?x?xf32>
+    %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32]
+          : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    return
+  }
+
+  func.func @old_format_dynamic(%src: !pto.ptr<f32>, %m: index, %n: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+
+    %tv = pto.make_tensor_view %src, shape = [%c64, %c64], strides = [%c64, %c1]
+          : !pto.tensor_view<?x?xf32>
+    %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%m, %n]
+          : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x?xf32>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @new_format_static
+// CHECK: %[[SV0:.*]] = pto.partition_view %{{.*}}, offsets = [%{{.*}}, %{{.*}}], sizes = [%{{.*}}, %{{.*}}] : !pto.tensor_view<?x?xf32>{{$}}
+// CHECK: pto.tload ins(%[[SV0]] : !pto.partition_tensor_view<16x32xf32>)
+// CHECK-LABEL: func.func @old_format_static
+// CHECK: %[[SV1:.*]] = pto.partition_view %{{.*}}, offsets = [%{{.*}}, %{{.*}}], sizes = [%{{.*}}, %{{.*}}] : !pto.tensor_view<?x?xf32>{{$}}
+// CHECK-LABEL: func.func @old_format_dynamic
+// CHECK: %[[SV2:.*]] = pto.partition_view %{{.*}}, offsets = [%{{.*}}, %{{.*}}], sizes = [%{{.*}}, %{{.*}}] : !pto.tensor_view<?x?xf32>{{$}}

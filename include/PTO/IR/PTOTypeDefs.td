@@ -88,6 +88,15 @@ def PartitionTensorViewType : TypeDef<PTO_Dialect, "PartitionTensorView"> {
 
   let hasCustomAssemblyFormat = 1;
 
+  // Convenience builders: explicit shape, or rank -> all dynamic ("?")
+  let builders = [
+    TypeBuilder<(ins "int64_t":$rank,
+                     "Type":$elementType), [{
+      SmallVector<int64_t, 4> shp(rank, mlir::ShapedType::kDynamic);
+      return Base::get($_ctxt, shp, elementType);
+    }]>
+  ];
+
   let extraClassDeclaration = [{
     int64_t getRank() const { return getShape().size(); }
     int64_t getDimSize(unsigned idx) const { return getShape()[idx]; }

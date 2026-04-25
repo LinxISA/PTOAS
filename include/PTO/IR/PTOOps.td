@@ -183,11 +183,7 @@ def PartitionViewOp : PTO_Op<"partition_view", [AttrSizedOperandSegments]> {
   let results = (outs PartitionTensorViewType:$result); // 输出: 逻辑切片
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    $source `,` `offsets` `=` `[` $offsets `]` `,` `sizes` `=` `[` $sizes `]`
-    attr-dict `:` qualified(type($source)) `->` qualified(type($result))
-  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 // Helper: tensor_view or memref (after lowering tensor_view to memref).

@@ -423,13 +423,8 @@ static void bindTensorViewType(py::module_ &m) {
           "get",
           [](py::object cls, py::object shapeOrRank, MlirType elementType,
              MlirContext context) -> py::object {
-            std::vector<int64_t> shape;
-            if (py::isinstance<py::int_>(shapeOrRank)) {
-              shape.assign(shapeOrRank.cast<int64_t>(),
-                           mlir::ShapedType::kDynamic);
-            } else {
-              shape = toInt64Vector(shapeOrRank.cast<py::sequence>());
-            }
+            auto shape = toShapeVectorOrDynamicRank(shapeOrRank);
+            context = inferContextFromElementType(context, elementType);
             return wrapType(
                 cls, mlirPTOTensorViewTypeGet(context, shape.size(), shape.data(),
                                               elementType));
@@ -454,13 +449,14 @@ static void bindPartitionTensorViewType(py::module_ &m) {
   })
       .def_classmethod(
           "get",
-          [](py::object cls, py::sequence shape, MlirType elementType,
+          [](py::object cls, py::object shapeOrRank, MlirType elementType,
              MlirContext context) {
-            auto dims = toInt64Vector(shape);
+            auto dims = toShapeVectorOrDynamicRank(shapeOrRank);
+            context = inferContextFromElementType(context, elementType);
             return wrapType(cls, mlirPTOPartitionTensorViewTypeGet(
                                      context, dims.size(), dims.data(), elementType));
           },
-          py::arg("cls"), py::arg("shape"), py::arg("element_type"),
+          py::arg("cls"), py::arg("shape_or_rank"), py::arg("element_type"),
           py::arg("context") = py::none())
       .def_property_readonly("rank", [](MlirType self) {
         return mlirPTOPartitionTensorViewTypeGetRank(self);

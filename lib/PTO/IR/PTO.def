@@ -9030,46 +9030,52 @@ static SmallVector<int64_t> getSubsetResultShape(ArrayAttr sizeAttr) {
   return resultShape;
 }
 
-static SmallVector<int64_t> inferSubsetValidShape(TileBufType sourceType,
-                                                  ArrayRef<int64_t> resultShape,
-                                                  ValueRange operands) {
+static SmallVector<int64_t> inferSubsetValidShape(ArrayRef<int64_t> resultShape,
+                                                  ValueRange operands,
+                                                  DictionaryAttr attributes) {
   SmallVector<int64_t> validShape;
   validShape.reserve(resultShape.size());
   constexpr int64_t kDynamicValidDim = -1;
-  ArrayRef<int64_t> parentValid = sourceType.getValidShape();
-  for (size_t i = 0, e = resultShape.size(); i < e; ++i) {
-    int64_t sizeDim = resultShape[i];
-    int64_t vdim = sizeDim;
+  Value explicitVRow;
+  Value explicitVCol;
 
-    if (parentValid.size() == resultShape.size()) {
-      int64_t pv = parentValid[i];
-      if (pv < 0) {
-        vdim = kDynamicValidDim;
-      } else {
-        int64_t off = 0;
-        if (operands.size() > 1 + i) {
-          auto offOpt = getConstIndexValue(operands[1 + i]);
-          if (!offOpt) {
-            validShape.push_back(kDynamicValidDim);
-            continue;
-          }
-          off = *offOpt;
-          int64_t diff = 0;
-          if (pv > 0) {
-            int64_t offMod = off % pv;
-            if (offMod < 0)
-              offMod += pv;
-            diff = pv - offMod;
-          }
-          if (diff < 0)
-            diff = 0;
-          vdim = std::min<int64_t>(sizeDim, diff);
-        } else {
-          vdim = kDynamicValidDim;
+  if (attributes) {
+    if (auto segAttr =
+            attributes.getAs<DenseI32ArrayAttr>("operandSegmentSizes")) {
+      ArrayRef<int32_t> segs = segAttr.asArrayRef();
+      if (segs.size() == 4) {
+        int32_t srcSeg = segs[0];
+        int32_t offSeg = segs[1];
+        int32_t vRowSeg = segs[2];
+        int32_t vColSeg = segs[3];
+        if (srcSeg == 1 && offSeg >= 0 && (vRowSeg == 0 || vRowSeg == 1) &&
+            (vColSeg == 0 || vColSeg == 1)) {
+          size_t index = static_cast<size_t>(srcSeg + offSeg);
+          if (vRowSeg == 1 && index < operands.size())
+            explicitVRow = operands[index++];
+          if (vColSeg == 1 && index < operands.size())
+            explicitVCol = operands[index];
         }
       }
     }
+  }
 
+  if (!explicitVRow && !explicitVCol && resultShape.size() == 2) {
+    size_t expectedWithoutValid = 1 + resultShape.size();
+    if (operands.size() >= expectedWithoutValid + 2) {
+      explicitVRow = operands[expectedWithoutValid];
+      explicitVCol = operands[expectedWithoutValid + 1];
+    }
+  }
+
+  for (size_t i = 0, e = resultShape.size(); i < e; ++i) {
+    int64_t vdim = resultShape[i];
+    Value explicitValid =
+        (i == 0) ? explicitVRow : (i == 1 ? explicitVCol : Value());
+    if (explicitValid) {
+      auto cst = getConstIndexValue(explicitValid);
+      vdim = cst ? std::min<int64_t>(*cst, resultShape[i]) : kDynamicValidDim;
+    }
     validShape.push_back(vdim);
   }
   return validShape;
@@ -9183,7 +9189,7 @@ LogicalResult SubViewOp::inferReturnTypes(
 
   SmallVector<int64_t> resultShape = getSubsetResultShape(sizeAttr);
   SmallVector<int64_t> validShape =
-      inferSubsetValidShape(sourceType, resultShape, operands);
+      inferSubsetValidShape(resultShape, operands, attributes);
   auto cfg = sourceType.getConfigAttr();
   if (!cfg)
     cfg = TileBufConfigAttr::getDefault(context);

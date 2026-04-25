@@ -86,6 +86,18 @@ static void bindIntBackedAttr(py::module_ &m, const char *name, IsaFn isaFn,
       });
 }
 
+template <typename IsaFn, typename BuildFn>
+static void bindNullaryType(py::module_ &m, const char *name, IsaFn isaFn,
+                            BuildFn buildFn) {
+  mlir_type_subclass(m, name, isaFn)
+      .def_classmethod(
+          "get",
+          [buildFn](py::object cls, MlirContext context) {
+            return wrapType(cls, buildFn(context));
+          },
+          py::arg("cls"), py::arg("context") = py::none());
+}
+
 static void bindRegisterDialect(py::module_ &m) {
   m.def(
       "register_dialect",
@@ -392,22 +404,15 @@ static void bindScalarTypes(py::module_ &m) {
       .def_property_readonly("element_type", [](MlirType self) {
         return mlirPTOPtrTypeGetElementType(self);
       });
-  mlir_type_subclass(m, "AsyncSessionType", [](MlirType type) -> bool {
-    return mlirPTOTypeIsAAsyncSessionType(type);
-  })
-      .def_classmethod("get",
-                       [](py::object cls, MlirContext context) {
-                         return wrapType(cls, mlirPTOAsyncSessionTypeGet(context));
-                       },
-                       py::arg("cls"), py::arg("context") = py::none());
-  mlir_type_subclass(m, "AsyncEventType", [](MlirType type) -> bool {
-    return mlirPTOTypeIsAAsyncEventType(type);
-  })
-      .def_classmethod("get",
-                       [](py::object cls, MlirContext context) {
-                         return wrapType(cls, mlirPTOAsyncEventTypeGet(context));
-                       },
-                       py::arg("cls"), py::arg("context") = py::none());
+  bindNullaryType(m, "AsyncSessionType", mlirPTOTypeIsAAsyncSessionType,
+                  mlirPTOAsyncSessionTypeGet);
+  bindNullaryType(m, "AsyncEventType", mlirPTOTypeIsAAsyncEventType,
+                  mlirPTOAsyncEventTypeGet);
+  bindNullaryType(m, "HiF8Type", mlirPTOTypeIsAHiF8Type, mlirPTOHiF8TypeGet);
+  bindNullaryType(m, "F4E1M2x2Type", mlirPTOTypeIsAF4E1M2x2Type,
+                  mlirPTOF4E1M2x2TypeGet);
+  bindNullaryType(m, "F4E2M1x2Type", mlirPTOTypeIsAF4E2M1x2Type,
+                  mlirPTOF4E2M1x2TypeGet);
 }
 
 static void bindTensorViewType(py::module_ &m) {

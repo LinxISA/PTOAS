@@ -1183,6 +1183,40 @@ def TMovOp  : PTO_TOp<"tmov", [
   }];
 }
 
+def TCopyOp : PTO_TOp<"tcopy", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Strided UB copy between vector tiles (DPS version).";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst,
+    DefaultValuedAttr<I32Attr, "1">:$blockSizeElem,
+    I32Attr:$srcStride,
+    I32Attr:$dstStride
+  );
+
+  let results = (outs
+    Optional<AnyRankedTensor>:$result
+  );
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    ( `->` qualified(type($result))^ )?
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 
 //===----------------------------------------------------------------------===//
 // Pointer Cast Op (existing)

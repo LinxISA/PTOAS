@@ -1,0 +1,18 @@
+// RUN: ptoas --pto-arch=a3 %s | FileCheck %s --check-prefix=A3
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
+
+func.func @tcopy_emitc() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=16, v_row=7, v_col=4, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=16, v_row=7, v_col=4, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  pto.tcopy ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=16, v_row=7, v_col=4, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+            outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=16, v_row=7, v_col=4, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+            {srcStride = 64 : i32, dstStride = 16 : i32}
+  return
+}
+
+// A3: #include "pto/npu/a2a3/TCopy.hpp"
+// A3: static AICORE inline void PTOAS__TCOPY
+// A3-LABEL: AICORE void tcopy_emitc(
+// A3: PTOAS__TCOPY<{{.*}}, 1, 64, 16>({{[^,]+}}, {{[^)]+}});
+
+// A5: error: 'pto.tcopy' op tcopy is only supported on A2/A3 targets

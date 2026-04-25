@@ -5280,6 +5280,67 @@ mlir::LogicalResult mlir::pto::TMovOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
+mlir::LogicalResult mlir::pto::TCopyOp::verify() {
+  auto verifyA2A3 = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+
+    if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
+        failed(verifyTileBufCommon(*this, dstTy, "dst")))
+      return failure();
+
+    auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+    auto dstSpace = getPTOMemorySpaceEnum(dstTy);
+    if (!srcSpace || !dstSpace)
+      return emitOpError() << "expects src and dst to have explicit address spaces";
+    if (*srcSpace != pto::AddressSpace::VEC ||
+        *dstSpace != pto::AddressSpace::VEC)
+      return emitOpError() << "expects tcopy to use vec->vec tiles";
+
+    if (getShapeVec(srcTy) != getShapeVec(dstTy))
+      return emitOpError() << "expects src and dst to have the same shape";
+    if (getValidShapeVec(srcTy) != getValidShapeVec(dstTy))
+      return emitOpError() << "expects src and dst to have the same validShape";
+    if (getElemTy(srcTy) != getElemTy(dstTy))
+      return emitOpError() << "expects src and dst to have the same element type";
+
+    auto verifyRowMajorVecLayout = [&](Type ty, StringRef name) -> LogicalResult {
+      if (auto tb = dyn_cast<pto::TileBufType>(ty)) {
+        if (tb.getBLayoutValueI32() !=
+            static_cast<int32_t>(pto::BLayout::RowMajor))
+          return emitOpError() << "expects " << name << " to use blayout=row_major";
+        if (tb.getSLayoutValueI32() !=
+            static_cast<int32_t>(pto::SLayout::NoneBox))
+          return emitOpError() << "expects " << name << " to use slayout=none_box";
+      }
+      return success();
+    };
+
+    if (failed(verifyRowMajorVecLayout(srcTy, "src")) ||
+        failed(verifyRowMajorVecLayout(dstTy, "dst")))
+      return failure();
+
+    auto requirePositive = [&](IntegerAttr attr, StringRef name) -> LogicalResult {
+      if (!attr || attr.getInt() <= 0)
+        return emitOpError() << "expects " << name << " to be a positive integer";
+      return success();
+    };
+
+    if (failed(requirePositive(getBlockSizeElemAttr(), "blockSizeElem")) ||
+        failed(requirePositive(getSrcStrideAttr(), "srcStride")) ||
+        failed(requirePositive(getDstStrideAttr(), "dstStride")))
+      return failure();
+
+    return success();
+  };
+
+  auto verifyA5 = [&]() -> LogicalResult {
+    return emitOpError() << "tcopy is only supported on A2/A3 targets";
+  };
+
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+}
+
 mlir::LogicalResult mlir::pto::TMovFPOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
     Type srcTy = getSrc().getType();
@@ -9470,6 +9531,14 @@ void TMovOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffect
   auto preQuantRange = getPreQuantScalarMutable();
   if (!preQuantRange.empty())
     addEffect(effects, &*preQuantRange.begin(), MemoryEffects::Read::get());
+  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+}
+
+// === TCopyOp ===
+// Read: src, Write: dst
+void TCopyOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  addEffect(effects, &getSrcMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 

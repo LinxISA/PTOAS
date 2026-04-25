@@ -7391,6 +7391,48 @@ struct PTOMovToEmitC : public OpConversionPattern<pto::TMovOp> {
   }
 };
 
+struct PTOTCopyToEmitC : public OpConversionPattern<pto::TCopyOp> {
+  using OpConversionPattern<pto::TCopyOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TCopyOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
+
+    if (getTargetArch(op) == PTOArch::A5)
+      return rewriter.notifyMatchFailure(op, "tcopy is only supported on A2/A3 targets");
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    auto dstOT = dst.getType().dyn_cast<emitc::OpaqueType>();
+    auto srcOT = src.getType().dyn_cast<emitc::OpaqueType>();
+    if (!dstOT || !srcOT)
+      return rewriter.notifyMatchFailure(
+          op, "tcopy lowering expects opaque dst/src types");
+
+    SmallVector<Attribute, 5> templateArgVec{
+        emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+        emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+        emitc::OpaqueAttr::get(
+            ctx, std::to_string(op.getBlockSizeElemAttr().getInt())),
+        emitc::OpaqueAttr::get(
+            ctx, std::to_string(op.getSrcStrideAttr().getInt())),
+        emitc::OpaqueAttr::get(
+            ctx, std::to_string(op.getDstStrideAttr().getInt())),
+    };
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "PTOAS__TCOPY",
+        /*args=*/ArrayAttr{},
+        /*templateArgs=*/rewriter.getArrayAttr(templateArgVec),
+        /*operands=*/SmallVector<Value, 2>{dst, src});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // PTOConvert.cpp  (add lowering + patterns.add for TMOV_FP DPS/memref op)
 //===----------------------------------------------------------------------===//
@@ -10424,6 +10466,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOLogToEmitC>(typeConverter, ctx);
   patterns.add<FuncToEmitC>(typeConverter, ctx);
   patterns.add<PTOMovToEmitC>(typeConverter, ctx);
+  patterns.add<PTOTCopyToEmitC>(typeConverter, ctx);
   patterns.add<ArithConstantToEmitC>(typeConverter, ctx);
   patterns.add<ArithAddUIExtendedToEmitC>(typeConverter, ctx);
   patterns.add<ArithMulSIExtendedToEmitC>(typeConverter, ctx);
@@ -10627,11 +10670,14 @@ struct EmitPTOManualPass
 
         bool needsEventIdArrayHelper = false;
         bool needsTRandomHelper = false;
+        bool needsTCopyHelper = false;
         mop.walk([&](Operation *op) {
           if (isa<mlir::pto::DeclareEventIdArrayOp>(op))
             needsEventIdArrayHelper = true;
           if (isa<mlir::pto::TRandomOp>(op))
             needsTRandomHelper = true;
+          if (isa<mlir::pto::TCopyOp>(op))
+            needsTCopyHelper = true;
         });
 
 		    // 1. 插入头文件
@@ -10640,6 +10686,11 @@ struct EmitPTOManualPass
 	    builder.setInsertionPointToStart(mop.getBody());
 	    builder.create<emitc::IncludeOp>(
 	        loc, builder.getStringAttr("pto/pto-inst.hpp"), /*isAngled=*/nullptr);
+        if (needsTCopyHelper) {
+	      builder.create<emitc::IncludeOp>(
+	          loc, builder.getStringAttr("pto/npu/a2a3/TCopy.hpp"),
+	          /*isAngled=*/nullptr);
+        }
 	    builder.create<emitc::VerbatimOp>(
 	        loc, builder.getStringAttr("using namespace pto;"));
         if (needsEventIdArrayHelper) {
@@ -10665,6 +10716,17 @@ static AICORE inline void PTOAS__TRANDOM(
   TRandomKey key = {key0, key1};
   TRandomCounter counter = {counter0, counter1, counter2, counter3};
   TRANDOM<Rounds>(dst, key, counter);
+}
+)cpp"));
+        }
+        if (needsTCopyHelper) {
+	      builder.create<emitc::VerbatimOp>(
+	          loc, builder.getStringAttr(R"cpp(
+template <typename DstTile, typename SrcTile, unsigned BlockSizeElem,
+          unsigned SrcStride, unsigned DstStride>
+static AICORE inline void PTOAS__TCOPY(DstTile &dst, SrcTile &src) {
+  pto::TCopy<DstTile, SrcTile, BlockSizeElem, SrcStride, DstStride>(
+      dst.data(), src.data(), src.GetValidRow(), src.GetValidCol());
 }
 )cpp"));
         }

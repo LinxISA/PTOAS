@@ -1843,6 +1843,18 @@ struct PTOViewToMemrefPass
             op.getReluPreModeAttr());
       }
 
+      // --- TCopyOp [Src, Dst] ---
+      SmallVector<mlir::pto::TCopyOp, 8> copies;
+      func.walk([&](mlir::pto::TCopyOp op) { copies.push_back(op); });
+      for (auto op : copies) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+        rewriter.replaceOpWithNewOp<pto::TCopyOp>(
+            op, TypeRange{}, op.getSrc(), op.getDst(),
+            op.getBlockSizeElemAttr(), op.getSrcStrideAttr(),
+            op.getDstStrideAttr());
+      }
+
       SmallVector<mlir::pto::TAbsOp, 8> abseops;
       func.walk([&](mlir::pto::TAbsOp op) { abseops.push_back(op); });
 

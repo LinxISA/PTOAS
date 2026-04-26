@@ -171,7 +171,8 @@ LoopInstanceElement::CloneFor(KindOfLoop loopKind) const {
   checkCondition(this->beginId != this->endId,
                  "LoopInstanceElement clone failed.");
   auto res =
-      std::make_unique<LoopInstanceElement>(index, beginId, endId, loopKind);
+      std::make_unique<LoopInstanceElement>(index, beginId, endId, loopKind,
+                                            mayZeroTrip);
   res->elementOp = elementOp;
   return res;
 }

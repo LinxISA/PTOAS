@@ -36,6 +36,55 @@ static bool isValidPipeIndex(PipelineType pipe) {
   return static_cast<unsigned>(pipe) < kPipeStateSize;
 }
 
+static bool hasUnconditionalFinder(const SyncRecord &record, int syncIndex) {
+  return record.syncFinder.lookup(syncIndex) &&
+         !record.syncFinderIsConditional.lookup(syncIndex);
+}
+
+static bool isFinderWaitAtRegionEntry(int syncIndex,
+                                      const SyncOperations &syncOperations,
+                                      unsigned regionBegin) {
+  if (syncIndex < 0 ||
+      static_cast<size_t>(syncIndex) >= syncOperations.size()) {
+    return false;
+  }
+
+  const auto &syncGroup = syncOperations[static_cast<size_t>(syncIndex)];
+  if (syncGroup.size() < 2 || !syncGroup[1]) {
+    return false;
+  }
+
+  const SyncOperation *wait = syncGroup[1].get();
+  return wait->isSyncWaitType() && wait->GetSyncIRIndex() == regionBegin;
+}
+
+static void propagateFinderFromMaySkipRegion(SyncRecord &target,
+                                             const SyncRecord &before,
+                                             const SyncRecord &after,
+                                             const SyncOperations &syncOperations,
+                                             unsigned regionBegin) {
+  llvm::DenseMap<int, bool> conditionalFinder;
+
+  for (const auto &entry : after.syncFinderIsConditional) {
+    int syncIndex = entry.first;
+    if (entry.second && after.syncFinder.lookup(syncIndex) &&
+        !hasUnconditionalFinder(before, syncIndex)) {
+      conditionalFinder[syncIndex] = true;
+    }
+  }
+
+  for (const auto &entry : after.syncFinder) {
+    int syncIndex = entry.first;
+    if (entry.second && !before.syncFinder.lookup(syncIndex) &&
+        !isFinderWaitAtRegionEntry(syncIndex, syncOperations, regionBegin)) {
+      conditionalFinder[syncIndex] = true;
+    }
+  }
+
+  target.syncFinder = after.syncFinder;
+  target.syncFinderIsConditional = std::move(conditionalFinder);
+}
+
 // ==============================================================================
 // 1. Entry Point
 // ==============================================================================
@@ -198,18 +247,29 @@ unsigned InsertSyncAnalysis::InsertLoopSync(
     const std::optional<unsigned> &forEndIndex) {
   if (loopElement->getLoopKind() == KindOfLoop::LOOP_END) {
     SyncRecordList syncRecordForList = syncRecordList;
+    SyncRecordList syncRecordBefore = syncRecordList;
     unsigned newBegin =
         std::max(begin, index - (loopElement->endId - loopElement->beginId));
     unsigned newEnd = index;
     InsertSeqSync(nowCompound, syncElement, static_cast<int>(newBegin),
                   static_cast<int>(newEnd), syncRecordForList, forEndIndex);
-    // A loop may execute zero iterations at runtime. Keep correctness for both
-    // paths by not promoting alreadySync from the loop-body traversal into the
-    // outer state. We only carry syncFinder updates, matching no-else branch
-    // behavior in InsertBranchSync.
-    for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++)
-      syncRecordList[bufferIdx].syncFinder =
-          syncRecordForList[bufferIdx].syncFinder;
+    for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++) {
+      if (loopElement->mayZeroTrip) {
+        // A may-skip loop needs both paths to remain valid: keep finder
+        // updates visible for outer pair-finding, but tag body-introduced bits
+        // as conditional so they cannot claim that a body wait ran.
+        propagateFinderFromMaySkipRegion(syncRecordList[bufferIdx],
+                                         syncRecordBefore[bufferIdx],
+                                         syncRecordForList[bufferIdx],
+                                         syncOperations_,
+                                         loopElement->beginId);
+      } else {
+        syncRecordList[bufferIdx].syncFinder =
+            syncRecordForList[bufferIdx].syncFinder;
+        syncRecordList[bufferIdx].syncFinderIsConditional =
+            syncRecordForList[bufferIdx].syncFinderIsConditional;
+      }
+    }
     return (loopElement->endId - loopElement->beginId);
   }
   return 0;
@@ -240,10 +300,15 @@ unsigned InsertSyncAnalysis::InsertBranchSync(
                     static_cast<int>(branchEnd), syncRecordElseList, forEndIndex);
       MergeAlreadySync(syncRecordList, syncRecordIfList, syncRecordElseList);
     } else {
-      // No else-branch: do not promote `alreadySync`, but keep syncFinder
-      // updates from the then-branch.
+      // No else-branch: do not promote `alreadySync`, but keep finder updates
+      // visible for outer pair-finding. Finder bits introduced by the then
+      // branch are conditional because the branch may be skipped.
       for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++)
-        syncRecordList[bufferIdx].syncFinder = syncRecordIfList[bufferIdx].syncFinder;
+        propagateFinderFromMaySkipRegion(syncRecordList[bufferIdx],
+                                         syncRecordList[bufferIdx],
+                                         syncRecordIfList[bufferIdx],
+                                         syncOperations_,
+                                         branchElement->beginId);
     }
     return (branchElement->endId - branchElement->beginId);
   } else if (branchElement->getBranchKind() == KindOfBranch::ELSE_BEGIN &&
@@ -455,6 +520,7 @@ void InsertSyncAnalysis::UpdateSyncRecord(const SyncOperation *sync,
   if (!canTransitivelyEliminate) return;
 
   if (recordFinder[sync->GetSyncIndex()] &&
+      !syncRecord.syncFinderIsConditional.lookup(sync->GetSyncIndex()) &&
       (sync->GetType() == SyncOperation::TYPE::SET_EVENT ||
        sync->GetType() == SyncOperation::TYPE::SYNC_BLOCK_SET)) {
     recordAlready[static_cast<unsigned>(setPipeValue)] = true;

@@ -270,12 +270,14 @@ class LoopInstanceElement : public InstanceElement {
 public:
   unsigned beginId;
   unsigned endId;
+  bool mayZeroTrip{true};
  
 public:
   LoopInstanceElement(unsigned index, unsigned beginId, unsigned endId,
-                      KindOfLoop loopKind = KindOfLoop::LOOP_BEGIN)
+                      KindOfLoop loopKind = KindOfLoop::LOOP_BEGIN,
+                      bool mayZeroTripLoop = true)
       : InstanceElement(KindTy::LOOP, index), beginId(beginId), endId(endId),
-        kLoopKind(loopKind) {}
+        mayZeroTrip(mayZeroTripLoop), kLoopKind(loopKind) {}
  
   ~LoopInstanceElement() override = default;
   std::unique_ptr<InstanceElement> CloneFor(KindOfLoop loopKind) const;
@@ -360,7 +362,7 @@ public:
   static bool classof(const InstanceElement *e);
   UNIT_FLAG getUnitFlagMode() const;
   
-  // PTO 暂时简化，去掉复杂的 UnitFlag 条件生成逻辑，或者稍后在 CPP 中适配
+  // PTO 暂时简化，去掉复杂的 UnitFlag 条件生成逻辑，或者稍后在 CPP 中退配
   std::optional<mlir::Value> getUnitFlagCond(Location loc, OpBuilder &rewriter);
 };
  

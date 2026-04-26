@@ -27,7 +27,17 @@
  
 using namespace mlir;
 using namespace mlir::pto;
- 
+
+static bool forOpMayZeroTrip(scf::ForOp forOp) {
+  llvm::APInt lowerBound;
+  llvm::APInt upperBound;
+  if (!matchPattern(forOp.getLowerBound(), m_ConstantInt(&lowerBound)) ||
+      !matchPattern(forOp.getUpperBound(), m_ConstantInt(&upperBound))) {
+    return true;
+  }
+  return !lowerBound.slt(upperBound);
+}
+
 // [辅助函数] 尝试从 Operation 中计算相对于 Source 的字节偏移量和新大小
 // 返回值: pair<offsetInBytes, sizeInBytes>
 // 如果无法计算静态值，返回 {-1, -1} 表示这是动态的
@@ -422,6 +432,7 @@ pto::PipelineType PTOIRTranslator::getOpPipeline(Operation *op) {
 void PTOIRTranslator::UpdateForOpInfo(scf::ForOp forOp) {
   auto forBeginElement = std::make_unique<LoopInstanceElement>(index, index, index);
   forBeginElement->elementOp = forOp.getOperation();
+  forBeginElement->mayZeroTrip = forOpMayZeroTrip(forOp);
   syncIR_.emplace_back(std::move(forBeginElement));
   
   std::unique_ptr<InstanceElement> &forElement = syncIR_[index];

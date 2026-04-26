@@ -162,6 +162,8 @@ public:
   Value lowestCommonAncestorBuffer{nullptr};
   int reuseCntForWiden{0};
   bool reallocatedLoopHeadTailSync{false};
+  // True only for the compiler's final clean barrier.
+  bool isAutoSyncTailBarrier{false};
   TCoreType syncCoreType{TCoreType::CUBE_OR_VECTOR};
   Value block_sync_event_value{nullptr};
  

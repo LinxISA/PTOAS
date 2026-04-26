@@ -284,8 +284,8 @@ void SyncCodegen::CreateBarrierOp(IRRewriter &rewriter, Operation *op,
   }
 
   // Compiler-inserted tail clean barrier must be anchored at function tail.
-  if (sync->GetActualSrcPipe() == PipelineType::PIPE_ALL &&
-      sync->GetActualDstPipe() == PipelineType::PIPE_ALL) {
+  // Other PIPE_ALL barriers are local fallbacks and must stay at their hazard.
+  if (sync->isAutoSyncTailBarrier) {
     pendingAutoSyncTailBarrier_ = true;
     return;
   }

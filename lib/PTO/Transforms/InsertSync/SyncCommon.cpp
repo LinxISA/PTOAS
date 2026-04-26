@@ -126,6 +126,7 @@ SyncOperation::GetMatchSync(unsigned index) const {
   res->depRootBuffers = this->depRootBuffers;
   res->eventIdNum = this->eventIdNum;
   res->isCompensation = this->isCompensation;
+  res->isAutoSyncTailBarrier = this->isAutoSyncTailBarrier;
   res->SetDepSyncIRIndex(this->GetDepSyncIRIndex());
   return res;
 }

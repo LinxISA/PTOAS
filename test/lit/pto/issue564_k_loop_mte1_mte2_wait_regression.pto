@@ -3,6 +3,8 @@
 // Regression guard for issue #564:
 // - loop-carried PIPE_MTE1 -> PIPE_MTE2 sync discovered before the K-loop must
 //   still be waited before the next K-loop TLOADs.
+// - when event ids are exhausted, the PIPE_ALL fallback must stay in the K-loop
+//   instead of being delayed to the function-tail clean barrier.
 // - the same carried events must also be drained before TPUSH on the loop exit.
 //
 // CHECK-LABEL: AICORE void scope3_incore_0_aic(
@@ -19,6 +21,10 @@
 // CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0]]);
 // CHECK-NEXT: TLOAD(
 // CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2]]);
+// CHECK-NEXT: TLOAD(
+// CHECK: pipe_barrier(PIPE_ALL);
+// CHECK-NEXT: TLOAD(
+// CHECK: pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: TLOAD(
 // CHECK: set_flag(PIPE_M, PIPE_FIX, EVENT_ID[[PUSH:[0-9]+]]);
 // CHECK-NEXT: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[POST:[0-9]+]]);

@@ -355,27 +355,6 @@ process_one_dir() {
     fi
 
     # Some samples are expected to fail depending on the selected ptoas flags.
-    #
-    # alloc_tile_addr.py uses `pto.alloc_tile addr=...`, which is only accepted
-    # by the ptoas tool when assembling at Level-3.
-    if [[ "$base" == "alloc_tile_addr" ]]; then
-      local has_level3=0
-      if ((${#ptoas_flags[@]})); then
-        for ((i=0; i<${#ptoas_flags[@]}; i++)); do
-          if [[ "${ptoas_flags[$i]}" == "--pto-level=level3" ]]; then
-            has_level3=1
-            break
-          fi
-          if [[ "${ptoas_flags[$i]}" == "--pto-level" ]]; then
-            if (( i + 1 < ${#ptoas_flags[@]} )) && [[ "${ptoas_flags[$((i+1))]}" == "level3" ]]; then
-              has_level3=1
-              break
-            fi
-          fi
-        done
-      fi
-      [[ $has_level3 -eq 1 ]] || expect_fail=1
-    fi
     if [[ "$base" == "test_intercore_sync_a3_missing_setffts" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" == "a3" ]]; then
       expect_fail=1
     fi

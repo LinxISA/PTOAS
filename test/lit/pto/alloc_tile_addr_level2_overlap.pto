@@ -1,0 +1,29 @@
+// RUN: ptoas --pto-arch=a5 %s | FileCheck %s
+
+module {
+  func.func @mixed_manual_overlap(%base: i64) {
+    %manual0 = pto.alloc_tile addr = %base
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %auto = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tmov ins(%manual0 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%auto : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    %manual1 = pto.alloc_tile addr = %base
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tmov ins(%auto : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%manual1 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void mixed_manual_overlap(
+// CHECK-SAME: int64_t [[BASE:v[0-9]+]]
+// CHECK: const int64_t [[AUTO_BASE:v[0-9]+]] = 0;
+// CHECK: Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[MANUAL0:v[0-9]+]];
+// CHECK: TASSIGN([[MANUAL0]], [[BASE]]);
+// CHECK: Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[AUTO_TILE:v[0-9]+]];
+// CHECK: TASSIGN([[AUTO_TILE]], [[AUTO_BASE]]);
+// CHECK: TMOV([[AUTO_TILE]], [[MANUAL0]]);
+// CHECK: Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[MANUAL1:v[0-9]+]];
+// CHECK: TASSIGN([[MANUAL1]], [[BASE]]);
+// CHECK: TMOV([[MANUAL1]], [[AUTO_TILE]]);

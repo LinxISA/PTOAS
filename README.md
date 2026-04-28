@@ -207,7 +207,7 @@ ptoas test/lit/pto/empty_func.pto --enable-insert-sync -o outputfile.cpp
 # 指定目标硬件架构（A3 / A5）
 ptoas test/lit/pto/empty_func.pto --pto-arch=a5 -o outputfile.cpp
 
-# 指定构建 Level（level3 会禁用 PlanMemory/InsertSync）
+# 指定构建 Level（level3 会禁用 PlanMemory/InsertSync，且每个 `pto.alloc_tile` 都需要显式 `addr`）
 ptoas test/lit/pto/empty_func.pto --pto-level=level3 -o outputfile.cpp
 
 # 查看当前 ptoas release 版本号

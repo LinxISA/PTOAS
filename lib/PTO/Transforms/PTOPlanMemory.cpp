@@ -344,6 +344,12 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       // of the result as a use of the source in liveness analysis.
       UpdateBufferAlias(bindOp.getResult(), bindOp.getSource());
       return WalkResult::advance();
+    } else if (auto pointerCastOp = dyn_cast<pto::PointerCastOp>(op)) {
+      // PointerCastOp already materializes a concrete local-memory base
+      // address. Treat it like an allocation root so downstream liveness and
+      // size computation can reason about mixed manual/automatic tile buffers.
+      UpdateOpBufferInfo(op, pointerCastOp->getResults());
+      return WalkResult::advance();
     } else if (isLocalMemPlan() && dyn_cast<memref::AllocOp>(op)) {
       if (failed(CheckLocalBufferAllocOp(op))) {
         return WalkResult::interrupt();

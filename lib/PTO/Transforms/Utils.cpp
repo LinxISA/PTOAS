@@ -185,7 +185,8 @@ Value tracebackImpl(Value memrefVal) {
 bool isAllocLikeOp(Operation *op) {
   if (!op)
     return false;
-  return isa<memref::AllocOp>(op) || isa<memref::AllocaOp>(op);
+  return isa<memref::AllocOp>(op) || isa<memref::AllocaOp>(op) ||
+         isa<pto::PointerCastOp>(op);
 }
 
 bool isAllocLikeOp(Value val) {

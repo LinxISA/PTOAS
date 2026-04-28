@@ -1079,17 +1079,6 @@ int main(int argc, char **argv) {
     });
     if (missing)
       return 1;
-  } else {
-    bool hasAddr = false;
-    module->walk([&](pto::AllocTileOp op) {
-      if (op.getAddr()) {
-        op.emitError(
-            "unexpected 'addr' operand: only supported when --pto-level=level3");
-        hasAddr = true;
-      }
-    });
-    if (hasAddr)
-      return 1;
   }
 
   // Main PassManager

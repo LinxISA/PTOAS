@@ -6,4 +6,8 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-#include "PTOPlanMemory.def"
+#include "DefPTOPlanMemoryPrelude.cpp"
+#include "DefPTOPlanMemoryLiveness.cpp"
+#include "DefPTOPlanMemoryLayout.cpp"
+#include "DefPTOPlanMemorySpeculative.cpp"
+#include "DefPTOPlanMemoryPass.cpp"

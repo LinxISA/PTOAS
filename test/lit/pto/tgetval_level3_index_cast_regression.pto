@@ -1,0 +1,49 @@
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 %s | FileCheck %s
+
+module {
+  func.func @tgetval_level3_index_cast_regression() attributes {pto.entry} {
+    %c0_index = arith.constant 0 : index
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+
+    %index_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=vec, dtype=i32, rows=2, cols=8, v_row=2, v_col=8,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src_row = pto.alloc_tile addr = %c4096_i64
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c8192_i64
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src_mat = pto.alloc_tile addr = %c12288_i64
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %row_i32 = pto.tgetval ins(%index_tile, %c0_index :
+        !pto.tile_buf<loc=vec, dtype=i32, rows=2, cols=8, v_row=2, v_col=8,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+        index) outs : i32
+    %row_idx = arith.index_cast %row_i32 : i32 to index
+    pto.textract ins(%src_mat, %c0_index, %c0_index :
+        !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+        index, index)
+      outs(%src_row : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1,
+                                    v_col=32, blayout=row_major, slayout=none_box,
+                                    fractal=512, pad=0>)
+    pto.tinsert ins(%src_row, %row_idx, %c0_index :
+        !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+        index, index)
+      outs(%dst_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32,
+                                     v_row=32, v_col=32, blayout=row_major,
+                                     slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void tgetval_level3_index_cast_regression() {
+// CHECK: int32_t [[ROW:v[0-9]+]] = [[IDX:v[0-9]+]].GetValue(
+// CHECK: TINSERT(

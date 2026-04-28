@@ -1825,38 +1825,6 @@ struct ArithFloatMinMaxToEmitCBase {
                          Type ty) {
     return makeEmitCOpaqueConstant(rewriter, loc, ty, "0.0f");
   }
-
-  static Value buildCmpLt(ConversionPatternRewriter &rewriter, Location loc,
-                          Value lhs, Value rhs) {
-    return rewriter
-        .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
-                              emitc::CmpPredicate::lt, lhs, rhs)
-        .getResult();
-  }
-
-  static Value buildNaNAwarePrimaryValue(ConversionPatternRewriter &rewriter,
-                                         Location loc, Type dstTy, Value lhs,
-                                         Value rhs, bool selectMax) {
-    Value cmpLt = buildCmpLt(rewriter, loc, lhs, rhs);
-    return rewriter
-        .create<emitc::ConditionalOp>(loc, dstTy, cmpLt, selectMax ? rhs : lhs,
-                                      selectMax ? lhs : rhs)
-        .getResult();
-  }
-
-  static Value buildNaNSelectResult(ConversionPatternRewriter &rewriter,
-                                    Location loc, Type dstTy, Value lhs,
-                                    Value rhs, Value primaryValue) {
-    Value lhsNaN = isNaN(rewriter, loc, lhs);
-    Value rhsNaN = isNaN(rewriter, loc, rhs);
-    Value rhsOrPrimary = rewriter
-                             .create<emitc::ConditionalOp>(loc, dstTy, rhsNaN,
-                                                           lhs, primaryValue)
-                             .getResult();
-    return rewriter
-        .create<emitc::ConditionalOp>(loc, dstTy, lhsNaN, rhs, rhsOrPrimary)
-        .getResult();
-  }
 };
 
 struct ArithMaxNumFToEmitC : public OpConversionPattern<arith::MaxNumFOp>,
@@ -1868,12 +1836,31 @@ struct ArithMaxNumFToEmitC : public OpConversionPattern<arith::MaxNumFOp>,
     Type dstTy = getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();
-    Value maxNoNaN = buildNaNAwarePrimaryValue(rewriter, loc, dstTy,
-                                               adaptor.getLhs(),
-                                               adaptor.getRhs(),
-                                               /*selectMax=*/true);
-    Value res = buildNaNSelectResult(rewriter, loc, dstTy, adaptor.getLhs(),
-                                     adaptor.getRhs(), maxNoNaN);
+
+    Value lhsNaN = isNaN(rewriter, loc, adaptor.getLhs());
+    Value rhsNaN = isNaN(rewriter, loc, adaptor.getRhs());
+
+    Value cmpLt = rewriter
+                      .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
+                                            emitc::CmpPredicate::lt,
+                                            adaptor.getLhs(), adaptor.getRhs())
+                      .getResult();
+    Value maxNoNaN =
+        rewriter
+            .create<emitc::ConditionalOp>(loc, dstTy, cmpLt, adaptor.getRhs(),
+                                          adaptor.getLhs())
+            .getResult();
+
+    Value rhsOrMax =
+        rewriter
+            .create<emitc::ConditionalOp>(loc, dstTy, rhsNaN, adaptor.getLhs(),
+                                          maxNoNaN)
+            .getResult();
+    Value res =
+        rewriter
+            .create<emitc::ConditionalOp>(loc, dstTy, lhsNaN, adaptor.getRhs(),
+                                          rhsOrMax)
+            .getResult();
     rewriter.replaceOp(op, res);
     return success();
   }
@@ -1888,12 +1875,31 @@ struct ArithMinNumFToEmitC : public OpConversionPattern<arith::MinNumFOp>,
     Type dstTy = getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();
-    Value minNoNaN = buildNaNAwarePrimaryValue(rewriter, loc, dstTy,
-                                               adaptor.getLhs(),
-                                               adaptor.getRhs(),
-                                               /*selectMax=*/false);
-    Value res = buildNaNSelectResult(rewriter, loc, dstTy, adaptor.getLhs(),
-                                     adaptor.getRhs(), minNoNaN);
+
+    Value lhsNaN = isNaN(rewriter, loc, adaptor.getLhs());
+    Value rhsNaN = isNaN(rewriter, loc, adaptor.getRhs());
+
+    Value cmpLt = rewriter
+                      .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
+                                            emitc::CmpPredicate::lt,
+                                            adaptor.getLhs(), adaptor.getRhs())
+                      .getResult();
+    Value minNoNaN =
+        rewriter
+            .create<emitc::ConditionalOp>(loc, dstTy, cmpLt, adaptor.getLhs(),
+                                          adaptor.getRhs())
+            .getResult();
+
+    Value rhsOrMin =
+        rewriter
+            .create<emitc::ConditionalOp>(loc, dstTy, rhsNaN, adaptor.getLhs(),
+                                          minNoNaN)
+            .getResult();
+    Value res =
+        rewriter
+            .create<emitc::ConditionalOp>(loc, dstTy, lhsNaN, adaptor.getRhs(),
+                                          rhsOrMin)
+            .getResult();
     rewriter.replaceOp(op, res);
     return success();
   }
@@ -2254,6 +2260,10 @@ struct ArithCastOPToEmitC : public OpConversionPattern<arith::IndexCastOp> {
     Type newTy = getTypeConverter()->convertType(op.getType());
     if (!newTy)
       return failure();
+    if (adaptor.getIn().getType() == newTy) {
+      rewriter.replaceOp(op, adaptor.getIn());
+      return success();
+    }
     rewriter.replaceOpWithNewOp<emitc::CastOp>(op, newTy, adaptor.getIn());
     return success();
   }
@@ -2422,3 +2432,6 @@ struct ArithConstantToEmitC : public OpConversionPattern<arith::ConstantOp> {
   }
 };
 //===----------------------------------------------------------------------===//
+// pto.mgather lowering -> MGATHER(dst, src, indexes)  (pto-isa)
+//===----------------------------------------------------------------------===//
+

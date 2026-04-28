@@ -6,10 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-//===----------------------------------------------------------------------===//
-// pto.load_scalar / pto.store_scalar lowering -> ptr[offset]
-//===----------------------------------------------------------------------===//
-
 struct PTOLoadScalarToEmitC : public OpConversionPattern<pto::LoadScalarOp> {
   using OpConversionPattern<pto::LoadScalarOp>::OpConversionPattern;
 
@@ -1406,3 +1402,7 @@ struct PTORandomToEmitC : public OpConversionPattern<pto::TRandomOp> {
     return success();
   }
 };
+//===----------------------------------------------------------------------===//
+// pto.tdiv lowering -> TDIV(dst, src0, src1)
+//===----------------------------------------------------------------------===//
+

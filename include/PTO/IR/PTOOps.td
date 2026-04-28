@@ -4446,7 +4446,11 @@ def TQuantOp : PTO_TOp<"tquant", [
 
   let hasVerifier = 1;
 
-  let hasCustomAssemblyFormat = 1;
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $fp (`,` $offset^)? `:` qualified(type($src)) `,` qualified(type($fp)) (`,` qualified(type($offset))^)? `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)`
+    attr-dict
+  }];
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -4489,7 +4493,11 @@ def TDequantOp : PTO_TOp<"tdequant", [
 
   let hasVerifier = 1;
 
-  let hasCustomAssemblyFormat = 1;
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $scale `,` $offset `:` qualified(type($src)) `,` qualified(type($scale)) `,` qualified(type($offset)) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)`
+    attr-dict
+  }];
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }

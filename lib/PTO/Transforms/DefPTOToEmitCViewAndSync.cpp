@@ -6,9 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// pto.mgather lowering -> MGATHER(dst, src, indexes)  (pto-isa)
-//===----------------------------------------------------------------------===//
-
 struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
   using OpConversionPattern<pto::MGatherOp>::OpConversionPattern;
 
@@ -2088,30 +2085,21 @@ static LogicalResult extractSyncTripletTokens(Operation *op,
                                              std::string &dstTok,
                                              std::string &evtTok,
                                              ConversionPatternRewriter &rewriter) {
-  auto tryNamedAttrSpellings = [&]() {
-    return tryExtractSyncTokensFromNamedAttrs(op, "src_pipe", "dst_pipe",
-                                              "event_id", srcTok, dstTok,
-                                              evtTok) ||
-           tryExtractSyncTokensFromNamedAttrs(op, "srcPipe", "dstPipe",
-                                              "eventId", srcTok, dstTok,
-                                              evtTok) ||
-           tryExtractSyncTokensFromNamedAttrs(op, "src", "dst", "event",
-                                              srcTok, dstTok, evtTok);
-  };
-  auto tryArraySpellings = [&]() {
-    for (StringRef attrName : {"args", "pipes", "sync", "triplet", "attrs"}) {
-      if (tryExtractSyncTokensFromArrayAttr(op, attrName, srcTok, dstTok,
-                                            evtTok)) {
-        return true;
-      }
-    }
-    return false;
-  };
+  if (tryExtractSyncTokensFromNamedAttrs(op, "src_pipe", "dst_pipe", "event_id",
+                                         srcTok, dstTok, evtTok) ||
+      tryExtractSyncTokensFromNamedAttrs(op, "srcPipe", "dstPipe", "eventId",
+                                         srcTok, dstTok, evtTok) ||
+      tryExtractSyncTokensFromNamedAttrs(op, "src", "dst", "event", srcTok,
+                                         dstTok, evtTok)) {
+    return success();
+  }
 
-  if (tryNamedAttrSpellings())
-    return success();
-  if (tryArraySpellings())
-    return success();
+  for (StringRef attrName : {"args", "pipes", "sync", "triplet", "attrs"}) {
+    if (tryExtractSyncTokensFromArrayAttr(op, attrName, srcTok, dstTok,
+                                          evtTok)) {
+      return success();
+    }
+  }
 
   if (tryExtractFallbackSyncTokens(op, srcTok, dstTok, evtTok))
     return success();
@@ -2872,3 +2860,8 @@ struct PTOTAssignToEmitC : public OpConversionPattern<pto::TAssignOp> {
     return success();
   }
 };
+
+//===----------------------------------------------------------------------===//
+// pto.load_scalar / pto.store_scalar lowering -> ptr[offset]
+//===----------------------------------------------------------------------===//
+

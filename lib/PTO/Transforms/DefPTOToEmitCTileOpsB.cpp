@@ -6,10 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-//===----------------------------------------------------------------------===//
-// pto.tdiv lowering -> TDIV(dst, src0, src1)
-//===----------------------------------------------------------------------===//
-
 struct PTODivToTDIV : public OpConversionPattern<pto::TDivOp> {
   using OpConversionPattern<pto::TDivOp>::OpConversionPattern;
 
@@ -2419,3 +2415,7 @@ struct PTOTrapOpToEmitC : public OpConversionPattern<pto::TrapOp> {
     return success();
   }
 };
+
+// =============================================================================
+// 2. BindTileOp Lowering (FIX: Trace back to physical address)
+// =============================================================================

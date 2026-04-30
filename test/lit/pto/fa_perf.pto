@@ -142,10 +142,10 @@ module {
         pto.tload ins(%pv0_v_part_1 : !pto.partition_tensor_view<128x128xf16>) outs(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>)
         pto.tmov ins(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>) outs(%38 : !pto.tile_buf<right, 128x128xf16, slayout=col_major>)
         pto.tmatmul.acc ins(%39, %36, %38 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>, !pto.tile_buf<left, 128x128xf16, slayout=row_major>, !pto.tile_buf<right, 128x128xf16, slayout=col_major>) outs(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>)
-        %pv_push_0 = pto.talloc_to_aiv {id = 27, split = 0} -> !pto.tensor_view<128x128xf32>
+        %pv_push_0 = pto.talloc_to_aiv {id = 27, split = 1} -> !pto.tensor_view<128x128xf32>
         %pv_push_part_0 = pto.partition_view %pv_push_0, offsets = [%c0, %c0], sizes = [%c128, %c128_0] : !pto.tensor_view<128x128xf32> -> !pto.partition_tensor_view<128x128xf32>
         pto.tstore ins(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>) outs(%pv_push_part_0 : !pto.partition_tensor_view<128x128xf32>)
-        pto.tpush_to_aiv(%pv_push_0 : !pto.tensor_view<128x128xf32>) {id = 27, split = 0}
+        pto.tpush_to_aiv(%pv_push_0 : !pto.tensor_view<128x128xf32>) {id = 27, split = 1}
         %c0_19 = arith.constant 0 : index
         %68 = arith.addi %63, %c0_19 : index
         %69 = pto.partition_view %41, offsets = [%c0, %68], sizes = [%c128_0, %c128_1] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<128x128xf16>
@@ -189,10 +189,10 @@ module {
         pto.tload ins(%pv1_v_part_1 : !pto.partition_tensor_view<128x128xf16>) outs(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>)
         pto.tmov ins(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>) outs(%38 : !pto.tile_buf<right, 128x128xf16, slayout=col_major>)
         pto.tmatmul.acc ins(%39, %36, %38 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>, !pto.tile_buf<left, 128x128xf16, slayout=row_major>, !pto.tile_buf<right, 128x128xf16, slayout=col_major>) outs(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>)
-        %pv_push_1 = pto.talloc_to_aiv {id = 27, split = 0} -> !pto.tensor_view<128x128xf32>
+        %pv_push_1 = pto.talloc_to_aiv {id = 27, split = 1} -> !pto.tensor_view<128x128xf32>
         %pv_push_part_1 = pto.partition_view %pv_push_1, offsets = [%c0, %c0], sizes = [%c128, %c128_0] : !pto.tensor_view<128x128xf32> -> !pto.partition_tensor_view<128x128xf32>
         pto.tstore ins(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>) outs(%pv_push_part_1 : !pto.partition_tensor_view<128x128xf32>)
-        pto.tpush_to_aiv(%pv_push_1 : !pto.tensor_view<128x128xf32>) {id = 27, split = 0}
+        pto.tpush_to_aiv(%pv_push_1 : !pto.tensor_view<128x128xf32>) {id = 27, split = 1}
         %c0_24 = arith.constant 0 : index
         %82 = arith.addi %77, %c0_24 : index
         %83 = pto.partition_view %41, offsets = [%c0, %82], sizes = [%c128_0, %c128_1] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<128x128xf16>
@@ -232,10 +232,10 @@ module {
       pto.tload ins(%pv2_v_part_1 : !pto.partition_tensor_view<128x128xf16>) outs(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>)
       pto.tmov ins(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>) outs(%38 : !pto.tile_buf<right, 128x128xf16, slayout=col_major>)
       pto.tmatmul.acc ins(%39, %36, %38 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>, !pto.tile_buf<left, 128x128xf16, slayout=row_major>, !pto.tile_buf<right, 128x128xf16, slayout=col_major>) outs(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>)
-      %pv_push_2 = pto.talloc_to_aiv {id = 27, split = 0} -> !pto.tensor_view<128x128xf32>
+      %pv_push_2 = pto.talloc_to_aiv {id = 27, split = 1} -> !pto.tensor_view<128x128xf32>
       %pv_push_part_2 = pto.partition_view %pv_push_2, offsets = [%c0, %c0], sizes = [%c128, %c128_0] : !pto.tensor_view<128x128xf32> -> !pto.partition_tensor_view<128x128xf32>
       pto.tstore ins(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>) outs(%pv_push_part_2 : !pto.partition_tensor_view<128x128xf32>)
-      pto.tpush_to_aiv(%pv_push_2 : !pto.tensor_view<128x128xf32>) {id = 27, split = 0}
+      pto.tpush_to_aiv(%pv_push_2 : !pto.tensor_view<128x128xf32>) {id = 27, split = 1}
       %p_pop_3 = pto.tpop_from_aiv {id = 30, split = 0} -> !pto.tensor_view<128x256xf16>
       %p_pop_part_3 = pto.partition_view %p_pop_3, offsets = [%c0, %c0], sizes = [%c128, %c128_0] : !pto.tensor_view<128x256xf16> -> !pto.partition_tensor_view<128x128xf16>
       pto.tload ins(%p_pop_part_3 : !pto.partition_tensor_view<128x128xf16>) outs(%35 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>)
@@ -254,10 +254,10 @@ module {
       pto.tload ins(%pv3_v_part_1 : !pto.partition_tensor_view<128x128xf16>) outs(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>)
       pto.tmov ins(%37 : !pto.tile_buf<mat, 128x128xf16, blayout=col_major, slayout=row_major>) outs(%38 : !pto.tile_buf<right, 128x128xf16, slayout=col_major>)
       pto.tmatmul.acc ins(%39, %36, %38 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>, !pto.tile_buf<left, 128x128xf16, slayout=row_major>, !pto.tile_buf<right, 128x128xf16, slayout=col_major>) outs(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>)
-      %pv_push_3 = pto.talloc_to_aiv {id = 27, split = 0} -> !pto.tensor_view<128x128xf32>
+      %pv_push_3 = pto.talloc_to_aiv {id = 27, split = 1} -> !pto.tensor_view<128x128xf32>
       %pv_push_part_3 = pto.partition_view %pv_push_3, offsets = [%c0, %c0], sizes = [%c128, %c128_0] : !pto.tensor_view<128x128xf32> -> !pto.partition_tensor_view<128x128xf32>
       pto.tstore ins(%39 : !pto.tile_buf<acc, 128x128xf32, blayout=col_major, slayout=row_major, fractal=1024>) outs(%pv_push_part_3 : !pto.partition_tensor_view<128x128xf32>)
-      pto.tpush_to_aiv(%pv_push_3 : !pto.tensor_view<128x128xf32>) {id = 27, split = 0}
+      pto.tpush_to_aiv(%pv_push_3 : !pto.tensor_view<128x128xf32>) {id = 27, split = 1}
     }
     return
   }

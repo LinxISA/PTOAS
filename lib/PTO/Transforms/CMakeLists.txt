@@ -39,6 +39,7 @@ add_mlir_dialect_library(PTOTransforms
   InsertSync/RemoveRedundantSync.cpp
   InsertSync/SyncEventIdAllocation.cpp
   InsertSync/SyncCodegen.cpp
+  PTOEnableMultiBuffer.cpp
   LoweringSyncToPipe.cpp
   PTOVerifyTFreePass.cpp
 

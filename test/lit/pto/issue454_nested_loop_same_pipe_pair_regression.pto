@@ -1,18 +1,18 @@
 // RUN: ptoas --pto-arch=a3 --enable-insert-sync %s | FileCheck %s
 //
 // Regression guard for nested loops sharing the same pipe pair (Issue #454 risk point):
-// - Outer loop-carried and inner loop-carried syncs on PIPE_M -> PIPE_MTE1 must coexist.
+// - Outer loop-carried and inner loop-carried syncs on PIPE_FIX -> PIPE_MTE1 must coexist.
 // - Inner-loop and outer-loop event chains must both keep their set/wait handshake.
 //
 // CHECK-LABEL: __global__ AICORE void nested_loop_same_pipe_pair()
 // CHECK: for (size_t
-// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[OUT:[0-9]+]]);
+// CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[OUT:[0-9]+]]);
 // CHECK: for (size_t
-// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[IN:[0-9]+]]);
-// CHECK: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[IN]]);
-// CHECK: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[OUT]]);
-// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[OUT]]);
-// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[IN]]);
+// CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[IN:[0-9]+]]);
+// CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[IN]]);
+// CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[OUT]]);
+// CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[OUT]]);
+// CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[IN]]);
 // CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
 
 module {

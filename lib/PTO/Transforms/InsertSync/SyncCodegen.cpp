@@ -141,7 +141,18 @@ static void createSetOrWaitFlagOp(IRRewriter &rewriter, Operation *op,
   }
   rewriter.create<pto::SetFlagOp>(op->getLoc(), srcPipe, dstPipe, eventId);
 }
- 
+
+static void createSetOrWaitFlagDynOp(IRRewriter &rewriter, Operation *op,
+                                     SyncOperation *sync, pto::PipeAttr srcPipe,
+                                     pto::PipeAttr dstPipe, Value eventIndex) {
+  if (sync->isSyncWaitType()) {
+    rewriter.create<pto::WaitFlagDynOp>(op->getLoc(), srcPipe, dstPipe,
+                                        eventIndex);
+    return;
+  }
+  rewriter.create<pto::SetFlagDynOp>(op->getLoc(), srcPipe, dstPipe, eventIndex);
+}
+
 // ==============================================================================
 // 2. SyncCodegen Implementation
 // ==============================================================================
@@ -267,12 +278,12 @@ void SyncCodegen::SyncInsert(IRRewriter &rewriter, Operation *op,
   if (sync->GetType() == SyncOperation::TYPE::PIPE_BARRIER) {
     CreateBarrierOp(rewriter, insertAnchorOp, sync, forceBefore);
   } else if (sync->isSyncSetType() || sync->isSyncWaitType()) {
-    if (sync->eventIds.size() == 1) {
-      CreateSetWaitOpForSingleBuffer(rewriter, insertAnchorOp, sync, forceBefore);
-    } else {
+    if (sync->eventIdNum > 1 && sync->eventIds.size() > 1) {
       CreateSetWaitOpForMultiBuffer(rewriter, insertAnchorOp, sync, forceBefore);
+    } else {
+      CreateSetWaitOpForSingleBuffer(rewriter, insertAnchorOp, sync, forceBefore);
     }
-  } 
+  }
 }
  
 // [核心修改] 加强版 CreateBarrierOp
@@ -346,46 +357,62 @@ void SyncCodegen::CreateSetWaitOpForMultiBuffer(IRRewriter &rewriter,
                                                 Operation *op,
                                                 SyncOperation *sync,
                                                 bool beforeInsert) {
-  Value bufferSelected = GetBufferSelected(rewriter, op, sync);
-  (void)bufferSelected;
- 
+  Value eventIdxDyn;
+  {
+    mlir::OpBuilder::InsertionGuard guard(rewriter);
+    eventIdxDyn = GetBufferSelected(rewriter, op, sync);
+  }
+  setSyncInsertionPoint(
+      rewriter, op, beforeInsert || op->hasTrait<OpTrait::IsTerminator>());
   auto srcPipe = getPipeAttr(rewriter, sync->GetActualSrcPipe());
   auto dstPipe = getPipeAttr(rewriter, sync->GetActualDstPipe());
-  auto eventId = getEventAttr(rewriter, sync->eventIds[0]);
-  setSyncInsertionPoint(rewriter, op,
-                        beforeInsert || op->hasTrait<OpTrait::IsTerminator>());
-  createSetOrWaitFlagOp(rewriter, op, sync, srcPipe, dstPipe, eventId);
+  if (!eventIdxDyn) {
+    int id0 = sync->eventIds.empty() ? 0 : sync->eventIds[0];
+    auto eventId = getEventAttr(rewriter, id0);
+    createSetOrWaitFlagOp(rewriter, op, sync, srcPipe, dstPipe, eventId);
+    return;
+  }
+  createSetOrWaitFlagDynOp(rewriter, op, sync, srcPipe, dstPipe, eventIdxDyn);
 }
- 
+
 Value SyncCodegen::GetBufferSelected(IRRewriter &rewriter, Operation *op,
                                      SyncOperation *sync) {
   if (SyncIndex2SelectBuffer.count(sync->GetSyncIndex())) {
     return SyncIndex2SelectBuffer[sync->GetSyncIndex()];
   }
- 
+
+  unsigned N = static_cast<unsigned>(sync->eventIdNum);
+  if (N <= 1 || sync->eventIds.size() < N)
+    return nullptr;
+
   auto parentLoop = op->getParentOfType<scf::ForOp>();
-  if (!parentLoop) return nullptr;
- 
+  if (!parentLoop)
+    return nullptr;
+
   Value counter;
-  if (loop2BufferCounter.count(parentLoop)) {
-    counter = loop2BufferCounter[parentLoop];
+  auto loopIt = loop2BufferCounter.find(parentLoop);
+  if (loopIt != loop2BufferCounter.end() && loopIt->second.second == N) {
+    counter = loopIt->second.first;
   } else {
     rewriter.setInsertionPointToStart(parentLoop.getBody());
     Value iv = parentLoop.getInductionVar();
-    Value c2 = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), 2);
-    counter = rewriter.create<arith::RemUIOp>(op->getLoc(), iv, c2);
-    loop2BufferCounter[parentLoop] = counter;
+    Value cN = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), N);
+    counter = rewriter.create<arith::RemUIOp>(op->getLoc(), iv, cN);
+    loop2BufferCounter[parentLoop] = {counter, N};
   }
- 
+
   rewriter.setInsertionPointAfter(counter.getDefiningOp());
-  Value id0 = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), sync->eventIds[0]);
-  Value id1 = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), sync->eventIds[1]);
-  
-  Value isZero = rewriter.create<arith::CmpIOp>(op->getLoc(), arith::CmpIPredicate::eq, counter, 
-      rewriter.create<arith::ConstantIndexOp>(op->getLoc(), 0));
-  
-  Value selected = rewriter.create<arith::SelectOp>(op->getLoc(), isZero, id0, id1);
-  
+  Value selected =
+      rewriter.create<arith::ConstantIndexOp>(op->getLoc(), sync->eventIds[0]);
+  for (unsigned i = 1; i < N; ++i) {
+    Value ci = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), i);
+    Value eq = rewriter.create<arith::CmpIOp>(op->getLoc(), arith::CmpIPredicate::eq,
+                                              counter, ci);
+    Value idv =
+        rewriter.create<arith::ConstantIndexOp>(op->getLoc(), sync->eventIds[i]);
+    selected = rewriter.create<arith::SelectOp>(op->getLoc(), eq, idv, selected);
+  }
+
   SyncIndex2SelectBuffer[sync->GetSyncIndex()] = selected;
   return selected;
 }

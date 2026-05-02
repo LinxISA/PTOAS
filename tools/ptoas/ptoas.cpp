@@ -183,6 +183,12 @@ static llvm::cl::opt<bool> enableInsertSync("enable-insert-sync",
                                             llvm::cl::desc("Enable automatic synchronization insertion pass"),
                                             llvm::cl::init(false));
 
+static llvm::cl::opt<bool> enableMultiBufferLowering(
+    "enable-multi-buffer-lowering",
+    llvm::cl::desc("After insert-sync, lower variadic pto.pointer_cast into "
+                    "single-address casts plus an iv mod N arith.select"),
+    llvm::cl::init(false));
+
 static llvm::cl::opt<bool> disableInferLayout(
     "disable-infer-layout",
     llvm::cl::desc("Disable PTO layout inference pass (static-only)"),
@@ -1123,7 +1129,10 @@ int main(int argc, char **argv) {
   // Conditionally add Sync pass based on flag.
   if (enableInsertSync)
     pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertSyncPass());
-  
+
+  if (enableMultiBufferLowering)
+    pm.addNestedPass<mlir::func::FuncOp>(
+        pto::createPTOEnableMultiBufferPass());
 
   // [Fix] ToolOutputFile Usage
   std::error_code ec;

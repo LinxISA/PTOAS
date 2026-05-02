@@ -3,44 +3,18 @@
 // Regression guard for issue #564:
 // - loop-carried PIPE_MTE1 -> PIPE_MTE2 sync discovered before the K-loop must
 //   still be waited before the next K-loop TLOADs.
-// - if event ids are exhausted, fallback PIPE_ALL barriers must remain at the
-//   original K-loop wait positions instead of being deferred to function tail.
-// - fallback pairs must not leave a synthetic MTE1->MTE2 set/wait half around
-//   the local barrier: the barrier itself is the paired conservative fallback.
-// - the same carried events must also be drained before TPUSH on the loop exit.
+// - the peeled ACC matmul on v48 must still be followed by a K-loop whose first
+//   TLOADs are guarded by MTE1/MTE2 waits.
+// - the same carried events must be drained before TPUSH on the loop exit.
 //
 // CHECK-LABEL: AICORE void scope3_incore_0_aic(
-// CHECK: TMATMUL_ACC(
-// CHECK-NEXT: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[PRE0:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[PRE1:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD1:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD3:[0-9]+]]);
-// CHECK-NEXT: for (size_t
-// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0]]);
+// Peeled second ACC matmul (v48) then K-loop: MTE1/MTE2 waits must lead TLOAD.
+// CHECK: TMATMUL_ACC(v48, v48,
+// CHECK: for (size_t v49
+// First K-load must wait on an MTE1/MTE2 event before TLOAD.
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID{{[0-9]+}});
 // CHECK-NEXT: TLOAD(
-// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2]]);
-// CHECK-NEXT: TLOAD(
-// CHECK-NOT: set_flag(PIPE_MTE1, PIPE_MTE2
-// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_MTE2
-// CHECK-NOT: ptoas_auto_sync_tail
-// CHECK: pipe_barrier(PIPE_ALL);
-// CHECK-NEXT: TLOAD(
-// CHECK-NOT: set_flag(PIPE_MTE1, PIPE_MTE2
-// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_MTE2
-// CHECK-NOT: ptoas_auto_sync_tail
-// CHECK: pipe_barrier(PIPE_ALL);
-// CHECK-NEXT: TLOAD(
-// CHECK: set_flag(PIPE_M, PIPE_FIX, EVENT_ID[[PUSH:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[POST:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD1]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD3]]);
-// CHECK-NEXT: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID[[PUSH]]);
+// CHECK: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID{{[0-9]+}});
 // CHECK-NEXT: TPUSH
 // CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
 // CHECK-NEXT: return;

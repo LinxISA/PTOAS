@@ -11,14 +11,18 @@
 
 #include "PTOPlanMemory.h"
 
+#include "PTO/Transforms/MultiBuffer.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "AllocToPointerCast.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -527,6 +531,19 @@ void MemLivenessAnalysis::build() {
   RecursionIR(&funcRegion, live);
   // the lifetime of the buffer.
   GenerateBufferLife();
+  collectMultiBufferAnnotations();
+}
+
+void MemLivenessAnalysis::collectMultiBufferAnnotations() {
+  func_.walk([&](memref::AllocOp alloc) {
+    auto attr = alloc->getAttrOfType<IntegerAttr>(kPtoMultiBufferAttrName);
+    if (!attr)
+      return;
+    uint64_t n = attr.getValue().getZExtValue();
+    if (n <= 1 || n > kPtoMultiBufferMaxNum)
+      return;
+    buffer2MultiNum[alloc.getResult()] = static_cast<uint32_t>(n);
+  });
 }
 
 bool MemLivenessAnalysis::isLocalMemPlan() const {
@@ -1648,15 +1665,20 @@ void MemPlan::ExpandMultiBufferStorageEntry() {
   // StorageEntry that needs to be expanded.
   size_t size = StorageEntryVec.size();
   for (size_t i = 0; i < size; i++) {
-    if (StorageEntryVec[i]->multiBufferNum > 1) {
+    if (StorageEntryVec[i]->multiBufferNum <= 1)
+      continue;
+    StorageEntry *primary = StorageEntryVec[i].get();
+    primary->relationOtherBuffers.clear();
+    uint32_t n = primary->multiBufferNum;
+    for (uint32_t k = 1; k < n; ++k) {
       std::unique_ptr<StorageEntry> entry = std::make_unique<StorageEntry>();
-      entry->bufInfo = StorageEntryVec[i]->bufInfo;
-      entry->bufferLifeVec = StorageEntryVec[i]->bufferLifeVec;
-      entry->alignedConstBits = StorageEntryVec[i]->alignedConstBits;
-      entry->inplaceBuffers = StorageEntryVec[i]->inplaceBuffers;
-      entry->multiBufferNum = StorageEntryVec[i]->multiBufferNum;
-      // Ping saves information related to Pong.
-      StorageEntryVec[i]->relationPongEntry = entry.get();
+      entry->bufInfo = primary->bufInfo;
+      entry->bufferLifeVec = primary->bufferLifeVec;
+      entry->alignedConstBits = primary->alignedConstBits;
+      entry->inplaceBuffers = primary->inplaceBuffers;
+      entry->multiBufferNum = primary->multiBufferNum;
+      StorageEntry *raw = entry.get();
+      primary->relationOtherBuffers.push_back(raw);
       StorageEntryVec.push_back(std::move(entry));
     }
   }
@@ -1936,16 +1958,21 @@ MemPlan::GetReorderRootStorageEntry(StorageEntry *rootStorageEntry) {
 void MemPlan::ReorderContinuousPingPongEntry(
     SmallVector<StorageEntry *> &storageEntryVec) {
   SmallVector<StorageEntry *> reorderedStorageEntryVec;
+  llvm::SmallPtrSet<StorageEntry *, 16> seen;
+  auto pushOnce = [&](StorageEntry *e) {
+    if (e && seen.insert(e).second)
+      reorderedStorageEntryVec.push_back(e);
+  };
   for (auto &storageEntry : storageEntryVec) {
-    auto it = std::find(reorderedStorageEntryVec.begin(),
-                        reorderedStorageEntryVec.end(), storageEntry);
-    if (it == reorderedStorageEntryVec.end()) {
-      reorderedStorageEntryVec.push_back(storageEntry);
-      if (storageEntry->multiBufferNum == kDoubleBufferCount &&
-          storageEntry->relationPongEntry) {
-        // Ping Pong continuous save.
-        reorderedStorageEntryVec.push_back(storageEntry->relationPongEntry);
-      }
+    if (seen.count(storageEntry))
+      continue;
+    pushOnce(storageEntry);
+    // Keep the N-buffer siblings adjacent to the primary so spec-level
+    // planning and rollback can reason about them as one contiguous region.
+    if (storageEntry->multiBufferNum > 1 &&
+        !storageEntry->relationOtherBuffers.empty()) {
+      for (StorageEntry *rel : storageEntry->relationOtherBuffers)
+        pushOnce(rel);
     }
   }
   reorderedStorageEntryVec.swap(storageEntryVec);
@@ -2122,9 +2149,13 @@ bool MemPlan::VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
   StorageEntry *multiRelationPongEntry =
       GetMultiRelationPongEntry(reuseBoundStorageEntry);
   if (multiRelationPongEntry) {
+    bool hasRelationSlots =
+        !e->relationOtherBuffers.empty() &&
+        llvm::all_of(e->relationOtherBuffers, [](StorageEntry *s) {
+          return s->bitsOffset != 0;
+        });
     if (e->multiBufferNum == kSingleBufferCount ||
-        (e->multiBufferNum == kDoubleBufferCount && e->relationPongEntry &&
-         (e->relationPongEntry->bitsOffset != 0))) {
+        (e->multiBufferNum > 1 && hasRelationSlots)) {
       auto parentLoop1 = GetBufferParentLoop(e->inplaceBuffers);
       auto parentLoop2 =
           GetBufferParentLoop(reuseBoundStorageEntry->inplaceBuffers);
@@ -2151,12 +2182,13 @@ bool MemPlan::VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
 
 StorageEntry *
 MemPlan::GetMultiRelationPongEntry(const StorageEntry *reuseBoundStorageEntry) {
-  if (reuseBoundStorageEntry->multiBufferNum == kDoubleBufferCount &&
-      reuseBoundStorageEntry->relationPongEntry &&
-      (reuseBoundStorageEntry->relationPongEntry->bitsOffset != 0)) {
-    // If the reuseBoundStorageEntry itself requires db, directly match and
-    // return relationPongEntry.
-    return reuseBoundStorageEntry->relationPongEntry;
+  if (reuseBoundStorageEntry->multiBufferNum > 1 &&
+      !reuseBoundStorageEntry->relationOtherBuffers.empty()) {
+    StorageEntry *last =
+        reuseBoundStorageEntry->relationOtherBuffers.back();
+    if (last->bitsOffset != 0) {
+      return last;
+    }
   }
   auto iter = pingEntry2RelationPongEntry.find(reuseBoundStorageEntry);
   if (iter != pingEntry2RelationPongEntry.end()) {
@@ -2169,33 +2201,38 @@ MemPlan::GetMultiRelationPongEntry(const StorageEntry *reuseBoundStorageEntry) {
 
 void MemPlan::SpecAllocRelationPongEntry(MemBoundList &outline, PlanRecHis &his,
                                          StorageEntry *e, uint64_t offset) {
-  for (MemBoundListConstIter start = outline.begin(); start != outline.end();
-       ++start) {
-    uint64_t size = 0;
-    // Find the MemBound corresponding to the Pong offset.
-    if ((*start)->offset != offset) {
-      continue;
-    }
-    for (MemBoundListConstIter end = start; end != outline.end(); ++end) {
-      std::shared_ptr<MemoryBound> last = *end;
-      size += last->extent;
-      if (size < e->alignedConstBits) {
+  SmallVector<StorageEntry *, 8> targets;
+  if (e->multiBufferNum > 1 && !e->relationOtherBuffers.empty()) {
+    for (StorageEntry *rel : e->relationOtherBuffers)
+      if (rel->bitsOffset != 0)
+        targets.push_back(rel);
+  } else {
+    auto iter = pingEntry2RelationPongEntry.find(e);
+    if (iter != pingEntry2RelationPongEntry.end())
+      targets.push_back(iter->second.get());
+  }
+
+  for (StorageEntry *pongStorageEntry : targets) {
+    uint64_t slotOffset = pongStorageEntry->bitsOffset;
+    bool placed = false;
+    for (MemBoundListConstIter start = outline.begin();
+         start != outline.end() && !placed; ++start) {
+      if ((*start)->offset != slotOffset)
         continue;
+      uint64_t size = 0;
+      for (MemBoundListConstIter end = start; end != outline.end(); ++end) {
+        std::shared_ptr<MemoryBound> last = *end;
+        size += last->extent;
+        if (size < pongStorageEntry->alignedConstBits)
+          continue;
+        UpdateOutline(outline, his, pongStorageEntry,
+                      OutlineSectionInfo(start, end, size, true), SPEC_LEVEL_1);
+        placed = true;
+        break;
       }
-      StorageEntry *pongStorageEntry = nullptr;
-      auto iter = pingEntry2RelationPongEntry.find(e);
-      if (iter != pingEntry2RelationPongEntry.end()) {
-        pongStorageEntry = iter->second.get();
-      }
-      if (e->multiBufferNum == kDoubleBufferCount && e->relationPongEntry) {
-        pongStorageEntry = e->relationPongEntry;
-      }
-      if (!pongStorageEntry)
-        llvm::report_fatal_error("pong storage entry not found");
-      UpdateOutline(outline, his, pongStorageEntry,
-                    OutlineSectionInfo(start, end, size, true), SPEC_LEVEL_1);
-      return;
     }
+    if (!placed)
+      llvm::report_fatal_error("pong storage entry outline not found");
   }
 }
 
@@ -2222,10 +2259,19 @@ void MemPlan::PlanRelationPongEntryAddress(uint64_t offset, StorageEntry *e) {
     entry->multiBufferNum = e->multiBufferNum;
     entry->bitsOffset = offset;
     pingEntry2RelationPongEntry[e] = std::move(entry);
-  } else if (e->multiBufferNum == kDoubleBufferCount) {
-    e->relationPongEntry->bitsOffset = offset;
-  } else {
-    llvm_unreachable("Does not support multi buffer num greater than 2 !");
+    return;
+  }
+  if (e->relationOtherBuffers.empty())
+    return;
+  pto::AddressSpace scope = e->bufInfo->bufferScope;
+  size_t alignUnit = GetPlannableBufferSpaceInfo(scope).first;
+
+  e->relationOtherBuffers[0]->bitsOffset = offset;
+  uint64_t cur = offset;
+  for (size_t i = 1; i < e->relationOtherBuffers.size(); ++i) {
+    cur = AlignUp(cur + e->relationOtherBuffers[i - 1]->alignedConstBits,
+                  alignUnit);
+    e->relationOtherBuffers[i]->bitsOffset = cur;
   }
 }
 
@@ -2663,8 +2709,8 @@ void MemPlan::RollBackForAllocFailInner(StatusWrapper &statusWrapper,
       pingEntry2RelationPongEntry.erase(iter);
     }
     if (r.isDirectlyRollback ||
-        (r.entry->multiBufferNum == kDoubleBufferCount &&
-         !r.entry->relationPongEntry)) {
+        (r.entry->multiBufferNum > 1 &&
+         r.entry->relationOtherBuffers.empty())) {
       continue;
     }
     si->childIdx = r.childIdx;

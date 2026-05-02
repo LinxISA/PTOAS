@@ -231,6 +231,25 @@ def PTOVerifyTFree : Pass<"pto-verify-tfree", "func::FuncOp"> {
   ];
 }
 
+def PTOEnableMultiBuffer : Pass<"pto-enable-multi-buffer", "func::FuncOp"> {
+  let summary = "Lower variadic pto.pointer_cast with multi-buffer addrs into "
+                "single-address casts plus a per-iteration arith.select";
+  let description = [{
+    Mirrors HIVM's `EnableMultiBuffer` lowering: takes a `pto.pointer_cast` with
+    N>1 address operands, hoists each address into its own single-address
+    `pto.pointer_cast` outside the parent `scf.for`, then replaces the original
+    multi-address cast with an N-way `arith.select` chain driven by `iv mod N`.
+    Runs after `pto-insert-sync` so the multi-address `pto.pointer_cast` stays
+    visible to dependency analysis.
+  }];
+  let constructor = "mlir::pto::createPTOEnableMultiBufferPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::scf::SCFDialect",
+    "mlir::arith::ArithDialect"
+  ];
+}
+
 def PTOViewToMemref : Pass<"pto-view-to-memref", "ModuleOp"> {
   let summary = "Lower PTO views to memref with Metadata Binding";
   let description = [{

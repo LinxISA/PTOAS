@@ -84,8 +84,8 @@ private:
   // 记录 Op -> Sync 的映射
   DenseMap<const Operation *, SyncPipeBuild> op2InsertSync;
  
-  // 记录 Loop -> Counter 的映射 (缓存)
-  DenseMap<Operation *, Value> loop2BufferCounter;
+  // 记录 Loop -> ( Counter value , modulo N ) 的映射 (缓存)
+  DenseMap<Operation *, std::pair<Value, unsigned>> loop2BufferCounter;
  
   // 记录 SyncIndex -> EventID Value 的映射 (缓存)
   DenseMap<unsigned, Value> SyncIndex2SelectBuffer;
@@ -97,4 +97,4 @@ private:
 } // namespace pto
 } // namespace mlir
  
-#endif // MLIR_DIALECT_PTO_TRANSFORMS_INJECTSYNC_SYNCCODEGEN_HN_H
+#endif // MLIR_DIALECT_PTO_TRANSFORMS_INJECTSYNC_SYNCCODEGEN_H

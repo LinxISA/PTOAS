@@ -61,6 +61,7 @@ std::unique_ptr<Pass>
 createPlanMemoryPass(const PlanMemoryOptions &planMemoryOption = {});
 
 std::unique_ptr<Pass> createPTORemoveRedundantBarrierPass();
+std::unique_ptr<Pass> createPTOEnableMultiBufferPass();
 std::unique_ptr<Pass> createPTOViewToMemrefPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();

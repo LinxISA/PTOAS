@@ -12,6 +12,7 @@
 #define PTO_PLAN_MEMORY_H
 
 #include "PTO/IR/PTO.h"
+#include "PTO/Transforms/MultiBuffer.h"
 #include "OptMemPlanForPipeline.h"
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -158,8 +159,9 @@ struct StorageEntry {
   /// Allocs that inplace buffer this entry.
   SmallVector<Value> inplaceBuffers;
 
-  /// multiBuffer relation StorageEntry.
-  StorageEntry *relationPongEntry{nullptr};
+  /// Extra physical slots for multi-buffering (N-1 entries; slot 0 is `this`).
+  /// Pointers reference sibling `StorageEntry` objects owned in `MemPlan`.
+  SmallVector<StorageEntry *, 8> relationOtherBuffers;
 
   /// The number of multibuffer optimization.
   /// note: default 1 which means single buffer and does not do multibuffer
@@ -317,6 +319,9 @@ public:
   bool isGlobalWorkSpaceMemPlan() const;
 
 private:
+  /// Read `pto.multi_buffer` on memref.alloc and fill `buffer2MultiNum`.
+  void collectMultiBufferAnnotations();
+
   void RecursionIR(Region *region, Liveness live);
 
   /// Get the buffer used within the loop and defined outside the loop.

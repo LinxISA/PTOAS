@@ -2456,15 +2456,25 @@ bool MemPlan::PipeConflictInSameLoop(const StorageEntry *e1,
   if (e1 == nullptr || e2 == nullptr) {
     return false;
   }
-  // Only treat the conflict as fatal when both entries hang off the same
-  // parent loop. Distinct loops (or top-level buffers) are deliberately
-  // permitted to share an offset under SPEC_LEVEL_2.
+  // SPEC_LEVEL_2 only blocks reuse when buffers (a) share a parent loop AND
+  // (b) actually pipe-conflict on the DMA path. Two earlier issues:
+  //   * The function name and `VerifyConflictStage2`'s comment promise an
+  //     "and pipe-conflict" check, but the body returned true unconditionally
+  //     for same-loop pairs - i.e., loop co-location alone aborted reuse.
+  //   * `GetBufferParentLoop` returns nullptr for top-level buffers; two
+  //     top-level buffers both yield nullptr and compare equal, so every
+  //     cross-buffer pair at function scope was getting marked as conflicting.
+  //     Reject the nullptr case so top-level pairs fall through to the
+  //     "different loops" branch and are allowed to share an offset.
   auto parentLoop1 = GetBufferParentLoop(e1->inplaceBuffers);
   auto parentLoop2 = GetBufferParentLoop(e2->inplaceBuffers);
+  if (!parentLoop1 || !parentLoop2) {
+    return false;
+  }
   if (parentLoop1 != parentLoop2) {
     return false;
   }
-  return true;
+  return PipeConflict(e1, e2, pipeDmaConflictMap);
 }
 
 bool MemPlan::PipeConflict(const StorageEntry *e1, const StorageEntry *e2,

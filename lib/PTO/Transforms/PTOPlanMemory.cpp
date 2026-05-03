@@ -1529,15 +1529,52 @@ void MemPlan::ValidateParameters(std::unique_ptr<StorageEntry> &e) const {
 }
 
 void MemPlan::UpdateBuffer2Offsets() {
+  // Slot ordering contract (relied on by EnableMultiBuffer / AllocToPointerCast):
+  //   buffer2Offsets[buf][i] is the byte offset of physical slot `i`,
+  //   selected at runtime by `iv mod N == i`. Slot 0 is the primary entry's
+  //   bitsOffset; slots 1..N-1 are `relationOtherBuffers[0..N-2]` in order.
+  // To preserve this we walk via primaries and explicitly emit slots, and
+  // skip non-primary slot entries that share `inplaceBuffers` with the
+  // primary (they would otherwise be double-pushed by a naive linear walk).
+  auto bitsToBytes = [](uint64_t bits) {
+    return (bits + kBitsToByte - 1) / kBitsToByte;
+  };
+
   for (auto &e : StorageEntryVec) {
+    if (e->isMultiBufferSlot)
+      continue; // handled via its primary below
+
+    if (e->multiBufferNum > 1) {
+      // Multi-buffer primary: emit slot 0 then slots 1..N-1 in declared order.
+      for (Value &buffer : e->inplaceBuffers) {
+        buffer2Offsets[buffer].push_back(bitsToBytes(e->bitsOffset));
+        for (StorageEntry *slot : e->relationOtherBuffers) {
+          if (!slot)
+            llvm::report_fatal_error(
+                "multi-buffer primary has null relation slot");
+          buffer2Offsets[buffer].push_back(bitsToBytes(slot->bitsOffset));
+        }
+      }
+      // Defensive invariant: each multi-buffered buffer must end up with
+      // exactly multiBufferNum offsets after this call (modulo the
+      // SPEC_LEVEL_1 single-reuse-db append below, which only fires for
+      // single-buffer entries).
+      for (Value &buffer : e->inplaceBuffers) {
+        if (buffer2Offsets[buffer].size() != e->multiBufferNum) {
+          llvm::report_fatal_error(
+              "multi-buffer offset count mismatch in UpdateBuffer2Offsets");
+        }
+      }
+      continue;
+    }
+
+    // Single-buffer entry: classic single-offset push.
     for (Value &buffer : e->inplaceBuffers) {
-      // MultiBuffer can cause multiple addrs.
-      buffer2Offsets[buffer].push_back(
-          (e->bitsOffset + kBitsToByte - 1) / kBitsToByte);
+      buffer2Offsets[buffer].push_back(bitsToBytes(e->bitsOffset));
     }
   }
   // In the MultiBuffer scenario, single reuse db will result in additional
-  // storageEntry.
+  // storageEntry. Only fires for single-buffer primaries that took a DB slot.
   UpdateMultiBufferReuseExtraOffset();
 }
 
@@ -1677,6 +1714,9 @@ void MemPlan::ExpandMultiBufferStorageEntry() {
       entry->alignedConstBits = primary->alignedConstBits;
       entry->inplaceBuffers = primary->inplaceBuffers;
       entry->multiBufferNum = primary->multiBufferNum;
+      // Mark this as a non-primary slot. UpdateBuffer2Offsets uses this flag
+      // to enforce primary-first slot ordering.
+      entry->isMultiBufferSlot = true;
       StorageEntry *raw = entry.get();
       primary->relationOtherBuffers.push_back(raw);
       StorageEntryVec.push_back(std::move(entry));

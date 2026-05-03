@@ -163,6 +163,14 @@ struct StorageEntry {
   /// Pointers reference sibling `StorageEntry` objects owned in `MemPlan`.
   SmallVector<StorageEntry *, 8> relationOtherBuffers;
 
+  /// True for entries created by `ExpandMultiBufferStorageEntry` as the
+  /// non-primary slots of a multi-buffer cluster. Such entries share their
+  /// `inplaceBuffers` with the primary; `UpdateBuffer2Offsets` walks the
+  /// cluster via the primary so it must skip slot entries to keep the
+  /// primary-first slot ordering contract that EnableMultiBuffer relies on
+  /// (offsets[i] == iv-mod-N selector index i).
+  bool isMultiBufferSlot{false};
+
   /// The number of multibuffer optimization.
   /// note: default 1 which means single buffer and does not do multibuffer
   /// optimization.

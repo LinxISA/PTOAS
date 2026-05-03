@@ -70,6 +70,23 @@ static LogicalResult lowerMultiBufferPointerCast(IRRewriter &rewriter,
   return success();
 }
 
+// Multi-buffer is a local-memory optimisation. GM pointer casts may also be
+// multi-address (e.g., a future workspace path) but the iv-mod-N selector is
+// not meaningful for GM, so we skip them here.
+static bool isLocalScopePointerCast(PointerCastOp op) {
+  auto memrefTy = dyn_cast<MemRefType>(op.getType());
+  if (!memrefTy)
+    return false;
+  auto attr = memrefTy.getMemorySpace();
+  if (!attr)
+    return false;
+  auto ptoAttr = dyn_cast<pto::AddressSpaceAttr>(attr);
+  if (!ptoAttr)
+    return false;
+  AddressSpace as = ptoAttr.getAddressSpace();
+  return as == AddressSpace::VEC || as == AddressSpace::MAT;
+}
+
 struct PTOEnableMultiBufferPass
     : public mlir::pto::impl::PTOEnableMultiBufferBase<
           PTOEnableMultiBufferPass> {
@@ -83,12 +100,42 @@ struct PTOEnableMultiBufferPass
 
     IRRewriter rewriter(&getContext());
     for (PointerCastOp op : work) {
+      // D2: scope guard. Multi-buffer slot selection only makes sense for
+      // local memory (VEC/MAT). Multi-address casts in GM (e.g., reserved
+      // workspaces) must keep their original semantics.
+      if (!isLocalScopePointerCast(op)) {
+        op.emitWarning() << "pto-enable-multi-buffer: skipping non-local "
+                            "pointer_cast (multi-buffer is VEC/MAT-only)";
+        continue;
+      }
+
       auto forOp = op->getParentOfType<scf::ForOp>();
       if (!forOp) {
         op.emitWarning()
             << "pto-enable-multi-buffer: expected enclosing scf.for; skipping";
         continue;
       }
+
+      // D1: loop-invariance guard. The pass hoists each addr operand and the
+      // resulting single-address pto.pointer_cast above `forOp`. SSA dominance
+      // requires every addr to be defined outside the loop. Today PlanMemory
+      // emits constant i64 offsets so this always holds, but a future
+      // dynamic-address path (e.g., workspace double-buffer) would silently
+      // violate dominance without this check.
+      bool addrsAreLoopInvariant = true;
+      for (Value addr : op.getAddrs()) {
+        if (!forOp.isDefinedOutsideOfLoop(addr)) {
+          addrsAreLoopInvariant = false;
+          break;
+        }
+      }
+      if (!addrsAreLoopInvariant) {
+        op.emitWarning() << "pto-enable-multi-buffer: addr operand is not "
+                            "loop-invariant; skipping (would break SSA on "
+                            "hoist)";
+        continue;
+      }
+
       if (failed(lowerMultiBufferPointerCast(rewriter, op, forOp))) {
         signalPassFailure();
         return;

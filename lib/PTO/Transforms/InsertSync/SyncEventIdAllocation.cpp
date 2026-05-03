@@ -152,19 +152,49 @@ void SyncEventIdAllocation::SetEventId(SyncOperation *sync) {
   size_t idSize = static_cast<size_t>(sync->eventIdNum);
   SmallVector<int> canAllocaEventId = GetAvailableEventId(
       sync, eventIdLifetimeAvailableStatus, eventIdIdleStatus, poolSize);
- 
+
   if (canAllocaEventId.empty()) {
     return;
-  } else if (canAllocaEventId.size() >= idSize) {
+  }
+  if (canAllocaEventId.size() >= idSize) {
     for (auto &id : canAllocaEventId) {
       SetEventPool(sync, id);
     }
-  } else if (reallocatedPipePair.count(ScopePair(sync)) &&
-             (canAllocaEventId.size() < idSize)) {
-    // Reallocate strategy: reduce usage to 1
-    assert(canAllocaEventId.size() > 0);
+    return;
+  }
+
+  // P1/B3: HIVM-style multi-buffer fallback. When the pool can't satisfy the
+  // requested N event ids, try a smaller N before giving up:
+  //   N odd  or N == 2: collapse straight to single-buffer (eventIdNum = 1).
+  //   N even and N > 2: try N = 2 first, then 1. The intermediate stop keeps
+  //   some pipelining benefit when the original 4/8/... exhausted the pool.
+  // Apply both fallback rungs uniformly (not only when reallocatedPipePair is
+  // set) - the previous code only collapsed in the rare reallocation path,
+  // which left non-rare exhaustions emitting sync->eventIds.empty() and
+  // silently dropping the sync.
+  auto applyFallbackToPair = [this](SyncOperation *sync, unsigned newN) {
+    sync->eventIdNum = newN;
+    auto &syncPair = syncOperations_[sync->GetSyncIndex()];
+    for (auto &op : syncPair) {
+      // Keep set/wait siblings consistent so SyncCodegen takes the same
+      // single- vs multi-buffer code path on both sides.
+      op->eventIdNum = newN;
+    }
+  };
+
+  unsigned fallbackN = (idSize > 2 && (idSize % 2 == 0)) ? 2u : 1u;
+  if (canAllocaEventId.size() >= fallbackN) {
+    applyFallbackToPair(sync, fallbackN);
+    for (size_t i = 0; i < fallbackN; ++i) {
+      SetEventPool(sync, canAllocaEventId[i]);
+    }
+    return;
+  }
+  // Last-resort fallback: if even fallbackN can't be satisfied, take whatever
+  // single id is available (pre-existing emergency behaviour).
+  if (!canAllocaEventId.empty()) {
+    applyFallbackToPair(sync, 1u);
     SetEventPool(sync, canAllocaEventId[0]);
-    sync->eventIdNum = 1;
   }
 }
  

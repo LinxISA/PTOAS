@@ -347,7 +347,40 @@ void InsertSyncAnalysis::InsertSyncOperation(
   PipelineType nowPipe = nowCompound->kPipeValue;
   PipelineType frontPipe = frontCompound->kPipeValue;
 
+  // Resolve the back-edge scf.for once: both branches below need it to drive
+  // multi-buffer-aware decisions (B1).
+  Operation *backEdgeForOp = nullptr;
+  if (forEndIndex.has_value() && forEndIndex.value() < syncIR_.size()) {
+    if (InstanceElement *loopElem = syncIR_[forEndIndex.value()].get())
+      backEdgeForOp = loopElem->elementOp;
+  }
+  int eventIdNum = forEndIndex.has_value()
+                       ? GetEventIdNum(depBaseMemInfosVec, backEdgeForOp)
+                       : 1;
+
+  // DMA pipes (MTE1/MTE2/MTE3) are simple in-order DMA command queues; the
+  // hardware itself serializes consecutive ops on the same DMA pipe regardless
+  // of iteration boundary. PIPE_M / PIPE_V keep the existing PIPE_BARRIER
+  // path because the matrix/vector units may have intra-pipe parallelism
+  // ("bar_m" / "bar_v" frontend expectation).
+  auto isDmaPipe = [](PipelineType p) {
+    return p == PipelineType::PIPE_MTE1 || p == PipelineType::PIPE_MTE2 ||
+           p == PipelineType::PIPE_MTE3 || p == PipelineType::PIPE_MTE4 ||
+           p == PipelineType::PIPE_MTE5;
+  };
+
   if (nowPipe == frontPipe) {
+    // Same-pipe back-edge dep: skip PIPE_BARRIER when:
+    //   1. The dep is multi-buffer eligible (different slots in different
+    //      iterations - the cross-iter dep is fundamentally false).
+    //   2. The pipe is a DMA pipe (HW DMA queue is strictly in-order, so
+    //      cross-iter same-pipe ordering is guaranteed by HW alone).
+    // For PIPE_M / PIPE_V keep the conservative PIPE_BARRIER to preserve
+    // bar_m / bar_v intra-pipe semantics expected by higher-level frontends.
+    if (forEndIndex.has_value() && (eventIdNum >= 2 || isDmaPipe(nowPipe))) {
+      // No barrier needed.
+      return;
+    }
     unsigned insertBarrierId = nowCompound->GetIndex();
     auto barrierOp = std::make_unique<SyncOperation>(
         SyncOperation::TYPE::PIPE_BARRIER, frontPipe, nowPipe, syncIndex_,
@@ -372,19 +405,7 @@ void InsertSyncAnalysis::InsertSyncOperation(
     setOp->SetDepSyncIRIndex(frontCompound->GetIndex());
     waitOp->SetDepSyncIRIndex(frontCompound->GetIndex());
 
-    // Back-edge dependencies may require multi-buffer event IDs. Resolve the
-    // owning scf.for so GetEventIdNum can verify that the dep buffer rotates
-    // on the right loop's induction variable (B1).
     if (forEndIndex.has_value()) {
-      Operation *backEdgeForOp = nullptr;
-      if (forEndIndex.value() < syncIR_.size()) {
-        InstanceElement *loopElem = syncIR_[forEndIndex.value()].get();
-        if (loopElem) {
-          // For LOOP_END elements, elementOp points at the originating scf.for.
-          backEdgeForOp = loopElem->elementOp;
-        }
-      }
-      int eventIdNum = GetEventIdNum(depBaseMemInfosVec, backEdgeForOp);
       setOp->eventIdNum = eventIdNum;
       waitOp->eventIdNum = eventIdNum;
     }

@@ -226,6 +226,36 @@ bool MemoryDependentAnalyzer::isBufferOverlap(const BaseMemInfo *a,
  
   uint64_t maxStart = std::max(aStart, bStart);
   uint64_t minEnd = std::min(aEnd, bEnd);
- 
+
   return maxStart < minEnd;
+}
+
+unsigned MemoryDependentAnalyzer::getMultiBufferSlotCount(
+    const BaseMemInfo *a, const BaseMemInfo *b) {
+  if (a == nullptr || b == nullptr)
+    return 0;
+  // Variable addresses cannot prove the disjoint-slot invariant.
+  if (a->hasVariableAddress || b->hasVariableAddress)
+    return 0;
+  if (a->baseAddresses.size() != b->baseAddresses.size())
+    return 0;
+  unsigned n = static_cast<unsigned>(a->baseAddresses.size());
+  if (n < 2)
+    return 0;
+  if (a->allocateSize == 0 || b->allocateSize == 0)
+    return 0;
+
+  // Same-index slots must overlap (real backward dep across iterations on the
+  // same physical buffer); different-index slots must NOT overlap (otherwise
+  // consecutive iterations would alias and multi-buffer is unsafe).
+  for (unsigned i = 0; i < n; ++i) {
+    if (!isBufferOverlap(a, b, static_cast<int>(i), static_cast<int>(i)))
+      return 0;
+    for (unsigned j = 0; j < n; ++j) {
+      if (i == j) continue;
+      if (isBufferOverlap(a, b, static_cast<int>(i), static_cast<int>(j)))
+        return 0;
+    }
+  }
+  return n;
 }

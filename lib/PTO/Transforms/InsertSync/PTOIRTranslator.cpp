@@ -272,12 +272,12 @@ LogicalResult PTOIRTranslator::UpdatePointerCastOpMemInfo(pto::PointerCastOp op)
   Value res = op.getResult();
   auto memRefType = dyn_cast<MemRefType>(res.getType());
   if (!memRefType) return failure();
- 
+
   if (op.getAddrs().empty()) {
     return op.emitError("PointerCast must have at least one address operand");
   }
-  Value rootSrc = op.getAddrs().front(); 
- 
+  Value rootSrc = op.getAddrs().front();
+
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
     int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
@@ -285,22 +285,41 @@ LogicalResult PTOIRTranslator::UpdatePointerCastOpMemInfo(pto::PointerCastOp op)
     for (auto dim : memRefType.getShape()) numElements *= dim;
     sizeInBytes = numElements * elemSize;
   }
- 
-  pto::AddressSpace space = pto::AddressSpace::GM; 
+
+  pto::AddressSpace space = pto::AddressSpace::GM;
   if (auto attr = memRefType.getMemorySpace()) {
     if (auto ptoAttr = dyn_cast<pto::AddressSpaceAttr>(attr)) {
       space = ptoAttr.getAddressSpace();
     }
   }
- 
+
+  // Multi-buffer pointer_cast carries N>=2 byte-offset operands (one per
+  // physical slot). Lift each compile-time constant addr into baseAddresses so
+  // dependency analysis can see N slots and InsertSyncAnalysis can deduce
+  // eventIdNum. Non-constant operands set hasVariableAddress so the analyzer
+  // falls back to conservative single-buffer treatment.
+  SmallVector<uint64_t> baseAddresses;
+  baseAddresses.reserve(op.getAddrs().size());
+  bool hasVariableAddress = false;
+  for (Value addr : op.getAddrs()) {
+    APInt cst;
+    if (matchPattern(addr, m_ConstantInt(&cst))) {
+      baseAddresses.push_back(cst.getZExtValue());
+    } else {
+      hasVariableAddress = true;
+      baseAddresses.push_back(0);
+    }
+  }
+
   auto newMemInfo = std::make_unique<BaseMemInfo>(
-      res,          
-      rootSrc,      
+      res,
+      rootSrc,
       space,
-      SmallVector<uint64_t>{0}, 
-      sizeInBytes
+      std::move(baseAddresses),
+      sizeInBytes,
+      hasVariableAddress
   );
- 
+
   buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
   return success();
 }
@@ -567,9 +586,12 @@ void PTOIRTranslator::UpdateAliasBufferInfo(Value result, Value source) {
   
   for (auto &parentInfo : buffer2MemInfoMap_[source]) {
     auto newInfo = parentInfo->clone(result);
- 
+
     if (!newInfo->baseAddresses.empty()) {
-        newInfo->baseAddresses[0] += deltaOffset;
+        // Multi-buffer-aware alias: a static delta from a view/subview applies
+        // to every physical slot, not only slot 0.
+        for (uint64_t &slotAddr : newInfo->baseAddresses)
+            slotAddr += deltaOffset;
     } else {
         newInfo->baseAddresses.push_back(deltaOffset);
     }

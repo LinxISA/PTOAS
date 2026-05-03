@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --enable-multi-buffer-lowering --mlir-print-ir-after=pto-insert-sync %s 2>&1 1>/dev/null | FileCheck %s
+
+// End-to-end regression for the multi-buffer event-id pipeline:
+//   PlanMemory  -> N-address pto.pointer_cast on a `pto.multi_buffer = 2`
+//                  alloc inside scf.for.
+//   InsertSync  -> sees N>=2 baseAddresses (PTOIRTranslator A2 fix), decides
+//                  eventIdNum=2 via the per-slot overlap helper (A3) and the
+//                  HIVM-style `GetEventIdNum` deduction (A1), then emits
+//                  `pto.{set,wait}_flag_dyn` driven by `iv mod N` `arith.select`.
+//
+// Without A1/A2/A3 this test regresses to a single static set_flag/wait_flag
+// pair on EVENT_ID0 with no remui/select.
+
+module {
+  func.func @double_buffer_dyn_event(
+      %arg0: memref<16x16x16xf16, #pto.address_space<gm>>,
+      %arg1: memref<16x16x16xf16, #pto.address_space<gm>>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    scf.for %i = %c0 to %c4 step %c1 {
+      %a = memref.alloc() {pto.multi_buffer = 2 : i32}
+          : memref<16x16x16xf16, #pto.address_space<vec>>
+      pto.tload ins(%arg0 : memref<16x16x16xf16, #pto.address_space<gm>>)
+               outs(%a : memref<16x16x16xf16, #pto.address_space<vec>>)
+      pto.tstore ins(%a : memref<16x16x16xf16, #pto.address_space<vec>>)
+                outs(%arg1 : memref<16x16x16xf16, #pto.address_space<gm>>)
+    }
+    return
+  }
+}
+
+// CHECK: IR Dump After PTOInsertSync
+// CHECK: func.func @double_buffer_dyn_event
+// Two distinct event ids must be reserved up front for the N=2 backward sync.
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID1>]
+// Inside the loop: iv mod 2 + arith.select chain selecting between event ids.
+// CHECK: scf.for %[[IV:.*]] =
+// CHECK: arith.remui %[[IV]], %{{.*}} : index
+// CHECK: arith.select
+// Dynamic-event-id wait/set ops drive the multi-buffer backward sync.
+// CHECK: pto.wait_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>, %{{.*}}]
+// CHECK: pto.set_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>, %{{.*}}]
+// Trailing waits at function exit drain both event ids.
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID1>]

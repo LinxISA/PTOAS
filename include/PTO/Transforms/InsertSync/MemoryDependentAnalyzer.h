@@ -23,21 +23,29 @@ class MemoryDependentAnalyzer {
 public:
   MemoryDependentAnalyzer() = default;
   ~MemoryDependentAnalyzer() = default;
- 
+
   // 检查两组内存信息之间是否存在依赖
   bool DepBetween(const SmallVector<const BaseMemInfo *> &a,
                   const SmallVector<const BaseMemInfo *> &b,
                   DepBaseMemInfoPairVec &depBaseMemInfosVec);
- 
+
   // 检查两个具体的 MemInfo 是否别名
   bool MemAlias(const BaseMemInfo *a, const BaseMemInfo *b);
- 
+
+  /// Multi-buffer eligibility for a dependent pair: HIVM requires both sides
+  /// to expose N>=2 byte-offset slots, sizes equal, **every same-index slot
+  /// overlaps** (the real cross-iteration dep) and **no different-index slot
+  /// overlaps** (so consecutive iterations land in disjoint physical buffers).
+  /// Returns N when eligible, otherwise 0.
+  unsigned getMultiBufferSlotCount(const BaseMemInfo *a,
+                                   const BaseMemInfo *b);
+
 private:
   bool isGMBufferOverlap(const BaseMemInfo *a, const BaseMemInfo *b);
-  
+
   bool isBufferAddressRangeOverlap(const BaseMemInfo *a, const BaseMemInfo *b);
-  
-  bool isBufferOverlap(const BaseMemInfo *a, const BaseMemInfo *b, 
+
+  bool isBufferOverlap(const BaseMemInfo *a, const BaseMemInfo *b,
                        int aIndex, int bIndex);
 };
  

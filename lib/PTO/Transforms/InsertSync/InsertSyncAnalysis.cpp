@@ -535,18 +535,66 @@ SmallVector<Value> InsertSyncAnalysis::GetMemInfoBuffers(
   return result;
 }
 
+// Walk up `value`'s parent op chain to the nearest enclosing scf.for, if any.
+// Used to satisfy HIVM's constraint that every multi-buffer dependency pair
+// share a common scf.for ancestor (so a single `iv mod N` selector is valid).
+static scf::ForOp getEnclosingScfFor(Value value) {
+  if (!value)
+    return nullptr;
+  Operation *op = value.getDefiningOp();
+  if (!op) {
+    // Block argument (e.g., loop iter_arg). Walk up from the parent block.
+    if (Block *block = value.getParentBlock())
+      op = block->getParentOp();
+  }
+  while (op) {
+    if (auto forOp = dyn_cast<scf::ForOp>(op))
+      return forOp;
+    op = op->getParentOp();
+  }
+  return nullptr;
+}
+
 int InsertSyncAnalysis::GetEventIdNum(
     const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
+  // HIVM `GetEventIdNum` semantics: only deduce N>1 when EVERY dependent pair
+  // is multi-buffer-eligible (same slot count, same-index slots overlap,
+  // different-index slots are disjoint), all pairs agree on N, and every
+  // involved root buffer hangs off the same scf.for. Any failure collapses to
+  // single-buffer (eventIdNum = 1).
+  if (depBaseMemInfosVec.empty())
+    return 1;
+
+  unsigned commonN = 0;
+  scf::ForOp commonLoop;
   for (const auto &pair : depBaseMemInfosVec) {
-    bool isLocalA =
-        pair.first && (pair.first->scope == pto::AddressSpace::MAT ||
-                       pair.first->scope == pto::AddressSpace::VEC);
-    bool isLocalB =
-        pair.second && (pair.second->scope == pto::AddressSpace::MAT ||
-                        pair.second->scope == pto::AddressSpace::VEC);
-    if (isLocalA || isLocalB) return 1;
+    unsigned n = memAnalyzer_.getMultiBufferSlotCount(pair.first, pair.second);
+    if (n < 2)
+      return 1;
+    if (commonN == 0)
+      commonN = n;
+    else if (commonN != n)
+      return 1;
+
+    auto checkLoop = [&](Value buffer) -> bool {
+      auto forOp = getEnclosingScfFor(buffer);
+      if (!forOp)
+        return false;
+      if (!commonLoop)
+        commonLoop = forOp;
+      return commonLoop == forOp;
+    };
+    // Use `baseBuffer` (the alloc-like SSA result inside the loop body)
+    // rather than `rootBuffer`, which for pto.pointer_cast is the i64 base
+    // address at function top and has no enclosing scf.for.
+    if (!checkLoop(pair.first->baseBuffer) ||
+        !checkLoop(pair.second->baseBuffer))
+      return 1;
   }
-  return 1;
+
+  if (commonN == 0 || commonN > MAX_MULTI_BUFFER_NUM)
+    return 1;
+  return static_cast<int>(commonN);
 }
 
 bool InsertSyncAnalysis::IsGMHazard(

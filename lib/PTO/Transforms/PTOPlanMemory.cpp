@@ -1401,6 +1401,15 @@ bool MemPlan::HasSemanticConflict(const StorageEntry *entry,
   return false;
 }
 
+void MemPlan::emitMultiBufferError(const llvm::Twine &msg) {
+  multiBufferDiagnosticEmitted_ = true;
+  if (func_) {
+    func_->emitError() << "[multi-buffer plan] " << msg;
+  } else {
+    llvm::errs() << "[multi-buffer plan] " << msg << "\n";
+  }
+}
+
 // Plan Memory algorithm.
 LogicalResult MemPlan::plan(bool emitErrors) {
   // Construct StorageEntry structure.
@@ -1412,6 +1421,12 @@ LogicalResult MemPlan::plan(bool emitErrors) {
   if (as == PlanStatus::PLAN_FAILED) {
     if (emitErrors)
       EmitPlanMemoryFailureInfo();
+    return failure();
+  }
+  if (multiBufferDiagnosticEmitted_) {
+    // A multi-buffer-specific invariant tripped (e.g., a planner intermediate
+    // wrote inconsistent slot data). Surface it as a failure so the
+    // PlanMemoryPass retry loop can attempt another seed instead of aborting.
     return failure();
   }
   if (RecordOverflowIfAny()) {
@@ -1546,23 +1561,34 @@ void MemPlan::UpdateBuffer2Offsets() {
 
     if (e->multiBufferNum > 1) {
       // Multi-buffer primary: emit slot 0 then slots 1..N-1 in declared order.
+      bool failedThisEntry = false;
       for (Value &buffer : e->inplaceBuffers) {
         buffer2Offsets[buffer].push_back(bitsToBytes(e->bitsOffset));
         for (StorageEntry *slot : e->relationOtherBuffers) {
-          if (!slot)
-            llvm::report_fatal_error(
+          if (!slot) {
+            // D4: surface as a recoverable error so the PlanMemoryPass retry
+            // loop can re-seed instead of aborting the compiler.
+            emitMultiBufferError(
                 "multi-buffer primary has null relation slot");
+            failedThisEntry = true;
+            break;
+          }
           buffer2Offsets[buffer].push_back(bitsToBytes(slot->bitsOffset));
         }
+        if (failedThisEntry)
+          break;
       }
+      if (failedThisEntry)
+        return; // plan() will see the diagnostic flag and return failure.
       // Defensive invariant: each multi-buffered buffer must end up with
       // exactly multiBufferNum offsets after this call (modulo the
       // SPEC_LEVEL_1 single-reuse-db append below, which only fires for
       // single-buffer entries).
       for (Value &buffer : e->inplaceBuffers) {
         if (buffer2Offsets[buffer].size() != e->multiBufferNum) {
-          llvm::report_fatal_error(
+          emitMultiBufferError(
               "multi-buffer offset count mismatch in UpdateBuffer2Offsets");
+          return;
         }
       }
       continue;
@@ -2186,35 +2212,46 @@ bool MemPlan::VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
     return true;
   }
 
-  StorageEntry *multiRelationPongEntry =
-      GetMultiRelationPongEntry(reuseBoundStorageEntry);
-  if (multiRelationPongEntry) {
-    bool hasRelationSlots =
-        !e->relationOtherBuffers.empty() &&
-        llvm::all_of(e->relationOtherBuffers, [](StorageEntry *s) {
-          return s->bitsOffset != 0;
+  // C2: HIVM allows the SPEC_LEVEL_1 reuse to anchor on ANY of the
+  // historical multi-buffer slots, not only the last one. Collect all
+  // candidate anchor offsets (in HIVM-doc order: slot1, slot2, ...,
+  // slotN-1, plus the legacy single-extra-pong slot when present), then
+  // pick the first that has no life-conflict with history.
+  SmallVector<uint64_t, 8> candidateAnchors =
+      CollectMultiRelationPongAnchors(reuseBoundStorageEntry);
+  if (candidateAnchors.empty()) {
+    return true;
+  }
+
+  bool hasRelationSlots =
+      !e->relationOtherBuffers.empty() &&
+      llvm::all_of(e->relationOtherBuffers, [](StorageEntry *s) {
+        return s->bitsOffset != 0;
+      });
+  if (!(e->multiBufferNum == kSingleBufferCount ||
+        (e->multiBufferNum > 1 && hasRelationSlots))) {
+    return true;
+  }
+  auto parentLoop1 = GetBufferParentLoop(e->inplaceBuffers);
+  auto parentLoop2 =
+      GetBufferParentLoop(reuseBoundStorageEntry->inplaceBuffers);
+  if (!(parentLoop1 != nullptr && parentLoop2 != nullptr &&
+        parentLoop1 == parentLoop2)) {
+    // Cannot be reused under the same for.
+    return true;
+  }
+
+  // There are two situations:
+  // 1. Single reuse DB.
+  // 2. DB reuse DB.
+  for (uint64_t anchor : candidateAnchors) {
+    bool conflict = std::any_of(
+        his.begin(), his.end(), [anchor, e, this](PlanRecord &r) {
+          return this->IsBufferLifeVecConflict(r, anchor, e);
         });
-    if (e->multiBufferNum == kSingleBufferCount ||
-        (e->multiBufferNum > 1 && hasRelationSlots)) {
-      auto parentLoop1 = GetBufferParentLoop(e->inplaceBuffers);
-      auto parentLoop2 =
-          GetBufferParentLoop(reuseBoundStorageEntry->inplaceBuffers);
-      if (!(parentLoop1 != nullptr && parentLoop2 != nullptr &&
-            parentLoop1 == parentLoop2)) {
-        // Cannot be reused under the same for.
-        return true;
-      }
-      // There are two situations:
-      // 1. Single reuse DB.
-      // 2. DB reuse DB.
-      pongOffset = multiRelationPongEntry->bitsOffset;
-      bool conflict = std::any_of(
-          his.begin(), his.end(), [pongOffset, e, this](PlanRecord &r) {
-            return this->IsBufferLifeVecConflict(r, pongOffset, e);
-          });
-      if (!conflict) {
-        return false;
-      }
+    if (!conflict) {
+      pongOffset = anchor;
+      return false;
     }
   }
   return true;
@@ -2237,6 +2274,28 @@ MemPlan::GetMultiRelationPongEntry(const StorageEntry *reuseBoundStorageEntry) {
     return iter->second.get();
   }
   return nullptr;
+}
+
+SmallVector<uint64_t, 8>
+MemPlan::CollectMultiRelationPongAnchors(
+    const StorageEntry *reuseBoundStorageEntry) {
+  // C2: HIVM enumerates *every* historical multi-buffer relation slot as a
+  // SPEC_LEVEL_1 reuse anchor candidate. PR-615 only returned the last slot,
+  // which silently dropped reuse opportunities for N>2.
+  SmallVector<uint64_t, 8> anchors;
+  if (reuseBoundStorageEntry->multiBufferNum > 1) {
+    for (StorageEntry *slot : reuseBoundStorageEntry->relationOtherBuffers) {
+      if (slot && slot->bitsOffset != 0)
+        anchors.push_back(slot->bitsOffset);
+    }
+  }
+  // Legacy single-extra-pong slot used when a single-buffer history entry
+  // had previously been reused with a DB.
+  auto iter = pingEntry2RelationPongEntry.find(reuseBoundStorageEntry);
+  if (iter != pingEntry2RelationPongEntry.end()) {
+    anchors.push_back(iter->second->bitsOffset);
+  }
+  return anchors;
 }
 
 void MemPlan::SpecAllocRelationPongEntry(MemBoundList &outline, PlanRecHis &his,
@@ -2271,8 +2330,16 @@ void MemPlan::SpecAllocRelationPongEntry(MemBoundList &outline, PlanRecHis &his,
         break;
       }
     }
-    if (!placed)
-      llvm::report_fatal_error("pong storage entry outline not found");
+    if (!placed) {
+      // D4: previously a fatal error; under heavy multi-buffer pressure this
+      // can fire when the pong slot's pre-computed offset has no matching
+      // memory bound left after rollback. Surface it as a recoverable
+      // diagnostic so PlanMemoryPass can retry with another seed.
+      emitMultiBufferError(
+          "pong storage entry outline not found "
+          "(SPEC_LEVEL_1 reuse-db slot placement failed)");
+      return;
+    }
   }
 }
 

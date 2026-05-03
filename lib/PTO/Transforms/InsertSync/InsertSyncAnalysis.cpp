@@ -372,9 +372,19 @@ void InsertSyncAnalysis::InsertSyncOperation(
     setOp->SetDepSyncIRIndex(frontCompound->GetIndex());
     waitOp->SetDepSyncIRIndex(frontCompound->GetIndex());
 
-    // Back-edge dependencies may require multi-buffer event IDs.
+    // Back-edge dependencies may require multi-buffer event IDs. Resolve the
+    // owning scf.for so GetEventIdNum can verify that the dep buffer rotates
+    // on the right loop's induction variable (B1).
     if (forEndIndex.has_value()) {
-      int eventIdNum = GetEventIdNum(depBaseMemInfosVec);
+      Operation *backEdgeForOp = nullptr;
+      if (forEndIndex.value() < syncIR_.size()) {
+        InstanceElement *loopElem = syncIR_[forEndIndex.value()].get();
+        if (loopElem) {
+          // For LOOP_END elements, elementOp points at the originating scf.for.
+          backEdgeForOp = loopElem->elementOp;
+        }
+      }
+      int eventIdNum = GetEventIdNum(depBaseMemInfosVec, backEdgeForOp);
       setOp->eventIdNum = eventIdNum;
       waitOp->eventIdNum = eventIdNum;
     }
@@ -556,17 +566,24 @@ static scf::ForOp getEnclosingScfFor(Value value) {
 }
 
 int InsertSyncAnalysis::GetEventIdNum(
-    const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
+    const DepBaseMemInfoPairVec &depBaseMemInfosVec,
+    Operation *backEdgeForLoop) {
   // HIVM `GetEventIdNum` semantics: only deduce N>1 when EVERY dependent pair
   // is multi-buffer-eligible (same slot count, same-index slots overlap,
   // different-index slots are disjoint), all pairs agree on N, and every
   // involved root buffer hangs off the same scf.for. Any failure collapses to
   // single-buffer (eventIdNum = 1).
+  //
+  // Forward dependencies (no enclosing back-edge) are unconditionally
+  // single-buffer: multi-event-id only buys parallelism by breaking
+  // loop-carried sync, so it's meaningless without a back-edge.
   if (depBaseMemInfosVec.empty())
+    return 1;
+  auto backEdgeFor = dyn_cast_or_null<scf::ForOp>(backEdgeForLoop);
+  if (!backEdgeFor)
     return 1;
 
   unsigned commonN = 0;
-  scf::ForOp commonLoop;
   for (const auto &pair : depBaseMemInfosVec) {
     unsigned n = memAnalyzer_.getMultiBufferSlotCount(pair.first, pair.second);
     if (n < 2)
@@ -576,13 +593,15 @@ int InsertSyncAnalysis::GetEventIdNum(
     else if (commonN != n)
       return 1;
 
+    // B1: every involved buffer's enclosing scf.for must match the back-edge
+    // loop. A buffer that lives in an *inner* loop nested inside the back-edge
+    // loop would rotate slots on the wrong iv (inner.iv mod N), giving the
+    // wrong physical slot for a backward dep that crosses the outer
+    // back-edge. A buffer in an *outer* loop never rotates with the back-edge
+    // we care about. Either case must collapse to single-buffer.
     auto checkLoop = [&](Value buffer) -> bool {
       auto forOp = getEnclosingScfFor(buffer);
-      if (!forOp)
-        return false;
-      if (!commonLoop)
-        commonLoop = forOp;
-      return commonLoop == forOp;
+      return forOp && forOp.getOperation() == backEdgeFor.getOperation();
     };
     // Use `baseBuffer` (the alloc-like SSA result inside the loop body)
     // rather than `rootBuffer`, which for pto.pointer_cast is the i64 base

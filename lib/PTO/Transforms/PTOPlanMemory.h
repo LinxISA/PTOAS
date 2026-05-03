@@ -681,6 +681,15 @@ private:
                             const OutlineSectionInfo &outlineInfo,
                             uint64_t &pongOffset);
 
+  /// Enumerate every candidate reuse anchor offset on a historical
+  /// multi-buffer entry: each non-zero `relationOtherBuffers` slot, plus the
+  /// legacy `pingEntry2RelationPongEntry` single-extra slot if present.
+  /// VerifyConflictStage1 walks the resulting list in order to find the first
+  /// life-conflict-free anchor (HIVM-style; PR-615 only used the last slot
+  /// and missed reuse opportunities for N>2).
+  SmallVector<uint64_t, 8>
+  CollectMultiRelationPongAnchors(const StorageEntry *reuseBoundStorageEntry);
+
   /// Check if e1 and e2 have any pipe conflict, regardless of loop scope.
   /// Cached in `conflictMap` to avoid recomputing the cartesian product of
   /// inplace buffers on each query.
@@ -911,6 +920,18 @@ private:
   /// The device's SCALING storage size
   int scalingSpaceSize{0};
 
+  /// Set by `emitMultiBufferError` whenever a multi-buffer-specific invariant
+  /// fails (e.g., slot-order mismatch in UpdateBuffer2Offsets or pong outline
+  /// not found). `plan()` checks this and converts it into a `failure()`
+  /// instead of aborting via `report_fatal_error`, so the PlanMemoryPass retry
+  /// loop can recover with a fresh seed.
+  bool multiBufferDiagnosticEmitted_{false};
+
+  /// Emit a multi-buffer-specific error against `func_` and arm the failure
+  /// flag. Use in code paths that previously called `llvm::report_fatal_error`
+  /// for invariants that may genuinely happen under heavy multi-buffer memory
+  /// pressure. When `func_` is unavailable, fall back to llvm errs.
+  void emitMultiBufferError(const llvm::Twine &msg);
 };
 
 } // namespace pto

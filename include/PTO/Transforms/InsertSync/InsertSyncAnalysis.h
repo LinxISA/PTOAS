@@ -159,8 +159,13 @@ private:
                             const CompoundInstanceElement *frontCompound,
                             bool isBackwardDep) const;
  
-  /// 获取依赖对涉及的 Event ID 数量 (用于 Multi-Buffer 分析)
-  int GetEventIdNum(const DepBaseMemInfoPairVec &depBaseMemInfosVec);
+  /// Multi-buffer event-id deduction (HIVM-style). `backEdgeForLoop`, when
+  /// non-null, is the scf.for whose back-edge this dependency crosses; the
+  /// deduction additionally requires every involved buffer to live directly
+  /// under that loop. If null (forward dep), the deduction is a no-op and
+  /// returns 1.
+  int GetEventIdNum(const DepBaseMemInfoPairVec &depBaseMemInfosVec,
+                    Operation *backEdgeForLoop = nullptr);
  
   /// 辅助函数：获取所有涉及的 Buffer (用于 LCA 计算，虽然现在简化了，保留接口)
   SmallVector<Value> GetMemInfoBuffers(const DepBaseMemInfoPairVec &depBaseMemInfosVec);

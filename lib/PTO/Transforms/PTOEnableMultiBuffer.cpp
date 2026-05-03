@@ -26,9 +26,32 @@ using namespace mlir::pto;
 
 namespace {
 
-static LogicalResult lowerMultiBufferPointerCast(IRRewriter &rewriter,
-                                                 PointerCastOp op,
-                                                 scf::ForOp forOp) {
+// (loop, factor N) -> shared `iv mod N` counter inside that loop.
+// B5: when several multi-buffer pointer_casts share the same enclosing scf.for
+// and the same N, they should all read from the same counter rather than each
+// inserting its own arith.remui + N constant ops. This mirrors
+// SyncCodegen::loop2BufferCounter so the two passes emit consistent counters.
+using LoopFactorKey = std::pair<scf::ForOp, unsigned>;
+
+static Value getOrCreateLoopCounter(
+    IRRewriter &rewriter,
+    llvm::DenseMap<LoopFactorKey, Value> &cache,
+    scf::ForOp forOp, unsigned n, Location loc) {
+  auto key = std::make_pair(forOp, n);
+  auto it = cache.find(key);
+  if (it != cache.end())
+    return it->second;
+  rewriter.setInsertionPointToStart(forOp.getBody());
+  Value iv = forOp.getInductionVar();
+  Value cN = rewriter.create<arith::ConstantIndexOp>(loc, n);
+  Value rem = rewriter.create<arith::RemUIOp>(loc, iv, cN);
+  cache[key] = rem;
+  return rem;
+}
+
+static LogicalResult lowerMultiBufferPointerCast(
+    IRRewriter &rewriter, PointerCastOp op, scf::ForOp forOp,
+    llvm::DenseMap<LoopFactorKey, Value> &counterCache) {
   ValueRange addrs = op.getAddrs();
   unsigned n = static_cast<unsigned>(addrs.size());
   assert(n >= 2);
@@ -52,10 +75,12 @@ static LogicalResult lowerMultiBufferPointerCast(IRRewriter &rewriter,
     slotBufs.push_back(slot.getResult());
   }
 
-  rewriter.setInsertionPointToStart(forOp.getBody());
-  Value iv = forOp.getInductionVar();
-  Value cN = rewriter.create<arith::ConstantIndexOp>(loc, n);
-  Value rem = rewriter.create<arith::RemUIOp>(loc, iv, cN);
+  Value rem = getOrCreateLoopCounter(rewriter, counterCache, forOp, n, loc);
+  // Insertion point for the select chain: right after the cached counter.
+  // (For a freshly created counter this lands at the same position as before;
+  // for cached ones it lands wherever that earlier remui sits, which is still
+  // at loop-body start so the chain dominates all uses inside the loop.)
+  rewriter.setInsertionPointAfter(rem.getDefiningOp());
 
   Value selected = slotBufs[0];
   for (unsigned i = 1; i < n; ++i) {
@@ -99,6 +124,9 @@ struct PTOEnableMultiBufferPass
     });
 
     IRRewriter rewriter(&getContext());
+    // Per-(loop, factor) counter cache so multiple multi-buffer pointer_casts
+    // sharing a loop and N reuse one `iv mod N` (B5).
+    llvm::DenseMap<LoopFactorKey, Value> counterCache;
     for (PointerCastOp op : work) {
       // D2: scope guard. Multi-buffer slot selection only makes sense for
       // local memory (VEC/MAT). Multi-address casts in GM (e.g., reserved
@@ -136,7 +164,8 @@ struct PTOEnableMultiBufferPass
         continue;
       }
 
-      if (failed(lowerMultiBufferPointerCast(rewriter, op, forOp))) {
+      if (failed(lowerMultiBufferPointerCast(rewriter, op, forOp,
+                                             counterCache))) {
         signalPassFailure();
         return;
       }

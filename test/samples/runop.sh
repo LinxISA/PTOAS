@@ -1034,6 +1034,68 @@ PY
       fi
     fi
 
+    if [[ "$base" == "comm_p2p" || "$base" == "comm_p2p_binding_variants" ]]; then
+      for pat in \
+        "pto::comm::TPUT(" \
+        "pto::comm::TGET(" \
+        "PTOAS__COMM_TNOTIFY<" \
+        "PTOAS__COMM_TWAIT<" \
+        "PTOAS__COMM_TTEST<"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+      if ! grep -Fq "pto::AtomicType::AtomicAdd" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing atomic-add TPUT lowering"
+        overall=1
+        continue
+      fi
+      if [[ "$base" == "comm_p2p_binding_variants" ]]; then
+        for pat in \
+          "pto::comm::NotifyOp::Set" \
+          "pto::comm::NotifyOp::AtomicAdd" \
+          "pto::comm::WaitCmp::GE" \
+          "pto::comm::WaitCmp::LE" \
+          "pto::comm::WaitCmp::EQ" \
+          "pto::comm::WaitCmp::NE"; do
+          if ! grep -Fq "$pat" "$cpp"; then
+            echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+            overall=1
+            continue 2
+          fi
+        done
+      fi
+    fi
+
+    if [[ "$base" == "comm_collective" || "$base" == "comm_collective_binding_variants" ]]; then
+      for pat in \
+        "pto::comm::ParallelGroup" \
+        "pto::comm::TBROADCAST(" \
+        "pto::comm::TGATHER(" \
+        "pto::comm::TSCATTER(" \
+        "pto::comm::TREDUCE("; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+      if ! grep -Fq "pto::comm::ReduceOp::Sum" "$cpp" || ! grep -Fq "pto::comm::ReduceOp::Max" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing reduce-op enum lowering"
+        overall=1
+        continue
+      fi
+      if [[ "$base" == "comm_collective_binding_variants" ]]; then
+        if ! grep -Fq "pto::comm::ReduceOp::Min" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing reduce-op Min lowering"
+          overall=1
+          continue
+        fi
+      fi
+    fi
+
 	    # Regression guard for Issue #190:
 	    # Infer layout for a 2D column-vector view (16 x 1) should prefer DN.
 	    if [[ "$base" == "tensor_view_infer_layout_dn" ]]; then

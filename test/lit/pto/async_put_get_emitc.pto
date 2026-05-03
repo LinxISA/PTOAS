@@ -5,11 +5,11 @@ module {
                            %src: memref<128xf32, #pto.address_space<gm>>,
                            %workspace: memref<1024xi8, #pto.address_space<gm>>) {
     %scratch = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %session = pto.build_async_session(%scratch, %workspace : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>, memref<1024xi8, #pto.address_space<gm>>) -> !pto.async_session
-    %put = pto.tput_async(%dst, %src, %session : memref<128xf32, #pto.address_space<gm>>, memref<128xf32, #pto.address_space<gm>>, !pto.async_session) -> !pto.async_event
-    %get = pto.tget_async(%src, %dst, %session : memref<128xf32, #pto.address_space<gm>>, memref<128xf32, #pto.address_space<gm>>, !pto.async_session) -> !pto.async_event
-    %put_done = pto.wait_async_event(%put, %session : !pto.async_event, !pto.async_session) -> i1
-    %get_done = pto.test_async_event(%get, %session : !pto.async_event, !pto.async_session) -> i1
+    %session = pto.comm.build_async_session(%scratch, %workspace : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>, memref<1024xi8, #pto.address_space<gm>>) -> !pto.async_session
+    %put = pto.comm.tput_async(%dst, %src, %session : memref<128xf32, #pto.address_space<gm>>, memref<128xf32, #pto.address_space<gm>>, !pto.async_session) -> !pto.async_event
+    %get = pto.comm.tget_async(%src, %dst, %session : memref<128xf32, #pto.address_space<gm>>, memref<128xf32, #pto.address_space<gm>>, !pto.async_session) -> !pto.async_event
+    %put_done = pto.comm.wait_async_event(%put, %session : !pto.async_event, !pto.async_session) -> i1
+    %get_done = pto.comm.test_async_event(%get, %session : !pto.async_event, !pto.async_session) -> i1
     return
   }
 }

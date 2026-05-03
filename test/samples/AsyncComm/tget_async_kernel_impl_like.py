@@ -24,10 +24,8 @@ from mlir.dialects import arith, func, pto, scf
 def _build_async_session(scratch, workspace, i32, ctx, sync_id=0):
     if hasattr(pto, "BuildAsyncSessionOp"):
         return pto.BuildAsyncSessionOp(scratch, workspace, sync_id=sync_id).result
-    if hasattr(pto, "build_async_session"):
-        return pto.build_async_session(scratch, workspace, sync_id=sync_id)
     op = Operation.create(
-        "pto.build_async_session",
+        "pto.comm.build_async_session",
         operands=[scratch, workspace],
         attributes={"sync_id": IntegerAttr.get(i32, sync_id)},
         results=[pto.AsyncSessionType.get(ctx)],
@@ -38,10 +36,8 @@ def _build_async_session(scratch, workspace, i32, ctx, sync_id=0):
 def _tget_async(dst, src, session, ctx):
     if hasattr(pto, "TGetAsyncOp"):
         return pto.TGetAsyncOp(dst, src, session).result
-    if hasattr(pto, "tget_async"):
-        return pto.tget_async(dst, src, session)
     op = Operation.create(
-        "pto.tget_async",
+        "pto.comm.tget_async",
         operands=[dst, src, session],
         results=[pto.AsyncEventType.get(ctx)],
     )
@@ -51,10 +47,8 @@ def _tget_async(dst, src, session, ctx):
 def _wait_async_event(event, session):
     if hasattr(pto, "WaitAsyncEventOp"):
         return pto.WaitAsyncEventOp(event, session).result
-    if hasattr(pto, "wait_async_event"):
-        return pto.wait_async_event(event, session)
     op = Operation.create(
-        "pto.wait_async_event",
+        "pto.comm.wait_async_event",
         operands=[event, session],
         results=[IntegerType.get_signless(1)],
     )

@@ -14,7 +14,7 @@ def _build_async_session(scratch, workspace, i32, ctx, sync_id=0):
     if hasattr(pto, "BuildAsyncSessionOp"):
         return pto.BuildAsyncSessionOp(scratch, workspace, sync_id=sync_id).result
     op = Operation.create(
-        "pto.build_async_session",
+        "pto.comm.build_async_session",
         operands=[scratch, workspace],
         attributes={"sync_id": IntegerAttr.get(i32, sync_id)},
         results=[pto.AsyncSessionType.get(ctx)],
@@ -24,8 +24,8 @@ def _build_async_session(scratch, workspace, i32, ctx, sync_id=0):
 
 def _async_transfer(op_name, dst, src, session, ctx):
     op_class_name = {
-        "pto.tput_async": "TPutAsyncOp",
-        "pto.tget_async": "TGetAsyncOp",
+        "pto.comm.tput_async": "TPutAsyncOp",
+        "pto.comm.tget_async": "TGetAsyncOp",
     }[op_name]
     if hasattr(pto, op_class_name):
         return getattr(pto, op_class_name)(dst, src, session).result
@@ -40,7 +40,7 @@ def _async_transfer(op_name, dst, src, session, ctx):
 def _wait_async_event(event, session):
     if hasattr(pto, "WaitAsyncEventOp"):
         return pto.WaitAsyncEventOp(event, session)
-    Operation.create("pto.wait_async_event", operands=[event, session], results=[])
+    Operation.create("pto.comm.wait_async_event", operands=[event, session], results=[])
 
 def build():
     with Context() as ctx:
@@ -88,14 +88,14 @@ def build():
                 with InsertionPoint(guarded.else_block):
                     scratch = pto.AllocTileOp(scratch_ty).result
                     session = _build_async_session(scratch, workspace_ptr, i32, ctx, sync_id=0)
-                    put_event = _async_transfer("pto.tput_async", dst, src, session, ctx)
-                    get_event = _async_transfer("pto.tget_async", src, dst, session, ctx)
+                    put_event = _async_transfer("pto.comm.tput_async", dst, src, session, ctx)
+                    get_event = _async_transfer("pto.comm.tget_async", src, dst, session, ctx)
                     _wait_async_event(put_event, session)
                     if hasattr(pto, "TestAsyncEventOp"):
                         pto.TestAsyncEventOp(get_event, session)
                     else:
                         Operation.create(
-                            "pto.test_async_event",
+                            "pto.comm.test_async_event",
                             operands=[get_event, session],
                             results=[IntegerType.get_signless(1, ctx)],
                         )

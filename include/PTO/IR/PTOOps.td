@@ -1564,7 +1564,7 @@ def ImportReservedBufferOp : PTO_Op<"import_reserved_buffer"> {
 // TPUSH/TPOP Pipe Communication Ops
 //===----------------------------------------------------------------------===//
 
-def BuildAsyncSessionOp : PTO_Op<"build_async_session", [
+def BuildAsyncSessionOp : PTO_Op<"comm.build_async_session", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Build an async DMA session handle for TPUT_ASYNC/TGET_ASYNC";
@@ -1588,7 +1588,7 @@ def BuildAsyncSessionOp : PTO_Op<"build_async_session", [
   }];
 }
 
-def TPutAsyncOp : PTO_Op<"tput_async", [
+def TPutAsyncOp : PTO_Op<"comm.tput_async", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Asynchronous remote write from local GM to remote GM";
@@ -1609,7 +1609,7 @@ def TPutAsyncOp : PTO_Op<"tput_async", [
   }];
 }
 
-def TGetAsyncOp : PTO_Op<"tget_async", [
+def TGetAsyncOp : PTO_Op<"comm.tget_async", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Asynchronous remote read from remote GM to local GM";
@@ -1630,7 +1630,7 @@ def TGetAsyncOp : PTO_Op<"tget_async", [
   }];
 }
 
-def WaitAsyncEventOp : PTO_Op<"wait_async_event", [
+def WaitAsyncEventOp : PTO_Op<"comm.wait_async_event", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Block until an async DMA event completes";
@@ -1649,7 +1649,7 @@ def WaitAsyncEventOp : PTO_Op<"wait_async_event", [
   }];
 }
 
-def TestAsyncEventOp : PTO_Op<"test_async_event", [
+def TestAsyncEventOp : PTO_Op<"comm.test_async_event", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Non-blocking completion test for an async DMA event";
@@ -1666,6 +1666,140 @@ def TestAsyncEventOp : PTO_Op<"test_async_event", [
         qualified(type($event)) `,` qualified(type($session)) `)`
     attr-dict `->` type($completed)
   }];
+}
+
+def TPutOp : PTO_Op<"comm.tput", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Synchronous remote write from local GM to remote GM";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      DefaultValuedAttr<PTO_AtomicTypeAttr, "::mlir::pto::AtomicType::AtomicNone">:$atomicType
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TGetOp : PTO_Op<"comm.tget", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Synchronous remote read from remote GM to local GM";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TNotifyOp : PTO_Op<"comm.tnotify", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Send a signal notification to remote GM";
+  let arguments = (ins
+      PTODpsType:$signal,
+      AnySignlessInteger:$value,
+      PTO_NotifyOpAttr:$notifyOp
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TWaitOp : PTO_Op<"comm.twait", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Block until signal(s) satisfy a comparison";
+  let arguments = (ins
+      PTODpsType:$signal,
+      AnySignlessInteger:$cmpValue,
+      PTO_WaitCmpAttr:$cmp
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TTestOp : PTO_Op<"comm.ttest", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Non-blocking signal comparison test";
+  let arguments = (ins
+      PTODpsType:$signal,
+      AnySignlessInteger:$cmpValue,
+      PTO_WaitCmpAttr:$cmp
+  );
+  let results = (outs I1:$result);
+  let hasVerifier = 1;
+}
+
+def TBroadcastOp : PTO_Op<"comm.tbroadcast", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Broadcast local GM data to all group members";
+  let arguments = (ins
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      Variadic<PTODpsType>:$group,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def CommTGatherOp : PTO_Op<"comm.comm_tgather", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Gather remote GM data from a communication group";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      Variadic<PTODpsType>:$group,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def CommTScatterOp : PTO_Op<"comm.comm_tscatter", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Scatter local GM data to a communication group";
+  let arguments = (ins
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      Variadic<PTODpsType>:$group,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TReduceOp : PTO_Op<"comm.treduce", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Reduce remote GM data from a communication group";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$acc,
+      PTODpsType:$recvPing,
+      Optional<PTODpsType>:$recvPong,
+      Variadic<PTODpsType>:$group,
+      PTO_ReduceOpAttr:$reduceOp,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
 }
 
 def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [

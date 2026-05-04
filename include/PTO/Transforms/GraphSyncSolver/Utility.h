@@ -172,6 +172,7 @@ struct ConflictPair {
   bool isBarrierAll{false}; // fallback marker: emit pto.barrier <PIPE_ALL>
 
   EventIdNode *eventIdNode{nullptr};
+  llvm::SmallVector<int64_t> eventIds;
 
   ConflictPair(RWOperation *op1, RWOperation *op2, OperationBase *setOp,
                OperationBase *waitOp, Occurrence *setOcc, Occurrence *waitOcc,

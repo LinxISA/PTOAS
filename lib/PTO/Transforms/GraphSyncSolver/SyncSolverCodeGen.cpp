@@ -27,6 +27,12 @@ CodeGenerator::CodeGenerator(std::unique_ptr<Solver> solver)
     : options(solver->options) {
   funcOp = solver->funcOp;
   funcIr = std::move(solver->funcIr);
+  for (auto &cp : solver->chosenConflictedPairs) {
+    if (!cp || !cp->eventIdNode)
+      continue;
+    cp->eventIds = cp->eventIdNode->getEventIds();
+    cp->eventIdNode = nullptr;
+  }
   chosenConflictedPairs = std::move(solver->chosenConflictedPairs);
 }
 
@@ -130,9 +136,10 @@ void CodeGenerator::emitOne(IRRewriter &rewriter, ConflictPair *cp) {
     return;
   }
   // Normal set/wait pair. Single event id in the minimal port.
-  assert(cp->eventIdNode);
-  const auto &eids = cp->eventIdNode->getEventIds();
+  const auto &eids = cp->eventIds;
   assert(!eids.empty());
+  if (eids.empty())
+    return;
   int64_t eid = eids[0];
   PIPE setPipe = cp->setCorePipeInfo.pipe;
   PIPE waitPipe = cp->waitCorePipeInfo.pipe;

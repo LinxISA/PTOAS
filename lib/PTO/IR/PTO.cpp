@@ -373,6 +373,7 @@ static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
   case VerifierTargetArch::A5:
     return verifyA5();
   }
+  return failure();
 }
 
 static ParseResult parseSyncEventOpCommon(OpAsmParser &parser,
@@ -2993,6 +2994,7 @@ static LogicalResult verifyVecTileCommon(Operation *op, Type ty, StringRef name)
   case VerifierTargetArch::A5:
     return verifyVecTileCommonA5(op, ty, name);
   }
+  return failure();
 }
 
 static LogicalResult verifyVecTileUnaryOp(Operation *op, Type srcTy, Type dstTy,
@@ -3032,6 +3034,7 @@ static LogicalResult verifyAccTileCommon(Operation *op, Type ty, StringRef name)
   case VerifierTargetArch::A5:
     return verifyAccTileCommonA5(op, ty, name);
   }
+  return failure();
 }
 
 static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
@@ -3104,6 +3107,7 @@ static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy
   case VerifierTargetArch::A5:
     return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy);
   }
+  return failure();
 }
 
 static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
@@ -3157,6 +3161,7 @@ static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsT
   case VerifierTargetArch::A5:
     return verifyGemvTileOperandsA5(op, lhsTy, rhsTy, dstTy);
   }
+  return failure();
 }
 
 static LogicalResult verifyMatBiasTileA2A3(Operation *op, Type biasTy, Type dstTy,
@@ -3197,6 +3202,7 @@ static LogicalResult verifyMatBiasTile(Operation *op, Type biasTy, Type dstTy,
   case VerifierTargetArch::A5:
     return verifyMatBiasTileA5(op, biasTy, dstTy, requireFloatBias);
   }
+  return failure();
 }
 
 static LogicalResult verifyMatmulTypeTriple(Operation *op, Type lhsElemTy,
@@ -8336,6 +8342,7 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
   case VerifierTargetArch::A5:
     return verifyA5();
   }
+  return failure();
 }
 
 

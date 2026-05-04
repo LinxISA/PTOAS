@@ -2270,9 +2270,9 @@ static SmallVector<int64_t, 4> getMatmulLogicalShapeVec(Type ty) {
   if (!isa<pto::TileBufType>(ty) || shape.size() != valid.size())
     return shape;
 
-  for (auto [dim, validDim] : llvm::zip(shape, valid)) {
-    if (validDim != ShapedType::kDynamic)
-      dim = validDim;
+  for (size_t i = 0, e = shape.size(); i < e; ++i) {
+    if (valid[i] != ShapedType::kDynamic)
+      shape[i] = valid[i];
   }
   return shape;
 }

@@ -1,0 +1,37 @@
+// RUN: ptoas --pto-arch a5 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s | FileCheck %s --check-prefix=A5
+// RUN: ptoas --pto-arch a3 %s | FileCheck %s --check-prefix=A3
+
+module attributes {"pto.device-spec" = "Ascend950"} {
+  func.func @tmov_acc_to_vec_mode_a5(%a: memref<32x32xf16, #pto.address_space<gm>>,
+                                     %b: memref<32x32xf16, #pto.address_space<gm>>) {
+    %a_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
+    %b_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
+    %a_left = memref.alloc() : memref<32x32xf16, #pto.address_space<left>>
+    %b_right = memref.alloc() : memref<32x32xf16, #pto.address_space<right>>
+    %acc = memref.alloc() : memref<32x32xf32, #pto.address_space<acc>>
+    %dst_vec = memref.alloc() : memref<32x32xf32, #pto.address_space<vec>>
+
+    pto.tload ins(%a : memref<32x32xf16, #pto.address_space<gm>>)
+              outs(%a_mat : memref<32x32xf16, #pto.address_space<mat>>)
+    pto.tload ins(%b : memref<32x32xf16, #pto.address_space<gm>>)
+              outs(%b_mat : memref<32x32xf16, #pto.address_space<mat>>)
+    pto.tmov ins(%a_mat : memref<32x32xf16, #pto.address_space<mat>>)
+             outs(%a_left : memref<32x32xf16, #pto.address_space<left>>)
+    pto.tmov ins(%b_mat : memref<32x32xf16, #pto.address_space<mat>>)
+             outs(%b_right : memref<32x32xf16, #pto.address_space<right>>)
+    pto.tmatmul ins(%a_left, %b_right : memref<32x32xf16, #pto.address_space<left>>,
+                                        memref<32x32xf16, #pto.address_space<right>>)
+                outs(%acc : memref<32x32xf32, #pto.address_space<acc>>)
+    pto.tmov ins(%acc : memref<32x32xf32, #pto.address_space<acc>>)
+             outs(%dst_vec : memref<32x32xf32, #pto.address_space<vec>>)
+             {accToVecMode = #pto.acc_to_vec_mode<dual_mode_split_m>}
+    return
+  }
+}
+
+// A5-LABEL: __global__ AICORE void tmov_acc_to_vec_mode_a5(
+// A5: set_flag(PIPE_M, PIPE_FIX, EVENT_ID{{[0-9]+}});
+// A5: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID{{[0-9]+}});
+// A5: TMOV<{{.*}}pto::AccToVecMode::DualModeSplitM{{.*}}>(
+// A3-LABEL: __global__ AICORE void tmov_acc_to_vec_mode_a5(
+// A3: TMOV<{{.*}}pto::AccToVecMode::DualModeSplitM{{.*}}>(

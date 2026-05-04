@@ -38,6 +38,37 @@ def PTOInsertSync : Pass<"pto-insert-sync", "func::FuncOp"> {
   ];
 }
 
+// Define PTOGraphSyncSolver Pass (graph-based intra-core sync solver).
+// Coexists with PTOInsertSync; selectable via the driver flag
+// `--enable-graph-sync-solver`. Minimal port of bishengir's GraphSyncSolver:
+// Dijkstra-based reachability pruning + Welsh-Powell event-id coloring with
+// fallback to a single PIPE_ALL barrier when the budget is exceeded.
+def PTOGraphSyncSolver : Pass<"pto-graph-sync-solver", "func::FuncOp"> {
+  let summary = "Graph-based intra-core synchronization solver for PTO";
+  let description = [{
+    Alternative to PTOInsertSync. Builds a hierarchical SyncSolver IR and
+    decides which set/wait/barrier ops to emit by combining a reachability
+    analysis (so transitively-covered candidates are skipped) with graph
+    coloring over the pool of EVENT_IDs.
+  }];
+
+  let constructor = "mlir::pto::createPTOGraphSyncSolverPass()";
+
+  let options = [
+    Option<"eventIdNumMax", "event-id-num-max", "int64_t",
+           /*default=*/"8",
+           "Maximum EVENT_ID slots usable by Welsh-Powell coloring; exceeding "
+           "the budget falls back to a single PIPE_ALL barrier.">,
+  ];
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::scf::SCFDialect"
+  ];
+}
+
 def ConvertToPTOOp : Pass<"convert-to-pto-op"> {
   let summary = "Convert Ops from other dialects to PTO Ops";
   let constructor = "mlir::pto::createConvertToPTOOpPass()";

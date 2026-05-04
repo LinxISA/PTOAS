@@ -40,6 +40,14 @@ add_mlir_dialect_library(PTOTransforms
   InsertSync/SyncEventIdAllocation.cpp
   InsertSync/SyncCodegen.cpp
   PTOEnableMultiBuffer.cpp
+  GraphSyncSolver/PTOGraphSyncSolver.cpp
+  GraphSyncSolver/SyncSolverIR.cpp
+  GraphSyncSolver/SyncSolverIRTranslator.cpp
+  GraphSyncSolver/Utility.cpp
+  GraphSyncSolver/GraphSolver.cpp
+  GraphSyncSolver/EventIdSolver.cpp
+  GraphSyncSolver/SyncSolver.cpp
+  GraphSyncSolver/SyncSolverCodeGen.cpp
   LoweringSyncToPipe.cpp
   PTOVerifyTFreePass.cpp
 
@@ -64,6 +72,7 @@ add_mlir_dialect_library(PTOTransforms
   MLIRTransforms
   MLIRTensorDialect
   MLIRSCFToEmitC
+  MLIRSCFDialect
 )
 
 install(TARGETS PTOTransforms

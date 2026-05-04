@@ -189,6 +189,20 @@ static llvm::cl::opt<bool> enableMultiBufferLowering(
                     "single-address casts plus an iv mod N arith.select"),
     llvm::cl::init(false));
 
+static llvm::cl::opt<bool> enableGraphSyncSolver(
+    "enable-graph-sync-solver",
+    llvm::cl::desc("Enable the graph-based intra-core sync solver "
+                   "(experimental). Mutually exclusive with "
+                   "--enable-insert-sync."),
+    llvm::cl::init(false));
+
+static llvm::cl::opt<int> graphSyncSolverEventIdMax(
+    "graph-sync-solver-event-id-max",
+    llvm::cl::desc(
+        "Maximum EVENT_ID slots for the graph sync solver (default 8). "
+        "Lower values exercise the PIPE_ALL coloring fallback sooner."),
+    llvm::cl::init(8));
+
 static llvm::cl::opt<bool> disableInferLayout(
     "disable-infer-layout",
     llvm::cl::desc("Disable PTO layout inference pass (static-only)"),
@@ -1075,6 +1089,17 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (enableInsertSync && enableGraphSyncSolver) {
+    llvm::errs() << "Error: --enable-insert-sync and "
+                    "--enable-graph-sync-solver are mutually exclusive.\n";
+    return 1;
+  }
+  if (hasTAssign && enableGraphSyncSolver) {
+    llvm::errs() << "Error: pto.tassign requires --enable-graph-sync-solver "
+                    "to be disabled.\n";
+    return 1;
+  }
+
   if (effectiveLevel == PTOBuildLevel::Level3) {
     bool missing = false;
     module->walk([&](pto::AllocTileOp op) {
@@ -1126,10 +1151,22 @@ int main(int argc, char **argv) {
   }
   pm.addPass(pto::createPTOResolveReservedBuffersPass());
 
-  // Conditionally add Sync pass based on flag.
+  // Conditionally add Sync pass based on flag. The two solvers are mutually
+  // exclusive (validated above); GraphSyncSolver is the experimental new
+  // path that lives next to PTOInsertSync.
   if (enableInsertSync)
     pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertSyncPass());
+  else if (enableGraphSyncSolver) {
+    PTOGraphSyncSolverOptions graphSyncOpts;
+    graphSyncOpts.eventIdNumMax = graphSyncSolverEventIdMax;
+    pm.addNestedPass<mlir::func::FuncOp>(
+        pto::createPTOGraphSyncSolverPass(graphSyncOpts));
+  }
 
+  // Multi-buffer lowering runs after either sync solver: it consumes the
+  // variadic pto.pointer_cast emitted by PlanMemory and replaces it with
+  // single-address casts plus an iv mod N selector. Decoupled from the sync
+  // solver choice because the pointer_cast geometry is solver-agnostic.
   if (enableMultiBufferLowering)
     pm.addNestedPass<mlir::func::FuncOp>(
         pto::createPTOEnableMultiBufferPass());

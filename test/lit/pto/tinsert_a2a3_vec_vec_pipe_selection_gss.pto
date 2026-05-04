@@ -1,0 +1,24 @@
+// RUN: ptoas --pto-arch=a3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s | FileCheck %s
+
+module attributes {"pto.target_arch" = "a3"} {
+  func.func @tinsert_a2a3_vec_vec_pipeline(%a: memref<32x32xf16, #pto.address_space<gm>>) {
+    %c0 = arith.constant 0 : index
+    %src_vec = memref.alloc() : memref<32x32xf16, #pto.address_space<vec>>
+    %dst_vec = memref.alloc() : memref<32x32xf16, #pto.address_space<vec>>
+    %out_vec = memref.alloc() : memref<32x32xf16, #pto.address_space<vec>>
+
+    pto.tload ins(%a : memref<32x32xf16, #pto.address_space<gm>>)
+              outs(%src_vec : memref<32x32xf16, #pto.address_space<vec>>) {layout = #pto.layout<nd>}
+    pto.tinsert ins(%src_vec, %c0, %c0 : memref<32x32xf16, #pto.address_space<vec>>, index, index)
+               outs(%dst_vec : memref<32x32xf16, #pto.address_space<vec>>)
+    pto.tmov ins(%dst_vec : memref<32x32xf16, #pto.address_space<vec>>)
+             outs(%out_vec : memref<32x32xf16, #pto.address_space<vec>>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void tinsert_a2a3_vec_vec_pipeline(
+// CHECK: set_flag(PIPE_MTE2, PIPE_V, EVENT_ID{{[0-9]+}});
+// CHECK: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID{{[0-9]+}});
+// CHECK: TINSERT(
+// CHECK-NOT: PIPE_FIX

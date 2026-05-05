@@ -223,6 +223,85 @@ def PTOInferValidatePipeInit : Pass<"pto-infer-validate-pipe-init", "ModuleOp"> 
   ];
 }
 
+def PTOCVAutoMarkMultiBuffer : Pass<"pto-cv-auto-mark-multi-buffer", "ModuleOp"> {
+  let summary = "Auto-mark CV preload local buffers as multi-buffered";
+  let description = [{
+    Scans Cube/Vector frontend TPipe transactions before CV scope materialization,
+    pairs producer/relay/consumer stages across logical C2V/V2C pipes, derives the
+    same max preload depth used by `pto-cv-mark-preload-scopes`, and annotates the
+    root local buffers used by those stages with `pto.multi_buffer`.
+
+    The pass intentionally runs before scope creation so the marker is attached to
+    existing `pto.alloc_tile` / `memref.alloc` anchors and can be forwarded to plan
+    memory after tile-buffer lowering.
+  }];
+
+  let constructor = "mlir::pto::createPTOCVAutoMarkMultiBufferPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::scf::SCFDialect"
+  ];
+}
+
+def PTOCVMarkPreloadScopes : Pass<"pto-cv-mark-preload-scopes", "ModuleOp"> {
+  let summary = "Create CV preload scopes from frontend TPipe transactions";
+  let description = [{
+    Scans Cube/Vector kernel_kind functions before frontend pipe lowering,
+    recognizes producer/consumer/relay TPipe transaction scopes, wraps each
+    transaction in a no-result `pto.cv.scope`, pairs them across logical
+    C2V/V2C pipes, and annotates the scope op with pto.cv.* preload metadata.
+  }];
+
+  let constructor = "mlir::pto::createPTOCVMarkPreloadScopesPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect"
+  ];
+}
+
+def PTOCVCreatePreload : Pass<"pto-cv-create-preload", "ModuleOp"> {
+  let summary = "Expand marked CV preload scopes into stage-guarded loops";
+  let description = [{
+    Consumes no-result `pto.cv.scope` operations annotated with
+    `pto.cv.preload_num` / `pto.cv.max_preload_num`, expands the parent
+    `scf.for` upper bound by `max_preload_num * step`, clones each scope under
+    a stage-valid `scf.if`, remaps the loop induction variable to the stage IV,
+    and rotates multi-address `pto.pointer_cast` values prepared by plan memory.
+
+    This pass expects local preload buffers to have already been annotated with
+    `pto.multi_buffer` and lowered/planned into variadic `pto.pointer_cast`
+    values. It deliberately does not synthesize storage addresses itself.
+  }];
+
+  let constructor = "mlir::pto::createPTOCVCreatePreloadPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::arith::ArithDialect",
+    "mlir::scf::SCFDialect"
+  ];
+}
+
+def PTOInlineCVPreloadScopes : Pass<"pto-inline-cv-preload-scopes", "ModuleOp"> {
+  let summary = "Inline no-result CV preload scope containers";
+  let description = [{
+    Inlines `pto.cv.scope` bodies back into their parent blocks. This keeps the
+    current codegen pipeline unchanged while leaving an explicit scope IR point
+    for debug printing and future preload expansion passes.
+  }];
+
+  let constructor = "mlir::pto::createPTOInlineCVPreloadScopesPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect"
+  ];
+}
+
 def PTOResolveReservedBuffers : Pass<"pto-resolve-reserved-buffers", "ModuleOp"> {
   let summary = "Resolve reserved local buffer addresses and peer pipe flag bases";
   let description = [{

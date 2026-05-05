@@ -189,6 +189,12 @@ static llvm::cl::opt<bool> enableMultiBufferLowering(
                     "single-address casts plus an iv mod N arith.select"),
     llvm::cl::init(false));
 
+static llvm::cl::opt<bool> enableCVCreatePreload(
+    "enable-cv-create-preload",
+    llvm::cl::desc("Expand annotated pto.cv.scope preload stages after memory "
+                    "planning"),
+    llvm::cl::init(false));
+
 static llvm::cl::opt<bool> enableGraphSyncSolver(
     "enable-graph-sync-solver",
     llvm::cl::desc("Enable the graph-based intra-core sync solver "
@@ -1131,8 +1137,12 @@ int main(int argc, char **argv) {
   
   pm.addNestedPass<mlir::func::FuncOp>(
       pto::createPTOAssignDefaultFrontendPipeIdPass());
+  pm.addPass(pto::createPTOCVAutoMarkMultiBufferPass());
+  pm.addPass(pto::createPTOCVMarkPreloadScopesPass());
   pm.addNestedPass<mlir::func::FuncOp>(
       pto::createPTOLowerFrontendPipeOpsPass());
+  if (!enableCVCreatePreload)
+    pm.addPass(pto::createPTOInlineCVPreloadScopesPass());
   //pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOVerifyTFreePass());
   pm.addPass(pto::createPTOInferValidatePipeInitPass());
   pm.addNestedPass<mlir::func::FuncOp>(pto::createLoweringSyncToPipePass());
@@ -1151,6 +1161,11 @@ int main(int argc, char **argv) {
   }
   pm.addPass(pto::createPTOResolveReservedBuffersPass());
 
+  if (enableCVCreatePreload) {
+    pm.addPass(pto::createPTOCVCreatePreloadPass());
+    pm.addPass(pto::createPTOInlineCVPreloadScopesPass());
+  }
+
   // Conditionally add Sync pass based on flag. The two solvers are mutually
   // exclusive (validated above); GraphSyncSolver is the experimental new
   // path that lives next to PTOInsertSync.
@@ -1167,7 +1182,7 @@ int main(int argc, char **argv) {
   // variadic pto.pointer_cast emitted by PlanMemory and replaces it with
   // single-address casts plus an iv mod N selector. Decoupled from the sync
   // solver choice because the pointer_cast geometry is solver-agnostic.
-  if (enableMultiBufferLowering)
+  if (enableMultiBufferLowering || enableCVCreatePreload)
     pm.addNestedPass<mlir::func::FuncOp>(
         pto::createPTOEnableMultiBufferPass());
 

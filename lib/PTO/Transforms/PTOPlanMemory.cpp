@@ -526,12 +526,13 @@ collectAutoReserveBufferBitsByAddressSpace(const ReserveBufferPlans &plans) {
 void MemLivenessAnalysis::build() {
   Region &funcRegion = func_.getBody();
   stableValueOrder = buildStableValueOrder(func_);
+  collectMultiBufferAnnotations();
+  collectPreloadBufferParentLoops();
   Liveness live(func_);
   // Recursively obtaining IR information.
   RecursionIR(&funcRegion, live);
   // the lifetime of the buffer.
   GenerateBufferLife();
-  collectMultiBufferAnnotations();
 }
 
 void MemLivenessAnalysis::collectMultiBufferAnnotations() {
@@ -543,6 +544,50 @@ void MemLivenessAnalysis::collectMultiBufferAnnotations() {
     if (n <= 1 || n > kPtoMultiBufferMaxNum)
       return;
     buffer2MultiNum[alloc.getResult()] = static_cast<uint32_t>(n);
+  });
+}
+
+void MemLivenessAnalysis::collectPreloadBufferParentLoops() {
+  if (!isLocalMemPlan())
+    return;
+
+  auto recordValue = [&](Value value, scf::ForOp parentLoop) {
+    if (!value || !isa<BaseMemRefType>(value.getType()))
+      return;
+    Value root = tracebackMemRef(value);
+    auto alloc = root.getDefiningOp<memref::AllocOp>();
+    if (!alloc)
+      return;
+    auto multiBufferAttr =
+        alloc->getAttrOfType<IntegerAttr>(kPtoMultiBufferAttrName);
+    if (!multiBufferAttr || multiBufferAttr.getInt() <= 1)
+      return;
+    auto memorySpaceAttr = GetBufferSpaceAttr(root);
+    if (!isLocalBuffer(memorySpaceAttr))
+      return;
+
+    SmallVector<Operation *, 2> &parentLoops =
+        preloadBufferParentLoops[root];
+    Operation *loopOp = parentLoop.getOperation();
+    if (!llvm::is_contained(parentLoops, loopOp))
+      parentLoops.push_back(loopOp);
+  };
+
+  func_.walk([&](CVScopeOp scope) {
+    if (!scope->getAttr("pto.cv.preload_num") ||
+        !scope->getAttr("pto.cv.max_preload_num"))
+      return;
+
+    auto parentLoop = scope->getParentOfType<scf::ForOp>();
+    if (!parentLoop)
+      return;
+
+    scope.walk([&](Operation *op) {
+      for (Value operand : op->getOperands())
+        recordValue(operand, parentLoop);
+      for (Value result : op->getResults())
+        recordValue(result, parentLoop);
+    });
   });
 }
 
@@ -715,10 +760,12 @@ void MemLivenessAnalysis::RecursiveForOp(scf::ForOp forOp, Liveness live) {
   // need to handle kill buffer.
   auto forBeginSeq = UpdateLinearOperation(forOp.getOperation());
   UpdateOpGenInfo(forBeginSeq, GetLiveBuffersInLoop(forOp, live));
+  UpdatePreloadLoopGenInfo(forBeginSeq, forOp);
   UpdateForOpInitArgsAlias(forOp);
   RecursionIR(&forOp.getRegion(), live);
   UpdateForOpBufferAlias(forOp);
   auto forEndSeq = UpdateLinearOperation(forOp.getOperation());
+  UpdatePreloadLoopKillInfo(forEndSeq, forOp, live);
   OpKillHandle(forEndSeq, live, forOp->getBlock());
 }
 
@@ -1071,7 +1118,20 @@ void MemLivenessAnalysis::UpdateOpGenInfo(OpInfo *opInfo,
   }
 }
 
+void MemLivenessAnalysis::UpdatePreloadLoopGenInfo(OpInfo *opInfo,
+                                                   scf::ForOp forOp) {
+  Operation *loopOp = forOp.getOperation();
+  for (const auto &it : preloadBufferParentLoops) {
+    if (!llvm::is_contained(it.second, loopOp))
+      continue;
+    UpdateOperandGenInfo(opInfo, it.first);
+  }
+}
+
 void MemLivenessAnalysis::UpdateOperandGenInfo(OpInfo *opInfo, Value operand) {
+  if (IsInsidePreloadParentLoop(operand, opInfo->operation))
+    return;
+
   auto iter_buffer = buffer2status.find(operand);
   if (iter_buffer == buffer2status.end())
     return;
@@ -1124,6 +1184,11 @@ void MemLivenessAnalysis::UpdateOpKillInfo(OpInfo *opInfo, Value operand,
                                            Liveness live) {
   auto aliasBuffers = GetAliasBuffers(operand);
   aliasBuffers.insert(operand);
+  if (llvm::any_of(aliasBuffers, [&](Value aliasBuffer) {
+        return IsInsidePreloadParentLoop(aliasBuffer, opInfo->operation);
+      }))
+    return;
+
   for (Value aliasBuffer : aliasBuffers) {
     auto iterBuffer = buffer2status.find(aliasBuffer);
     if (iterBuffer == buffer2status.end())
@@ -1148,6 +1213,32 @@ void MemLivenessAnalysis::UpdateOpKillInfo(OpInfo *opInfo, Value operand,
       buffer2GenOp.erase(iterBuffer->first);
     }
   }
+}
+
+void MemLivenessAnalysis::UpdatePreloadLoopKillInfo(OpInfo *opInfo,
+                                                    scf::ForOp forOp,
+                                                    Liveness live) {
+  Operation *loopOp = forOp.getOperation();
+  for (const auto &it : preloadBufferParentLoops) {
+    if (!llvm::is_contained(it.second, loopOp))
+      continue;
+    UpdateOpKillInfo(opInfo, it.first, live);
+  }
+}
+
+bool MemLivenessAnalysis::IsInsidePreloadParentLoop(Value buffer,
+                                                    Operation *op) const {
+  auto it = preloadBufferParentLoops.find(buffer);
+  if (it == preloadBufferParentLoops.end())
+    return false;
+
+  for (Operation *loopOp : it->second) {
+    if (loopOp == op)
+      continue;
+    if (loopOp->isAncestor(op))
+      return true;
+  }
+  return false;
 }
 
 Operation *MemLivenessAnalysis::GetBufferGenOp(Value buffer) const {

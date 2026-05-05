@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-cv-create-preload --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
+// RUN: ptoas --enable-cv-create-preload --mlir-print-ir-after=pto-cv-create-preload %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=CREATE
+// RUN: ptoas --enable-cv-create-preload --mlir-print-ir-after=pto-enable-multi-buffer %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=MB
+
+module {
+  func.func @cv_create_preload(%arg0: memref<16x16xf16, #pto.address_space<gm>>,
+                               %arg1: memref<16x16xf16, #pto.address_space<gm>>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %buf = memref.alloc() {pto.multi_buffer = 2 : i32}
+        : memref<16x16xf16, #pto.address_space<vec>>
+
+    scf.for %i = %c0 to %c4 step %c1 {
+      pto.cv.scope {
+        pto.tload ins(%arg0 : memref<16x16xf16, #pto.address_space<gm>>)
+                 outs(%buf : memref<16x16xf16, #pto.address_space<vec>>)
+      } {pto.cv.core = "vector", pto.cv.group_id = 0 : i64,
+         pto.cv.input_pipe = "", pto.cv.max_preload_num = 2 : i64,
+         pto.cv.output_pipe = "c2v:1", pto.cv.preload_num = 1 : i64,
+         pto.cv.role = "producer", pto.cv.scope_id = 0 : i64}
+
+      pto.cv.scope {
+        pto.tstore ins(%buf : memref<16x16xf16, #pto.address_space<vec>>)
+                  outs(%arg1 : memref<16x16xf16, #pto.address_space<gm>>)
+      } {pto.cv.core = "vector", pto.cv.group_id = 0 : i64,
+         pto.cv.input_pipe = "c2v:1", pto.cv.max_preload_num = 2 : i64,
+         pto.cv.output_pipe = "", pto.cv.preload_num = 0 : i64,
+         pto.cv.role = "consumer", pto.cv.scope_id = 1 : i64}
+    }
+    return
+  }
+}
+
+// PLAN-LABEL: IR Dump After PlanMemory
+// PLAN-LABEL: func.func @cv_create_preload
+// PLAN-NOT: memref.alloc
+// PLAN: pto.pointer_cast(%{{.*}}, %{{.*}}) :
+// PLAN: pto.cv.scope
+// PLAN: } {{.*}}pto.cv.preload_num = 1
+// PLAN: pto.cv.scope
+// PLAN: } {{.*}}pto.cv.preload_num = 0
+
+// CREATE-LABEL: IR Dump After PTOCVCreatePreload
+// CREATE-LABEL: func.func @cv_create_preload
+// CREATE: arith.addi
+// CREATE: scf.for
+// CREATE: pto.pointer_cast(%{{.*}}, %{{.*}}) :
+// CREATE: pto.pointer_cast(%{{.*}}, %{{.*}}) :
+// CREATE: scf.if
+// CREATE: pto.cv.scope
+// CREATE: pto.tload
+// CREATE: } {{.*}}pto.cv.preload_num = 1
+// CREATE: scf.if
+// CREATE: pto.cv.scope
+// CREATE: pto.tstore
+// CREATE: } {{.*}}pto.cv.preload_num = 0
+
+// MB-LABEL: IR Dump After PTOEnableMultiBuffer
+// MB-LABEL: func.func @cv_create_preload
+// MB: pto.pointer_cast(%{{[^,)]+}}) :
+// MB: pto.pointer_cast(%{{[^,)]+}}) :
+// MB: scf.for %[[IV:.*]] =
+// MB: arith.remui %[[IV]],
+// MB: arith.select
+// MB: pto.tload
+// MB: pto.tstore

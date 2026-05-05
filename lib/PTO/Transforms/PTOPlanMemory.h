@@ -330,6 +330,10 @@ private:
   /// Read `pto.multi_buffer` on memref.alloc and fill `buffer2MultiNum`.
   void collectMultiBufferAnnotations();
 
+  /// Find multi-buffer local allocs used by annotated CV preload scopes and
+  /// remember the parent loop whose physical iterations will overlap them.
+  void collectPreloadBufferParentLoops();
+
   void RecursionIR(Region *region, Liveness live);
 
   /// Get the buffer used within the loop and defined outside the loop.
@@ -400,6 +404,9 @@ private:
   /// Process gen buffer based on the result value of op.
   void UpdateOpGenInfo(OpInfo *opInfo, const ValueRange &results);
 
+  /// Force preload buffers to be generated at their parent loop boundary.
+  void UpdatePreloadLoopGenInfo(OpInfo *opInfo, scf::ForOp forOp);
+
   /// Update normal operand gen information on buffer.
   void UpdateOperandGenInfo(OpInfo *opInfo, Value operand);
 
@@ -435,6 +442,14 @@ private:
   /// Process kill buffer based on the result live of op.
   void UpdateOpKillInfo(OpInfo *opInfo, Value operand, Liveness live);
 
+  /// Force preload buffers to be killed at their parent loop boundary.
+  void UpdatePreloadLoopKillInfo(OpInfo *opInfo, scf::ForOp forOp,
+                                 Liveness live);
+
+  /// Return true when a buffer is a preload buffer being touched inside, but
+  /// not at, one of its preload parent loops.
+  bool IsInsidePreloadParentLoop(Value buffer, Operation *op) const;
+
   /// Have all alias buffer been killed.
   bool AllDeadAfter(Operation *op, SetVector<Value> aliasVec,
                     Liveness live) const;
@@ -468,6 +483,10 @@ private:
   /// Buffers whose loop-entry generation was delayed to their first write in
   /// the loop body.
   DenseMap<Value, bool> delayedLoopEntryGenBuffers;
+
+  /// Multi-buffer local allocs used by annotated CV preload scopes. Each value
+  /// maps to the loop operations that need loop-wide lifetimes for it.
+  DenseMap<Value, SmallVector<Operation *, 2>> preloadBufferParentLoops;
 
   /// map on buffer alias
   DenseMap<Value, SetVector<Value>> buffer2AliasVec;

@@ -14,6 +14,7 @@
 
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
+#include "PTO/Transforms/MultiBuffer.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -55,6 +56,11 @@ static constexpr llvm::StringLiteral kLoweredSetValidShapeAttrName =
     "__pto.lowered_set_validshape";
 static constexpr llvm::StringLiteral kForceDynamicValidShapeAttrName =
     "__pto.force_dynamic_valid_shape";
+
+static void forwardMultiBufferAttr(Operation *from, Operation *to) {
+  if (Attribute attr = from->getAttr(kPtoMultiBufferAttrName))
+    to->setAttr(kPtoMultiBufferAttrName, attr);
+}
 
 namespace {
 
@@ -668,10 +674,12 @@ static LogicalResult lowerAllocTileOps(func::FuncOp func, MLIRContext *ctx) {
       auto pc = rewriter.create<pto::PointerCastOp>(
           loc, targetType, ValueRange{addr}, vRow ? vRow : Value(),
           vCol ? vCol : Value(), configAttr);
+      forwardMultiBufferAttr(op, pc);
       markForceDynamicValidShape(pc, tbTy.hasDynamicValid(), ctx);
       auto bindOp = rewriter.create<pto::BindTileOp>(
           loc, targetType, pc.getResult(), vRow ? vRow : Value(),
           vCol ? vCol : Value(), configAttr);
+      forwardMultiBufferAttr(op, bindOp);
       markForceDynamicValidShape(bindOp, tbTy.hasDynamicValid(), ctx);
       rewriter.replaceOp(op, bindOp.getResult());
       continue;
@@ -680,10 +688,12 @@ static LogicalResult lowerAllocTileOps(func::FuncOp func, MLIRContext *ctx) {
     auto allocLayout = StridedLayoutAttr::get(ctx, 0, strides);
     auto allocType =
         MemRefType::get(shape, elemTy, allocLayout, tbTy.getMemorySpace());
-    Value alloc = rewriter.create<memref::AllocOp>(loc, allocType);
+    auto allocOp = rewriter.create<memref::AllocOp>(loc, allocType);
+    forwardMultiBufferAttr(op, allocOp);
     auto bindOp = rewriter.create<pto::BindTileOp>(
-        loc, targetType, alloc, vRow ? vRow : Value(), vCol ? vCol : Value(),
-        configAttr);
+        loc, targetType, allocOp.getResult(), vRow ? vRow : Value(),
+        vCol ? vCol : Value(), configAttr);
+    forwardMultiBufferAttr(op, bindOp);
     markForceDynamicValidShape(bindOp, tbTy.hasDynamicValid(), ctx);
     rewriter.replaceOp(op, bindOp.getResult());
   }
@@ -1240,10 +1250,12 @@ struct PTOViewToMemrefPass
           auto pc = rewriter.create<pto::PointerCastOp>(
               loc, targetType, ValueRange{addr}, vRow ? vRow : Value(),
               vCol ? vCol : Value(), configAttr);
+          forwardMultiBufferAttr(op, pc);
           markForceDynamicValidShape(pc, tbTy.hasDynamicValid(), ctx);
           auto bindOp = rewriter.create<pto::BindTileOp>(
               loc, targetType, pc.getResult(), vRow ? vRow : Value(),
               vCol ? vCol : Value(), configAttr);
+          forwardMultiBufferAttr(op, bindOp);
           markForceDynamicValidShape(bindOp, tbTy.hasDynamicValid(), ctx);
           rewriter.replaceOp(op, bindOp.getResult());
           continue;
@@ -1253,12 +1265,14 @@ struct PTOViewToMemrefPass
         // memref.alloc 要求明确的 layout，不能是动态 offset。
         auto allocLayout = StridedLayoutAttr::get(ctx, 0, strides); // offset = 0
         auto allocType = MemRefType::get(shape, elemTy, allocLayout, tbTy.getMemorySpace());
-        Value alloc = rewriter.create<memref::AllocOp>(loc, allocType);
+        auto allocOp = rewriter.create<memref::AllocOp>(loc, allocType);
+        forwardMultiBufferAttr(op, allocOp);
 
         // BindTileOp 的 Builder 会自动处理空的 Value，将其视为静态维度
         auto bindOp = rewriter.create<pto::BindTileOp>(
-            loc, targetType, alloc, vRow ? vRow : Value(), vCol ? vCol : Value(),
-            configAttr);
+            loc, targetType, allocOp.getResult(), vRow ? vRow : Value(),
+            vCol ? vCol : Value(), configAttr);
+        forwardMultiBufferAttr(op, bindOp);
         markForceDynamicValidShape(bindOp, tbTy.hasDynamicValid(), ctx);
 
         rewriter.replaceOp(op, bindOp.getResult());

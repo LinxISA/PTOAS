@@ -1329,6 +1329,25 @@ def SectionCubeOp : PTO_SectionOp<"section.cube">;
 def SectionVectorOp : PTO_SectionOp<"section.vector">;
 
 //===----------------------------------------------------------------------===//
+// CV Preload Scope Ops
+//===----------------------------------------------------------------------===//
+
+def CVScopeOp : PTO_Op<"cv.scope", [SingleBlock, NoTerminator]> {
+  let summary = "No-result CV preload transaction scope";
+  let description = [{
+    Groups one producer, consumer, or relay TPipe transaction for CV preload
+    analysis.  The first PTOAS version intentionally carries no operands,
+    results, or yield terminator: cross-scope dependencies are represented by
+    explicit TPipe metadata such as pto.cv.input_pipe and pto.cv.output_pipe,
+    while tilebuf/memref allocations that are shared across scopes must be
+    defined outside the scope.
+  }];
+
+  let regions = (region SizedRegion<1>:$body);
+  let assemblyFormat = "$body attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // Frontend TPUSH/TPOP Pipe Communication Ops
 //===----------------------------------------------------------------------===//
 

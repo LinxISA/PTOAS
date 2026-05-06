@@ -162,7 +162,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1063, "pto.tsort32", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1064, "pto.tsqrt", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1065, "pto.tstore", 0, 0x00, 0x02, 0, 0, 0, 0x00},
-  {0x1066, "pto.tstore.fp", 0, 0x00, 0x00, 3, 0, 0, 0x00},
+  {0x1066, "pto.tstore_fp", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1067, "pto.tsub", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1068, "pto.tsubc", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x1069, "pto.tsubs", 0, 0x00, 0x00, 3, 0, 0, 0x00},
@@ -356,7 +356,7 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.tsort32", 0x1063)
     .Case("pto.tsqrt", 0x1064)
     .Case("pto.tstore", 0x1065)
-    .Case("pto.tstore.fp", 0x1066)
+    .Case("pto.tstore_fp", 0x1066)
     .Case("pto.tsub", 0x1067)
     .Case("pto.tsubc", 0x1068)
     .Case("pto.tsubs", 0x1069)
@@ -535,7 +535,7 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.tsort32", OpcodeAndVariant{0x1063, 0, 0})
     .Case("pto.tsqrt", OpcodeAndVariant{0x1064, 0, 0})
     .Case("pto.tstore", OpcodeAndVariant{0x1065, 0, 0})
-    .Case("pto.tstore.fp", OpcodeAndVariant{0x1066, 0, 0})
+    .Case("pto.tstore_fp", OpcodeAndVariant{0x1066, 0, 0})
     .Case("pto.tsub", OpcodeAndVariant{0x1067, 0, 0})
     .Case("pto.tsubc", OpcodeAndVariant{0x1068, 0, 0})
     .Case("pto.tsubs", OpcodeAndVariant{0x1069, 0, 0})

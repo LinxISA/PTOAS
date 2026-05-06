@@ -11,7 +11,15 @@
 
 #include "PTOPlanMemory.h"
 
+#include "PTO/Transforms/InsertSync/SyncCommon.h"
 #include "PTO/Transforms/MultiBuffer.h"
+
+// Compile-time pinning: PTO plan-memory hands out at most kPtoMultiBufferMaxNum
+// physical slots, while InsertSync's event-id allocator is hard-bounded by
+// MAX_MULTI_BUFFER_NUM. If they ever drift out of sync the planner will emit
+// N slot pointer_casts that the sync side cannot allocate event ids for.
+static_assert(::mlir::pto::kPtoMultiBufferMaxNum == MAX_MULTI_BUFFER_NUM,
+              "kPtoMultiBufferMaxNum must equal MAX_MULTI_BUFFER_NUM");
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"

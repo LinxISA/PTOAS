@@ -17,7 +17,10 @@ namespace pto {
 /// Attribute name for multi-buffer depth on `memref.alloc` (integer slot count N>=2).
 inline constexpr llvm::StringLiteral kPtoMultiBufferAttrName = "pto.multi_buffer";
 
-/// Upper bound for N; must stay consistent with `MAX_MULTI_BUFFER_NUM` in insert-sync.
+/// Upper bound for N; must stay consistent with `MAX_MULTI_BUFFER_NUM` in
+/// insert-sync's SyncCommon.h. The static_assert that pins these two values
+/// together lives in PTOPlanMemory.cpp (which already includes both headers)
+/// so this header stays cheap to include from CV/multi-buffer paths.
 inline constexpr unsigned kPtoMultiBufferMaxNum = 16;
 
 } // namespace pto

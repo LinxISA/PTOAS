@@ -161,22 +161,39 @@ scf::ForOp Solver::getMultiBufferLoop(RWOperation *rwOp1, RWOperation *rwOp2) {
 
 EventIdInfo Solver::getMultiBufferEventIdInfo(RWOperation *rwOp1,
                                               RWOperation *rwOp2) {
-  // Mirrors `checkMultiBufferEventIdInfo` + `getMultiBufferEventIdInfo`:
-  //   1. All conflict pairs must agree on slot count N >= 2.
-  //   2. All involved buffers must hang off the same scf.for.
-  //   3. N is the common slot count (small enough to fit MAX_MULTI_BUFFER_NUM).
+  // P1-4: Match HIVM and PTO InsertSync semantics. Multi-buffer is only safe
+  // when EVERY dependency pair between rwOp1/rwOp2 is multi-buffer-eligible
+  // with the same slot count. If even one pair is a single-buffer real
+  // dependency, we MUST collapse to single-buffer; otherwise the dyn flag
+  // serializing the multi-buffer pairs would not protect the single-buffer
+  // pair, which only happens to be covered if its lifetime accidentally fits
+  // inside the rotation window. Earlier code used `continue` here, which let
+  // a single-buffer real dep slip past (Codex Review P2 in the original PR).
+  //
+  // Constraints (all must hold):
+  //   1. Every pair returns the SAME slot count N >= 2 (no n==0 / n==1 pairs).
+  //   2. N <= MAX_MULTI_BUFFER_NUM.
+  //   3. All involved buffers hang off the same scf.for.
   // Returns single-buffer EventIdInfo() on any failure.
   if (!rwOp1 || !rwOp2)
     return {};
 
+  bool sawAnyPair = false;
   unsigned commonN = 0;
   auto checkPair = [&](const llvm::SmallVector<const BaseMemInfo *> &as,
                        const llvm::SmallVector<const BaseMemInfo *> &bs) -> bool {
     for (auto *a : as) {
       for (auto *b : bs) {
+        // Only count pairs that actually carry a memory dependency.
+        // getMultiBufferSlotCount returns 0 either when there is no dep at
+        // all (different physical buffer) or when the dep is a real single
+        // buffer dep. We need to distinguish: probe MemAlias to decide.
+        if (!memAnalyzer_.MemAlias(a, b))
+          continue;
         unsigned n = memAnalyzer_.getMultiBufferSlotCount(a, b);
         if (n < 2)
-          continue;
+          return false; // real single-buffer dep -> not safe to MB.
+        sawAnyPair = true;
         if (commonN == 0)
           commonN = n;
         else if (commonN != n)
@@ -191,7 +208,7 @@ EventIdInfo Solver::getMultiBufferEventIdInfo(RWOperation *rwOp1,
     return {};
   if (!checkPair(rwOp1->writeMemInfo, rwOp2->writeMemInfo))
     return {};
-  if (commonN < 2 || commonN > MAX_MULTI_BUFFER_NUM)
+  if (!sawAnyPair || commonN < 2 || commonN > MAX_MULTI_BUFFER_NUM)
     return {};
 
   scf::ForOp loop = getMultiBufferLoop(rwOp1, rwOp2);

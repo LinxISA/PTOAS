@@ -51,10 +51,13 @@ module {
 
 // CREATE-LABEL: IR Dump After PTOCVCreatePreload
 // CREATE-LABEL: func.func @cv_create_preload
+// P1-7: per-stage rotated multi-address pointer_casts are hoisted ABOVE the
+// rotation loop, not duplicated inside the body. arith.addi (new_ub) follows
+// after all the hoisted pointer_casts.
+// CREATE: pto.pointer_cast(%{{.*}}, %{{.*}}) :
+// CREATE: pto.pointer_cast(%{{.*}}, %{{.*}}) :
 // CREATE: arith.addi
 // CREATE: scf.for
-// CREATE: pto.pointer_cast(%{{.*}}, %{{.*}}) :
-// CREATE: pto.pointer_cast(%{{.*}}, %{{.*}}) :
 // CREATE: scf.if
 // CREATE: pto.cv.scope
 // CREATE: pto.tload

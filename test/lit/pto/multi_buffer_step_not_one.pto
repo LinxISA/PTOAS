@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-multi-buffer-lowering --mlir-print-ir-after=pto-enable-multi-buffer %s 2>&1 1>/dev/null | FileCheck %s
+
+// P0-2 regression: when the loop step is NOT 1, the slot index must be the
+// LOGICAL iteration count modulo N, not `iv mod N`. With step=2 / N=2 the
+// naive `iv mod 2` only ever yields 0 (slot 1 is never selected), silently
+// breaking double-buffer rotation. The lowering should compute the slot as
+// `((iv - lb) / step) mod N`, i.e., divide the normalized iv by the step
+// before the modulo.
+//
+// Loop here uses lb=0, step=2, ub=8 -> 4 logical iterations: slot=0,1,0,1.
+
+module {
+  func.func @double_buffer_step_two(%arg0: memref<16x16x16xf16, #pto.address_space<gm>>,
+                                    %arg1: memref<16x16x16xf16, #pto.address_space<gm>>) {
+    %c0 = arith.constant 0 : index
+    %c2 = arith.constant 2 : index
+    %c8 = arith.constant 8 : index
+    scf.for %i = %c0 to %c8 step %c2 {
+      %a = memref.alloc() {pto.multi_buffer = 2 : i32}
+          : memref<16x16x16xf16, #pto.address_space<vec>>
+      pto.tload ins(%arg0 : memref<16x16x16xf16, #pto.address_space<gm>>)
+               outs(%a : memref<16x16x16xf16, #pto.address_space<vec>>)
+      pto.tstore ins(%a : memref<16x16x16xf16, #pto.address_space<vec>>)
+                outs(%arg1 : memref<16x16x16xf16, #pto.address_space<gm>>)
+    }
+    return
+  }
+}
+
+// CHECK: IR Dump After PTOEnableMultiBuffer
+// CHECK: func.func @double_buffer_step_two
+// Slot index must include a divui by the loop step BEFORE the remui. The
+// step %c2 is the same SSA value used as the loop's `step`, so we match
+// "divui ..., %c2" without trying to capture the step name from the for op
+// signature (FileCheck regex would otherwise greedily eat trailing tokens).
+// CHECK: scf.for %[[IV:[a-zA-Z0-9_]+]] = %{{.*}} to %{{.*}} step %{{.*}}
+// CHECK: arith.divui %[[IV]], %{{.*}} : index
+// CHECK: arith.remui %{{.*}}, %{{.*}} : index
+// CHECK: arith.select

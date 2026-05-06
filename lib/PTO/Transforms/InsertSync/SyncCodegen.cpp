@@ -375,6 +375,21 @@ void SyncCodegen::CreateSetWaitOpForMultiBuffer(IRRewriter &rewriter,
   createSetOrWaitFlagDynOp(rewriter, op, sync, srcPipe, dstPipe, eventIdxDyn);
 }
 
+// P0-2: Slot index must be the LOGICAL iteration count modulo N, not `iv % N`.
+// Compute `((iv - lb) / step) % N`, with a fast path for the canonical
+// step=1, lb=0 case so we don't bloat IR for the common scenario.
+static bool isyncIsConstantIndexEqualTo(Value v, int64_t target) {
+  if (!v)
+    return false;
+  if (auto cst = v.getDefiningOp<arith::ConstantIndexOp>())
+    return cst.value() == target;
+  if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
+      return intAttr.getInt() == target;
+  }
+  return false;
+}
+
 Value SyncCodegen::GetBufferSelected(IRRewriter &rewriter, Operation *op,
                                      SyncOperation *sync) {
   if (SyncIndex2SelectBuffer.count(sync->GetSyncIndex())) {
@@ -397,7 +412,14 @@ Value SyncCodegen::GetBufferSelected(IRRewriter &rewriter, Operation *op,
     rewriter.setInsertionPointToStart(parentLoop.getBody());
     Value iv = parentLoop.getInductionVar();
     Value cN = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), N);
-    counter = rewriter.create<arith::RemUIOp>(op->getLoc(), iv, cN);
+    Value lb = parentLoop.getLowerBound();
+    Value step = parentLoop.getStep();
+    Value normalized = iv;
+    if (!isyncIsConstantIndexEqualTo(lb, 0))
+      normalized = rewriter.create<arith::SubIOp>(op->getLoc(), normalized, lb);
+    if (!isyncIsConstantIndexEqualTo(step, 1))
+      normalized = rewriter.create<arith::DivUIOp>(op->getLoc(), normalized, step);
+    counter = rewriter.create<arith::RemUIOp>(op->getLoc(), normalized, cN);
     loop2BufferCounter[parentLoop] = {counter, N};
   }
 

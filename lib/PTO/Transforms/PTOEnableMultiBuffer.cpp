@@ -26,12 +26,30 @@ using namespace mlir::pto;
 
 namespace {
 
-// (loop, factor N) -> shared `iv mod N` counter inside that loop.
-// B5: when several multi-buffer pointer_casts share the same enclosing scf.for
-// and the same N, they should all read from the same counter rather than each
-// inserting its own arith.remui + N constant ops. This mirrors
+// (loop, factor N) -> shared `((iv - lb) / step) mod N` counter inside that
+// loop. B5: when several multi-buffer pointer_casts share the same enclosing
+// scf.for and the same N, they should all read from the same counter rather
+// than each inserting its own arith.remui + N constant ops. This mirrors
 // SyncCodegen::loop2BufferCounter so the two passes emit consistent counters.
+//
+// P0-2 (slot index): The slot must be the LOGICAL iteration index modulo N,
+// not the physical induction variable modulo N. When `step != 1` or `lb != 0`,
+// `iv mod N` skips slots whenever gcd(step, N) > 1 (e.g. step=2,N=4 only ever
+// produces 0,2). Compute `((iv - lb) / step) mod N` explicitly; degenerate to
+// the cheaper `iv mod N` when `lb == 0` and `step == 1`.
 using LoopFactorKey = std::pair<scf::ForOp, unsigned>;
+
+static bool isConstantIndexEqualTo(Value v, int64_t target) {
+  if (!v)
+    return false;
+  if (auto cst = v.getDefiningOp<arith::ConstantIndexOp>())
+    return cst.value() == target;
+  if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
+      return intAttr.getInt() == target;
+  }
+  return false;
+}
 
 static Value getOrCreateLoopCounter(
     IRRewriter &rewriter,
@@ -44,7 +62,14 @@ static Value getOrCreateLoopCounter(
   rewriter.setInsertionPointToStart(forOp.getBody());
   Value iv = forOp.getInductionVar();
   Value cN = rewriter.create<arith::ConstantIndexOp>(loc, n);
-  Value rem = rewriter.create<arith::RemUIOp>(loc, iv, cN);
+  Value lb = forOp.getLowerBound();
+  Value step = forOp.getStep();
+  Value normalized = iv;
+  if (!isConstantIndexEqualTo(lb, 0))
+    normalized = rewriter.create<arith::SubIOp>(loc, normalized, lb);
+  if (!isConstantIndexEqualTo(step, 1))
+    normalized = rewriter.create<arith::DivUIOp>(loc, normalized, step);
+  Value rem = rewriter.create<arith::RemUIOp>(loc, normalized, cN);
   cache[key] = rem;
   return rem;
 }
@@ -112,6 +137,26 @@ static bool isLocalScopePointerCast(PointerCastOp op) {
   return as == AddressSpace::VEC || as == AddressSpace::MAT;
 }
 
+// CV-create-preload hoists per-stage rotated pointer_casts ABOVE the rotation
+// loop, so a multi-address pointer_cast may have NO enclosing scf.for of its
+// own even though its users still rotate over an enclosing loop. When the cast
+// itself is loop-invariant, infer the rotation loop from its users: every use
+// must live inside the SAME scf.for, otherwise a single `iv mod N` selector
+// can't be valid. Returns nullptr to mean "skip with a warning".
+static scf::ForOp inferRotationLoopFromUses(PointerCastOp op) {
+  scf::ForOp common;
+  for (Operation *user : op->getUsers()) {
+    auto userFor = user->getParentOfType<scf::ForOp>();
+    if (!userFor)
+      return nullptr;
+    if (!common)
+      common = userFor;
+    else if (common != userFor)
+      return nullptr;
+  }
+  return common;
+}
+
 struct PTOEnableMultiBufferPass
     : public mlir::pto::impl::PTOEnableMultiBufferBase<
           PTOEnableMultiBufferPass> {
@@ -138,6 +183,13 @@ struct PTOEnableMultiBufferPass
       }
 
       auto forOp = op->getParentOfType<scf::ForOp>();
+      if (!forOp) {
+        // Hoisted-by-CVCreatePreload case: the rotated multi-address cast lives
+        // at function level, but its users still rotate over an inner scf.for.
+        // Infer that loop and reuse the regular lowering path; if uses span
+        // multiple loops (or none), fall through to the warning + skip.
+        forOp = inferRotationLoopFromUses(op);
+      }
       if (!forOp) {
         op.emitWarning()
             << "pto-enable-multi-buffer: expected enclosing scf.for; skipping";

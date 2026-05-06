@@ -191,6 +191,10 @@ struct ScopeInfo {
   SmallVector<Operation *> ops;
   Operation *firstOp = nullptr;
   Operation *lastOp = nullptr;
+  // P1-5: parent loop must participate in scope-class identity. Two
+  // independent scf.for loops in the same kernel that happen to use the same
+  // pipe must NOT be merged into one preload group.
+  Operation *parentLoop = nullptr;
   int64_t classId = -1;
 };
 
@@ -198,6 +202,11 @@ struct ScopeClass {
   CoreKind core = CoreKind::Cube;
   std::optional<PipeKey> input;
   std::optional<PipeKey> output;
+  // Same parent loop op as the contributing scopes. Pipe-only matching is
+  // still valid across cores (chain edges follow pipe identity), but within
+  // a single core+pipe direction we partition by parent loop so siblings of
+  // distinct loops do not collide.
+  Operation *parentLoop = nullptr;
   SmallVector<int64_t> scopeIds;
   int64_t groupId = -1;
   int64_t preloadNum = -1;
@@ -212,10 +221,14 @@ static std::string getRole(const ScopeInfo &scope) {
   return "consumer";
 }
 
-static std::string getClassKey(CoreKind core, std::optional<PipeKey> input,
+static std::string getClassKey(CoreKind core, Operation *parentLoop,
+                               std::optional<PipeKey> input,
                                std::optional<PipeKey> output) {
-  return (llvm::Twine(stringify(core)) + "|" + llvm::Twine(stringify(input)) +
-          "|" + llvm::Twine(stringify(output)))
+  // Include the parent loop pointer so two same-pipe scopes from different
+  // scf.for nests get their own classes (P1-5).
+  uintptr_t loopAddr = reinterpret_cast<uintptr_t>(parentLoop);
+  return (llvm::Twine(stringify(core)) + "|" + llvm::Twine(loopAddr) + "|" +
+          llvm::Twine(stringify(input)) + "|" + llvm::Twine(stringify(output)))
       .str();
 }
 
@@ -235,6 +248,7 @@ static std::optional<CoreKind> getKernelCore(func::FuncOp funcOp) {
 }
 
 static void collectScopeIfValid(PendingScope &pending, CoreKind core,
+                                Operation *parentLoop,
                                 SmallVectorImpl<ScopeInfo> &scopes) {
   std::optional<PipeKey> committedOutput =
       pending.outputCommitted ? pending.output : std::nullopt;
@@ -251,6 +265,7 @@ static void collectScopeIfValid(PendingScope &pending, CoreKind core,
   scope.ops = pending.ops;
   scope.firstOp = pending.firstOp;
   scope.lastOp = pending.lastOp;
+  scope.parentLoop = parentLoop;
   scopes.push_back(std::move(scope));
   pending.reset();
 }
@@ -276,11 +291,38 @@ static void includeMissingThrough(PendingScope &pending, Operation *last) {
                last);
 }
 
+// P1-6: Diagnose TPipe ops nested under scf.if / scf.for inside this loop.
+// The state-machine in collectScopesInFor only iterates direct children of
+// the loop body, so nested-region TPipe ops would be silently dropped from
+// scope identification (and from auto multi-buffer marking too). Emit one
+// warning per loop so the user knows preload analysis is incomplete instead
+// of silently producing a partial transaction graph.
+static void warnIfNestedTPipeOps(scf::ForOp forOp) {
+  Block *body = forOp.getBody();
+  bool emitted = false;
+  forOp.getOperation()->walk([&](Operation *op) {
+    if (emitted)
+      return WalkResult::interrupt();
+    if (op->getBlock() == body)
+      return WalkResult::advance();
+    if (!getPipeAction(op))
+      return WalkResult::advance();
+    op->emitWarning(
+          "pto-cv-mark-preload-scopes: TPipe op nested under control flow "
+          "inside scf.for; V1 only recognizes TPipe ops at the loop body's "
+          "top level, this transaction is excluded from preload analysis");
+    emitted = true;
+    return WalkResult::interrupt();
+  });
+}
+
 static void collectScopesInFor(scf::ForOp forOp, CoreKind core,
                                SmallVectorImpl<ScopeInfo> &scopes) {
+  warnIfNestedTPipeOps(forOp);
   PendingScope pending;
   Operation *segmentStart = &forOp.getBody()->front();
   Operation *terminator = forOp.getBody()->getTerminator();
+  Operation *parentLoopOp = forOp.getOperation();
 
   for (Operation &op : forOp.getBody()->without_terminator()) {
     PipeAction action = getPipeAction(&op);
@@ -290,7 +332,7 @@ static void collectScopesInFor(scf::ForOp forOp, CoreKind core,
     if (action.isTPop) {
       if (pending.active)
         includeMissingThrough(pending, op.getPrevNode());
-      collectScopeIfValid(pending, core, scopes);
+      collectScopeIfValid(pending, core, parentLoopOp, scopes);
       pending.input = action.input;
       includeRange(pending, &op, &op);
       segmentStart = &op;
@@ -299,7 +341,7 @@ static void collectScopesInFor(scf::ForOp forOp, CoreKind core,
 
     if (action.isTAlloc) {
       if (pending.active && pending.output)
-        collectScopeIfValid(pending, core, scopes);
+        collectScopeIfValid(pending, core, parentLoopOp, scopes);
       Operation *start =
           pending.active
               ? (pending.lastOp ? pending.lastOp->getNextNode() : &op)
@@ -321,7 +363,7 @@ static void collectScopesInFor(scf::ForOp forOp, CoreKind core,
         includeMissingThrough(pending, &op);
       }
       if (!pending.input || pending.inputReleased) {
-        collectScopeIfValid(pending, core, scopes);
+        collectScopeIfValid(pending, core, parentLoopOp, scopes);
         segmentStart = op.getNextNode();
       }
       continue;
@@ -331,7 +373,7 @@ static void collectScopesInFor(scf::ForOp forOp, CoreKind core,
       includeMissingThrough(pending, &op);
       pending.inputReleased = true;
       if (pending.outputCommitted) {
-        collectScopeIfValid(pending, core, scopes);
+        collectScopeIfValid(pending, core, parentLoopOp, scopes);
         segmentStart = op.getNextNode();
       }
       continue;
@@ -341,20 +383,22 @@ static void collectScopesInFor(scf::ForOp forOp, CoreKind core,
   if (pending.active)
     includeMissingThrough(pending, terminator ? terminator->getPrevNode()
                                               : nullptr);
-  collectScopeIfValid(pending, core, scopes);
+  collectScopeIfValid(pending, core, parentLoopOp, scopes);
 }
 
 static void buildScopeClasses(SmallVectorImpl<ScopeInfo> &scopes,
                               SmallVectorImpl<ScopeClass> &classes) {
   llvm::StringMap<int64_t> classByKey;
   for (ScopeInfo &scope : scopes) {
-    std::string key = getClassKey(scope.core, scope.input, scope.output);
+    std::string key =
+        getClassKey(scope.core, scope.parentLoop, scope.input, scope.output);
     auto [it, inserted] = classByKey.try_emplace(key, classes.size());
     if (inserted) {
       ScopeClass klass;
       klass.core = scope.core;
       klass.input = scope.input;
       klass.output = scope.output;
+      klass.parentLoop = scope.parentLoop;
       classes.push_back(std::move(klass));
     }
     scope.classId = it->second;
@@ -363,18 +407,64 @@ static void buildScopeClasses(SmallVectorImpl<ScopeInfo> &scopes,
 }
 
 static void assignPreloadNumbers(SmallVectorImpl<ScopeClass> &classes) {
-  std::map<PipeKey, int64_t> inputClass;
+  // P1-5: detect fan-out / fan-in. A pipe consumed by more than one class is
+  // a branched chain that the linear preload-num scheme cannot represent;
+  // skip every class touching that pipe and emit one warning per offending
+  // pipe so the user knows preload was disabled instead of being silently
+  // misapplied.
+  std::map<PipeKey, SmallVector<int64_t, 2>> inputClasses;
+  std::map<PipeKey, SmallVector<int64_t, 2>> outputClasses;
   for (auto [idx, klass] : llvm::enumerate(classes)) {
     if (klass.input)
-      inputClass.try_emplace(*klass.input, static_cast<int64_t>(idx));
+      inputClasses[*klass.input].push_back(static_cast<int64_t>(idx));
+    if (klass.output)
+      outputClasses[*klass.output].push_back(static_cast<int64_t>(idx));
+  }
+
+  llvm::DenseSet<int64_t> branchedClasses;
+  auto warnFanout = [&](const PipeKey &pipe,
+                        const SmallVector<int64_t, 2> &cls,
+                        const char *role) {
+    for (int64_t idx : cls)
+      branchedClasses.insert(idx);
+    if (cls.size() < 2)
+      return;
+    Operation *anchor = nullptr;
+    if (auto *parent = classes[cls.front()].parentLoop)
+      anchor = parent;
+    if (anchor)
+      anchor->emitWarning() << "pto-cv-mark-preload-scopes: pipe "
+                            << stringify(pipe) << " has " << cls.size() << " "
+                            << role
+                            << "s; branched CV chain not supported, "
+                               "skipping preload assignment for these scopes";
+  };
+  for (auto &kv : inputClasses)
+    if (kv.second.size() > 1)
+      warnFanout(kv.first, kv.second, "consumer");
+  for (auto &kv : outputClasses)
+    if (kv.second.size() > 1)
+      warnFanout(kv.first, kv.second, "producer");
+
+  // Map pipe -> the unique consumer class (only present when there is exactly
+  // one consumer for that pipe; otherwise the pipe is in branchedClasses and
+  // chain construction skips it).
+  std::map<PipeKey, int64_t> inputClass;
+  for (auto &kv : inputClasses) {
+    if (kv.second.size() == 1)
+      inputClass.try_emplace(kv.first, kv.second.front());
   }
 
   SmallVector<int64_t> next(classes.size(), -1);
   for (auto [idx, klass] : llvm::enumerate(classes)) {
     if (!klass.output)
       continue;
+    if (branchedClasses.contains(static_cast<int64_t>(idx)))
+      continue;
     auto it = inputClass.find(*klass.output);
     if (it == inputClass.end())
+      continue;
+    if (branchedClasses.contains(it->second))
       continue;
     next[idx] = it->second;
   }
@@ -382,6 +472,8 @@ static void assignPreloadNumbers(SmallVectorImpl<ScopeClass> &classes) {
   int64_t nextGroupId = 0;
   for (auto [startIdx, klass] : llvm::enumerate(classes)) {
     if (klass.input || !klass.output)
+      continue;
+    if (branchedClasses.contains(static_cast<int64_t>(startIdx)))
       continue;
 
     SmallVector<int64_t> chain;
@@ -523,13 +615,31 @@ static bool canWrapNoResultScope(const ScopeInfo &scope) {
       break;
   }
 
-  for (Operation *op : moved) {
-    for (Value result : op->getResults()) {
-      for (OpOperand &use : result.getUses()) {
-        if (!isInsideMovedRange(use.getOwner(), moved))
-          return false;
+  // P1-8: walk EVERY op (including nested-region ops) inside the moved range
+  // and check every result's uses. The earlier version only iterated the
+  // direct top-level ops, so a result produced inside e.g. a nested scf.if
+  // body and consumed outside the scope would slip past the check; the splice
+  // would then move the def while leaving the use behind, breaking dominance
+  // (and crashing the verifier with "operand defined in a region not visible
+  // here"). isInsideMovedRange already walks parent ops, so any nested use of
+  // a moved-range value is correctly accepted.
+  bool sawEscapedUse = false;
+  for (Operation *top : moved) {
+    top->walk([&](Operation *innerOp) {
+      if (sawEscapedUse)
+        return WalkResult::interrupt();
+      for (Value result : innerOp->getResults()) {
+        for (OpOperand &use : result.getUses()) {
+          if (!isInsideMovedRange(use.getOwner(), moved)) {
+            sawEscapedUse = true;
+            return WalkResult::interrupt();
+          }
+        }
       }
-    }
+      return WalkResult::advance();
+    });
+    if (sawEscapedUse)
+      return false;
   }
   return true;
 }

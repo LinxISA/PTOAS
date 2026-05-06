@@ -126,6 +126,23 @@ void CodeGenerator::insertBarrier(IRRewriter &rewriter, OperationBase *anchor,
   rewriter.create<pto::BarrierOp>(loc, pipeAttr);
 }
 
+// P0-2: Slot index = LOGICAL iteration % N = ((iv - lb) / step) % N, NOT
+// `iv % N`. When step is not 1 the latter only ever yields a stride-shifted
+// subset of slots (e.g. step=2,N=4 -> {0,2}), silently corrupting the rotation.
+// Keep a `iv % N` fast path for the canonical step=1, lb=0 case so the
+// generated IR stays minimal in the common scenario.
+static bool gssIsConstantIndexEqualTo(Value v, int64_t target) {
+  if (!v)
+    return false;
+  if (auto cst = v.getDefiningOp<arith::ConstantIndexOp>())
+    return cst.value() == target;
+  if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
+      return intAttr.getInt() == target;
+  }
+  return false;
+}
+
 Value CodeGenerator::getOrCreateLoopCounter(IRRewriter &rewriter,
                                             scf::ForOp forOp, int64_t n,
                                             Location loc) {
@@ -136,17 +153,57 @@ Value CodeGenerator::getOrCreateLoopCounter(IRRewriter &rewriter,
   rewriter.setInsertionPointToStart(forOp.getBody());
   Value iv = forOp.getInductionVar();
   Value cN = rewriter.create<arith::ConstantIndexOp>(loc, n);
-  Value rem = rewriter.create<arith::RemUIOp>(loc, iv, cN);
+  Value lb = forOp.getLowerBound();
+  Value step = forOp.getStep();
+  Value normalized = iv;
+  if (!gssIsConstantIndexEqualTo(lb, 0))
+    normalized = rewriter.create<arith::SubIOp>(loc, normalized, lb);
+  if (!gssIsConstantIndexEqualTo(step, 1))
+    normalized = rewriter.create<arith::DivUIOp>(loc, normalized, step);
+  Value rem = rewriter.create<arith::RemUIOp>(loc, normalized, cN);
   loop2BufferCounter_[key] = rem;
   return rem;
+}
+
+// P0-3: Anchor preservation.
+//
+// Earlier this function unconditionally placed the dyn wait at the loop body
+// start and the dyn set right before the yield. That works for the simple
+// "loop body is one straight segment" case but corrupts every other shape:
+//
+//   * If the consumer RWOp lives under an `scf.if`, the body-start dyn wait
+//     pops the queue even on iterations where the consumer is skipped, so we
+//     consume primes that were never produced.
+//   * If the producer RWOp lives under an `scf.if`, the before-terminator dyn
+//     set pushes onto the queue every iteration regardless of whether the
+//     producer ran, drifting the queue depth.
+//
+// The original solver already chose the actual conflicting RWOperations as
+// `cp->op1`/`cp->op2` (these point to the producer/consumer MLIR ops directly,
+// inside whatever control flow they live in). Use those positions when they
+// are inside the rotation loop body. Fall back to body-start/before-terminator
+// only when the anchor is missing or actually lives outside the loop (e.g.,
+// LCA-driven PlaceHolder anchors that resolved to the loop boundary).
+static Operation *getMultiBufferAnchorOpInLoop(RWOperation *rwOp,
+                                               scf::ForOp loop) {
+  if (!rwOp || !rwOp->op || !loop)
+    return nullptr;
+  Operation *op = rwOp->op;
+  // The op must live strictly inside the rotation loop body for the dyn ops
+  // to dominate / be dominated by the in-body selector value.
+  if (op == loop.getOperation())
+    return nullptr;
+  if (!loop->isProperAncestor(op))
+    return nullptr;
+  return op;
 }
 
 void CodeGenerator::emitMultiBufferSetWait(IRRewriter &rewriter,
                                            ConflictPair *cp) {
   // Multi-buffer codegen mirrors the InsertSync output:
   //   pre-loop:   N pto.set_flag (queue prime, one per event id)
-  //   in-loop:    pto.wait_flag_dyn(idx) at body start,
-  //               pto.set_flag_dyn(idx)  at body end (before yield)
+  //   in-loop:    pto.wait_flag_dyn(idx) at the consumer anchor,
+  //               pto.set_flag_dyn(idx)  at the producer anchor
   //   post-loop:  N pto.wait_flag (queue drain)
   // The dyn set/wait MUST live inside the loop body so they share the
   // `iv mod N` selector's dominance. GSS's default backward-sync anchors
@@ -168,6 +225,42 @@ void CodeGenerator::emitMultiBufferSetWait(IRRewriter &rewriter,
   auto srcAttr = makePipe(rewriter.getContext(), setPipe);
   auto dstAttr = makePipe(rewriter.getContext(), waitPipe);
 
+  // Resolve the lexical-first / lexical-last RWOp positions in the loop body.
+  //
+  // NOTE: cp->op1 / cp->op2 are NOT MLIR-lexical-ordered. processOrders sorts
+  // by syncIrIndex, and for backward-edge processing the "second iteration"
+  // copy of an op gets a LARGER syncIrIndex than the original. So for a
+  // backward dep between tload and tstore, cp->op1 is typically the prev-iter
+  // tstore (lexically LATER in the MLIR loop body) and cp->op2 is the
+  // next-iter tload copy (whose underlying MLIR op is lexically EARLIER).
+  // We need to compare actual MLIR positions and pick the right anchors.
+  //
+  // For backward (cross-iteration) slot rotation:
+  //   - The wait_flag_dyn must precede the iteration's FIRST MLIR user of the
+  //     slot, otherwise the next iteration could overwrite a slot still in
+  //     flight from two iterations ago.
+  //   - The set_flag_dyn must follow the iteration's LAST MLIR user of the
+  //     slot, otherwise the queue would advance before the slot is free.
+  // This matches the conservative body-start / before-terminator placement
+  // exactly when the loop body has no other ops besides op1..op2 and is
+  // strictly tighter when those ops live under nested control flow.
+  Operation *anchor1 = getMultiBufferAnchorOpInLoop(cp->op1, loop);
+  Operation *anchor2 = getMultiBufferAnchorOpInLoop(cp->op2, loop);
+  Operation *firstUserAnchor = nullptr;
+  Operation *lastUserAnchor = nullptr;
+  if (anchor1 && anchor2 && anchor1->getBlock() == anchor2->getBlock()) {
+    if (anchor1->isBeforeInBlock(anchor2)) {
+      firstUserAnchor = anchor1;
+      lastUserAnchor = anchor2;
+    } else {
+      firstUserAnchor = anchor2;
+      lastUserAnchor = anchor1;
+    }
+  }
+  // If anchors are in different blocks (e.g. one under scf.if), or one is
+  // missing, leave them null and fall back to body-start/before-terminator
+  // below. That preserves correctness at the cost of guarding fewer cases.
+
   // 1. Pre-loop: queue-prime with N concrete event ids.
   rewriter.setInsertionPoint(loop);
   for (int64_t i = 0; i < n; ++i) {
@@ -175,8 +268,9 @@ void CodeGenerator::emitMultiBufferSetWait(IRRewriter &rewriter,
     rewriter.create<pto::SetFlagOp>(loc, srcAttr, dstAttr, eidAttr);
   }
 
-  // 2. In-loop: build (or reuse) the `iv mod N` counter at the start of the
-  // body, then a select chain over the assigned event ids.
+  // 2. In-loop: build (or reuse) the slot counter at body start, then a
+  // select chain over the assigned event ids. The chain dominates every
+  // in-body anchor because it lives at body start.
   Value rem = getOrCreateLoopCounter(rewriter, loop, n, loc);
   rewriter.setInsertionPointAfter(rem.getDefiningOp());
   Value selected =
@@ -189,18 +283,30 @@ void CodeGenerator::emitMultiBufferSetWait(IRRewriter &rewriter,
     selected = rewriter.create<arith::SelectOp>(loc, eq, idv, selected);
   }
 
-  // wait_flag_dyn goes at the start of the body (just after the selector),
-  // set_flag_dyn goes right before the terminator (yield) of the body.
-  rewriter.setInsertionPointAfter(selected.getDefiningOp());
+  // 3a. wait_flag_dyn just before the iteration's first user of the slot.
+  // Fall back to body start (right after the selector) if that anchor lives
+  // outside the rotation loop body (e.g. solver chose loop-boundary
+  // PlaceHolders).
+  if (firstUserAnchor) {
+    rewriter.setInsertionPoint(firstUserAnchor);
+  } else {
+    rewriter.setInsertionPointAfter(selected.getDefiningOp());
+  }
   rewriter.create<pto::WaitFlagDynOp>(loc, srcAttr, dstAttr, selected);
 
-  Operation *terminator = loop.getBody()->getTerminator();
-  if (!terminator)
-    return;
-  rewriter.setInsertionPoint(terminator);
+  // 3b. set_flag_dyn right after the iteration's last user of the slot. Fall
+  // back to right before the loop terminator if that anchor lives outside.
+  if (lastUserAnchor) {
+    rewriter.setInsertionPointAfter(lastUserAnchor);
+  } else {
+    Operation *terminator = loop.getBody()->getTerminator();
+    if (!terminator)
+      return;
+    rewriter.setInsertionPoint(terminator);
+  }
   rewriter.create<pto::SetFlagDynOp>(loc, srcAttr, dstAttr, selected);
 
-  // 3. Post-loop: drain by waiting on each prime.
+  // 4. Post-loop: drain by waiting on each prime.
   rewriter.setInsertionPointAfter(loop);
   for (int64_t i = 0; i < n; ++i) {
     auto eidAttr = makeEvent(rewriter.getContext(), eids[i]);

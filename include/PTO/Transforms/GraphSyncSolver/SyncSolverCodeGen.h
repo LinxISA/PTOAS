@@ -1,67 +1,65 @@
-// Copyright (c) 2026 Huawei Technologies Co., Ltd.
-// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-// CANN Open Software License Agreement Version 2.0 (the "License").
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
-//===- SyncSolverCodeGen.h - Emit pto sync ops ------------------*- C++ -*-===//
+//===---------- SyncSolverCodeGen.h ---- Graph Sync Solver ----------------===//
 //
-// Walks the chosen ConflictPairs and writes back `pto.set_flag`,
-// `pto.wait_flag`, and `pto.barrier` ops at the right insertion points
-// (PlaceHolders and direct ops). The emission supports a single event id per
-// ConflictPair (no multi-buffer logic).
+// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 //===----------------------------------------------------------------------===//
-
 #ifndef MLIR_DIALECT_PTO_TRANSFORMS_GRAPHSYNCSOLVER_SYNCSOLVERCODEGEN_H
 #define MLIR_DIALECT_PTO_TRANSFORMS_GRAPHSYNCSOLVER_SYNCSOLVERCODEGEN_H
 
 #include "PTO/Transforms/GraphSyncSolver/SyncSolver.h"
 #include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
 #include "PTO/Transforms/GraphSyncSolver/Utility.h"
+
+#include "PTO/IR/PTO.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include <memory>
 
-namespace mlir {
-namespace pto {
-namespace syncsolver {
+namespace mlir::pto::syncsolver {
 
 class CodeGenerator {
 public:
-  SyncSolverOptions options;
+  const SyncSolverOptions options;
   func::FuncOp funcOp;
   std::unique_ptr<OperationBase> funcIr;
-  std::vector<std::unique_ptr<ConflictPair>> chosenConflictedPairs;
 
-  explicit CodeGenerator(std::unique_ptr<Solver> solver);
+private:
+  SyncMap syncMapBefore, syncMapAfter;
 
-  // Emit the sync ops into the underlying MLIR func::FuncOp.
+public:
+  CodeGenerator() = delete;
+
+  explicit CodeGenerator(std::unique_ptr<Solver> solver)
+      : options(solver->options) {
+    auto [syncBefore, syncAfter] = solver->getBeforeAfterSyncMaps();
+    syncMapBefore = std::move(syncBefore);
+    syncMapAfter = std::move(syncAfter);
+    funcOp = solver->funcOp;
+    funcIr = std::move(solver->funcIr);
+  }
+
   void generateResultOps();
 
 private:
-  void emitOne(IRRewriter &rewriter, ConflictPair *cp);
-
-  // Resolve the actual MLIR Operation* and a Location for an OperationBase,
-  // accounting for PlaceHolders that point at a parent scope op.
-  Operation *resolveSyncAnchor(OperationBase *opBase, bool insertAfter);
+  Operation *resolveSyncAnchor(OperationBase *opBase);
   Location resolveSyncLoc(OperationBase *opBase);
-
-  // Insert a single set/wait/barrier op at the given anchor.
-  void insertSetFlag(IRRewriter &rewriter, OperationBase *anchor,
-                     PIPE setPipe, PIPE waitPipe, int64_t eventId,
-                     bool insertAfter);
-  void insertWaitFlag(IRRewriter &rewriter, OperationBase *anchor,
-                      PIPE setPipe, PIPE waitPipe, int64_t eventId,
-                      bool insertAfter);
-  void insertBarrier(IRRewriter &rewriter, OperationBase *anchor, PIPE pipe,
-                     bool insertAfter);
+  void setInsertionPoint(IRRewriter &rewriter, OperationBase *opBase,
+                         bool insertAfter);
+  void emitSyncOp(IRRewriter &rewriter, SyncOp *syncOp);
+  void emitSyncMap(IRRewriter &rewriter, SyncMap &syncMap, bool insertAfter);
 };
 
-} // namespace syncsolver
-} // namespace pto
-} // namespace mlir
+} // namespace mlir::pto::syncsolver
 
 #endif // MLIR_DIALECT_PTO_TRANSFORMS_GRAPHSYNCSOLVER_SYNCSOLVERCODEGEN_H

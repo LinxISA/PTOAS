@@ -66,9 +66,10 @@ struct PTOGraphSyncSolverPass
     if (hasExplicitSync)
       return;
 
-    SyncSolverOptions opts;
-    opts.eventIdNumMax =
-        std::max<int64_t>(1, static_cast<int64_t>(this->eventIdNumMax));
+    SyncSolverOptions opts(SyncMode::INTRA_CORE_SYNC,
+                           /*isMemBasedArch=*/true,
+                           /*isRegBasedArch=*/false);
+    opts.eventIdNumMax = eventIdNumMax;
     auto translator = std::make_unique<IRTranslator>(func, opts);
 
     // Trivial / empty function bodies have nothing to solve.

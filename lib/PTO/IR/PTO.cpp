@@ -4325,14 +4325,14 @@ mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
       return emitOpError("expects scalar type == dst element type");
     if (*dstSpace == pto::AddressSpace::VEC && !isRowMajorTileBuf(dstTy))
       return emitOpError("expects vec dst to use row-major layout on A2/A3");
-    if (dstElem.isF16() || dstElem.isF32())
+    if (dstElem.isF16() || dstElem.isBF16() || dstElem.isF32())
       return mlir::success();
     if (auto it = mlir::dyn_cast<mlir::IntegerType>(dstElem)) {
       unsigned w = it.getWidth();
       if (w == 16 || w == 32)
         return mlir::success();
     }
-    return emitOpError("expects A2/A3 texpands dst element type to be i16/i32/f16/f32");
+    return emitOpError("expects A2/A3 texpands dst element type to be i16/i32/f16/bf16/f32");
   };
   auto verifyA5 = [&]() -> LogicalResult {
     Type dstTy = getDst().getType();
@@ -4346,14 +4346,14 @@ mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
     Type scalarTy = getScalar().getType();
     if (scalarTy != dstElem)
       return emitOpError("expects scalar type == dst element type");
-    if (dstElem.isF16() || dstElem.isF32())
+    if (dstElem.isF16() || dstElem.isBF16() || dstElem.isF32())
       return mlir::success();
     if (auto it = mlir::dyn_cast<mlir::IntegerType>(dstElem)) {
       unsigned w = it.getWidth();
       if (w == 8 || w == 16 || w == 32)
         return mlir::success();
     }
-    return emitOpError("expects A5 texpands dst element type to be i8/i16/i32/f16/f32");
+    return emitOpError("expects A5 texpands dst element type to be i8/i16/i32/f16/bf16/f32");
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }

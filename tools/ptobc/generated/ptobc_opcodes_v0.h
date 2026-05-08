@@ -177,6 +177,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1072, "pto.subview", 0, 0x01, 0x02, 0, 1, 0, 0x00},
   {0x1073, "pto.trowexpanddiv", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1074, "pto.trowexpandmul", 0, 0x00, 0x02, 0, 0, 0, 0x00},
+  {0x1075, "pto.tdequant", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x1076, "pto.taxpy", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1077, "pto.thistogram", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1078, "pto.tget_scale_addr", 0, 0x00, 0x00, 2, 0, 0, 0x00},
@@ -382,6 +383,7 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.subview", 0x1072)
     .Case("pto.trowexpanddiv", 0x1073)
     .Case("pto.trowexpandmul", 0x1074)
+    .Case("pto.tdequant", 0x1075)
     .Case("pto.taxpy", 0x1076)
     .Case("pto.thistogram", 0x1077)
     .Case("pto.tget_scale_addr", 0x1078)
@@ -572,6 +574,7 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.subview", OpcodeAndVariant{0x1072, 0, 0})
     .Case("pto.trowexpanddiv", OpcodeAndVariant{0x1073, 0, 0})
     .Case("pto.trowexpandmul", OpcodeAndVariant{0x1074, 0, 0})
+    .Case("pto.tdequant", OpcodeAndVariant{0x1075, 0, 0})
     .Case("pto.taxpy", OpcodeAndVariant{0x1076, 0, 0})
     .Case("pto.thistogram", OpcodeAndVariant{0x1077, 0, 0})
     .Case("pto.tget_scale_addr", OpcodeAndVariant{0x1078, 0, 0})

@@ -60,16 +60,7 @@ void RemoveRedundantSync::Run() {
  
   // 3. 逐个检查并移除冗余
   for (auto [setFlag, waitFlag] : syncOps) {
-    // Conservative mode:
-    // 1) keep multi-buffer and compensation syncs
-    // 2) only prune syncs that carry concrete dependency signatures
-    if (setFlag->eventIdNum != 1 || waitFlag->eventIdNum != 1) {
-      continue;
-    }
     if (setFlag->isCompensation || waitFlag->isCompensation) {
-      continue;
-    }
-    if (!hasSameSyncDepRoots(setFlag, waitFlag)) {
       continue;
     }
 
@@ -225,12 +216,9 @@ bool RemoveRedundantSync::CheckLoopBetween(LoopInstanceElement *loopElement,
 bool RemoveRedundantSync::CanMatchedSync(SmallVector<bool> &syncFinder,
                                          SyncOperation *relatedSync,
                                          SyncOperation *setFlag) {
-  // 1. 过滤不相关的同步
-  // - 类型必须匹配 (Wait/Set)
-  // - 不能是自己 (Index 相同)
-  // - Pipe 必须完全一致 (Src->Dst)
-  // - EventIdNum: 内部的同步能力必须强于外部 (related.eventIdNum >= set.eventIdNum ???) 
-  //   这里暂时假设 Single Buffer (eventIdNum=1) 场景即可覆盖主流程
+  // Set/wait flags serialize a pipe pair, not a particular root buffer.  A
+  // complete inner pair on the same pipe pair can cover an outer pair even when
+  // the memory dependency roots differ.
   
   bool isWait = (relatedSync->GetType() == SyncOperation::TYPE::WAIT_EVENT);
   bool isSet = (relatedSync->GetType() == SyncOperation::TYPE::SET_EVENT);
@@ -243,11 +231,8 @@ bool RemoveRedundantSync::CanMatchedSync(SmallVector<bool> &syncFinder,
  
   if (!isWait && !isSet) return false;
   if (relatedSync->GetSyncIndex() == setFlag->GetSyncIndex()) return false;
-  if (relatedSync->eventIdNum != setFlag->eventIdNum) return false;
-  if (relatedSync->GetForEndIndex() != setFlag->GetForEndIndex()) return false;
+  if (relatedSync->eventIdNum > setFlag->eventIdNum) return false;
   if (relatedSync->isCompensation || setFlag->isCompensation) return false;
-  if (!hasSameSyncDepRoots(relatedSync, setFlag))
-    return false;
   
   // Pipe 检查：内部同步必须也是解决同样的 Src -> Dst 依赖
   if (relatedSync->GetSrcPipe() != setFlag->GetSrcPipe()) return false;

@@ -154,8 +154,8 @@ public:
 public:
   SmallVector<int> eventIds;
   // Root buffers participating in the dependency that created this sync pair.
-  // Used by redundant-sync pruning to avoid removing syncs from unrelated
-  // producer/consumer chains that happen to share the same pipe pair.
+  // These are kept for allocation/widening heuristics and debug printing; set/
+  // wait redundancy pruning is based on the pipe pair semantics.
   SmallVector<Value> depRootBuffers;
   bool uselessSync{false};
   int eventIdNum{1};

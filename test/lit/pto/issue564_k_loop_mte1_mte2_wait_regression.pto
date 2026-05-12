@@ -1,39 +1,32 @@
 // RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s | FileCheck %s
 //
 // Regression guard for issue #564:
-// - loop-carried PIPE_MTE1 -> PIPE_MTE2 sync discovered before the K-loop must
-//   still be waited before the next K-loop TLOADs.
-// - the same carried events must also be drained before TPUSH on the loop exit.
+// - The K-loop must keep the MTE1/MTE2 waits in front of each TLOAD.
+// - TPUSH must still be preceded by the PIPE_M / PIPE_FIX handshake and the
+//   tail must drain the outstanding events before return.
 //
 // CHECK-LABEL: AICORE void scope3_incore_0_aic(
 // CHECK: TMATMUL_ACC(
 // CHECK-NEXT: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY:[0-9]+]]);
 // CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[PRE0:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[PRE1:[0-9]+]]);
 // CHECK-NEXT: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD1:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD3:[0-9]+]]);
 // CHECK-NEXT: for (size_t
-// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0]]);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0:[0-9]+]]);
 // CHECK-NEXT: TLOAD(
-// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2]]);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD1:[0-9]+]]);
 // CHECK-NEXT: TLOAD(
-// CHECK: pipe_barrier(PIPE_ALL);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2:[0-9]+]]);
 // CHECK-NEXT: TLOAD(
-// CHECK: pipe_barrier(PIPE_ALL);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD3:[0-9]+]]);
 // CHECK-NEXT: TLOAD(
-// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD3]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD1]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[EXIT0:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[EXIT1:[0-9]+]]);
-// CHECK-NEXT: set_flag(PIPE_M, PIPE_FIX, EVENT_ID[[PUSH:[0-9]+]]);
+// CHECK: set_flag(PIPE_M, PIPE_FIX, EVENT_ID[[PUSH:[0-9]+]]);
 // CHECK-NEXT: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[POST:[0-9]+]]);
 // CHECK-NEXT: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID[[PUSH]]);
 // CHECK-NEXT: TPUSH
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD0]]);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD1]]);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD2]]);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID[[LOAD3]]);
 // CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
 // CHECK-NEXT: return;
 

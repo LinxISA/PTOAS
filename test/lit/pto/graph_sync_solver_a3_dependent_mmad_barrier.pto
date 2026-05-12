@@ -1,0 +1,20 @@
+// RUN: ptoas --pto-arch=a3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 --emit-pto-ir %s | FileCheck %s --check-prefix=A3
+// RUN: ptoas --pto-arch=a5 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 --emit-pto-ir %s | FileCheck %s --check-prefix=A5
+
+module {
+  // A3-LABEL: func.func @dependent_mmad_same_acc
+  // A3: pto.tmatmul
+  // A3-NEXT: pto.barrier <PIPE_M>
+  // A3-NEXT: pto.tmatmul.acc
+  // A5-LABEL: func.func @dependent_mmad_same_acc
+  // A5: pto.tmatmul
+  // A5-NEXT: pto.tmatmul.acc
+  func.func @dependent_mmad_same_acc(
+      %lhs: memref<32x32xf16, #pto.address_space<left>>,
+      %rhs: memref<32x32xf16, #pto.address_space<right>>,
+      %acc: memref<32x32xf32, #pto.address_space<acc>>) {
+    pto.tmatmul ins(%lhs, %rhs : memref<32x32xf16, #pto.address_space<left>>, memref<32x32xf16, #pto.address_space<right>>) outs(%acc : memref<32x32xf32, #pto.address_space<acc>>)
+    pto.tmatmul.acc ins(%acc, %lhs, %rhs : memref<32x32xf32, #pto.address_space<acc>>, memref<32x32xf16, #pto.address_space<left>>, memref<32x32xf16, #pto.address_space<right>>) outs(%acc : memref<32x32xf32, #pto.address_space<acc>>)
+    return
+  }
+}

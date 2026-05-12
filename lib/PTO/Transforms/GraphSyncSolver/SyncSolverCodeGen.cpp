@@ -6,166 +6,144 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+//===---------- SyncSolverCodeGen.cpp ---- Graph Sync Solver --------------===//
+//===----------------------------------------------------------------------===//
+
 #include "PTO/Transforms/GraphSyncSolver/SyncSolverCodeGen.h"
 
 #include "PTO/IR/PTO.h"
-#include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
-#include "PTO/Transforms/GraphSyncSolver/Utility.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/PatternMatch.h"
 #include "llvm/Support/Casting.h"
-#include <cassert>
-
-#define DEBUG_TYPE "pto-graph-sync-solver-codegen"
 
 using namespace mlir;
 using namespace mlir::pto;
 using namespace mlir::pto::syncsolver;
 
-CodeGenerator::CodeGenerator(std::unique_ptr<Solver> solver)
-    : options(solver->options) {
-  funcOp = solver->funcOp;
-  funcIr = std::move(solver->funcIr);
-  for (auto &cp : solver->chosenConflictedPairs) {
-    if (!cp || !cp->eventIdNode)
-      continue;
-    cp->eventIds = cp->eventIdNode->getEventIds();
-    cp->eventIdNode = nullptr;
-  }
-  chosenConflictedPairs = std::move(solver->chosenConflictedPairs);
+static PipeAttr makePipe(MLIRContext *ctx, PIPE pipe) {
+  return PipeAttr::get(ctx, pipe);
 }
 
-static PipeAttr makePipe(MLIRContext *ctx, PIPE p) {
-  return PipeAttr::get(ctx, p);
+static EventAttr makeEvent(MLIRContext *ctx, int64_t eventId) {
+  return EventAttr::get(ctx, static_cast<EVENT>(eventId));
 }
 
-static EventAttr makeEvent(MLIRContext *ctx, int64_t eid) {
-  // PTO event enum currently provides EVENT_ID0..EVENT_ID7 (0..7).
-  return EventAttr::get(ctx, static_cast<EVENT>(eid));
-}
-
-Operation *CodeGenerator::resolveSyncAnchor(OperationBase *opBase,
-                                            bool insertAfter) {
-  assert(opBase);
-  // PlaceHolders may not have an `op` directly; map to the surrounding
-  // loop / block / scope's MLIR op.
+Operation *CodeGenerator::resolveSyncAnchor(OperationBase *opBase) {
+  if (!opBase)
+    return nullptr;
   if (auto *ph = dyn_cast<PlaceHolder>(opBase)) {
-    if (ph->beforeOp != nullptr) {
-      assert(ph->beforeOp->op);
+    if (ph->beforeOp)
       return ph->beforeOp->op;
-    }
-    if (ph->afterOp != nullptr) {
-      assert(ph->afterOp->op);
+    if (ph->afterOp)
       return ph->afterOp->op;
-    }
-    if (ph->block != nullptr) {
-      // Block start/end: anchor at the block's parent op.
-      Operation *parent = ph->block->getParentOp();
-      return parent;
-    }
+    if (ph->block)
+      return ph->block->getParentOp();
     return nullptr;
   }
   return opBase->op;
 }
 
 Location CodeGenerator::resolveSyncLoc(OperationBase *opBase) {
-  if (Operation *anchor = resolveSyncAnchor(opBase, /*insertAfter=*/false))
+  if (Operation *anchor = resolveSyncAnchor(opBase))
     return anchor->getLoc();
   return funcOp.getLoc();
 }
 
-void CodeGenerator::insertSetFlag(IRRewriter &rewriter, OperationBase *anchor,
-                                  PIPE setPipe, PIPE waitPipe, int64_t eventId,
-                                  bool insertAfter) {
-  Operation *anchorOp = resolveSyncAnchor(anchor, insertAfter);
-  if (!anchorOp)
-    return;
-  Location loc = resolveSyncLoc(anchor);
-  if (insertAfter)
-    rewriter.setInsertionPointAfter(anchorOp);
-  else
-    rewriter.setInsertionPoint(anchorOp);
-  auto srcAttr = makePipe(rewriter.getContext(), setPipe);
-  auto dstAttr = makePipe(rewriter.getContext(), waitPipe);
-  auto eidAttr = makeEvent(rewriter.getContext(), eventId);
-  rewriter.create<pto::SetFlagOp>(loc, srcAttr, dstAttr, eidAttr);
-}
-
-void CodeGenerator::insertWaitFlag(IRRewriter &rewriter, OperationBase *anchor,
-                                   PIPE setPipe, PIPE waitPipe, int64_t eventId,
-                                   bool insertAfter) {
-  Operation *anchorOp = resolveSyncAnchor(anchor, insertAfter);
-  if (!anchorOp)
-    return;
-  Location loc = resolveSyncLoc(anchor);
-  if (insertAfter)
-    rewriter.setInsertionPointAfter(anchorOp);
-  else
-    rewriter.setInsertionPoint(anchorOp);
-  auto srcAttr = makePipe(rewriter.getContext(), setPipe);
-  auto dstAttr = makePipe(rewriter.getContext(), waitPipe);
-  auto eidAttr = makeEvent(rewriter.getContext(), eventId);
-  rewriter.create<pto::WaitFlagOp>(loc, srcAttr, dstAttr, eidAttr);
-}
-
-void CodeGenerator::insertBarrier(IRRewriter &rewriter, OperationBase *anchor,
-                                  PIPE pipe, bool insertAfter) {
-  Operation *anchorOp = resolveSyncAnchor(anchor, insertAfter);
-  if (!anchorOp)
-    return;
-  Location loc = resolveSyncLoc(anchor);
-  if (insertAfter)
-    rewriter.setInsertionPointAfter(anchorOp);
-  else
-    rewriter.setInsertionPoint(anchorOp);
-  auto pipeAttr = makePipe(rewriter.getContext(), pipe);
-  rewriter.create<pto::BarrierOp>(loc, pipeAttr);
-}
-
-void CodeGenerator::emitOne(IRRewriter &rewriter, ConflictPair *cp) {
-  if (cp->isBarrierAll) {
-    // Single PIPE_ALL barrier inserted just before the wait anchor.
-    insertBarrier(rewriter, cp->waitOp, PIPE::PIPE_ALL,
-                  /*insertAfter=*/false);
+void CodeGenerator::setInsertionPoint(IRRewriter &rewriter,
+                                      OperationBase *opBase,
+                                      bool insertAfter) {
+  if (auto *ph = dyn_cast_or_null<PlaceHolder>(opBase)) {
+    // Block-start placeholder: insert at the very top of the block.
+    if (ph->scopeBegin && ph->block) {
+      rewriter.setInsertionPointToStart(ph->block);
+      return;
+    }
+    // Block-end placeholder: insert before the terminator if any, otherwise
+    // at the end of the block.
+    if (ph->scopeEnd && ph->block) {
+      if (!ph->block->empty() &&
+          ph->block->back().hasTrait<OpTrait::IsTerminator>())
+        rewriter.setInsertionPoint(&ph->block->back());
+      else
+        rewriter.setInsertionPointToEnd(ph->block);
+      return;
+    }
+    // Loop-boundary slot. The placeholder names the linked loop op via
+    // beforeOp/afterOp; the side is picked by the `insertAfter` flag, which
+    // by the solver's convention agrees with the field that is set.
+    OperationBase *linked = ph->beforeOp ? ph->beforeOp : ph->afterOp;
+    if (linked && linked->op) {
+      if (insertAfter)
+        rewriter.setInsertionPointAfter(linked->op);
+      else
+        rewriter.setInsertionPoint(linked->op);
+      return;
+    }
+    // Malformed placeholder: fall back to the function entry to keep the
+    // pass from crashing.
+    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
     return;
   }
-  if (cp->isBarrier()) {
-    insertBarrier(rewriter, cp->waitOp, cp->setCorePipeInfo.pipe,
-                  /*insertAfter=*/false);
+  Operation *anchor = opBase ? opBase->op : nullptr;
+  if (!anchor) {
+    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
     return;
   }
-  // Normal set/wait pair. Single event id in the minimal port.
-  const auto &eids = cp->eventIds;
-  assert(!eids.empty());
-  if (eids.empty())
+  if (insertAfter)
+    rewriter.setInsertionPointAfter(anchor);
+  else
+    rewriter.setInsertionPoint(anchor);
+}
+
+void CodeGenerator::emitSyncOp(IRRewriter &rewriter, SyncOp *syncOp) {
+  if (auto *barrier = dyn_cast<BarrierOp>(syncOp)) {
+    rewriter.create<pto::BarrierOp>(resolveSyncLoc(barrier),
+                                    makePipe(rewriter.getContext(),
+                                             barrier->pipe));
     return;
-  int64_t eid = eids[0];
-  PIPE setPipe = cp->setCorePipeInfo.pipe;
-  PIPE waitPipe = cp->waitCorePipeInfo.pipe;
-  // SetFlag goes AFTER the producer anchor; WaitFlag goes BEFORE the
-  // consumer anchor.
-  insertSetFlag(rewriter, cp->setOp, setPipe, waitPipe, eid,
-                /*insertAfter=*/true);
-  insertWaitFlag(rewriter, cp->waitOp, setPipe, waitPipe, eid,
-                 /*insertAfter=*/false);
+  }
+
+  auto *setWait = dyn_cast<SetWaitOp>(syncOp);
+  if (!setWait || setWait->eventIds.empty())
+    return;
+
+  // The first/last-iter wrapping path (scf.if(isFirstIter/isLastIter) {
+  // set/wait }) lives behind the MmadL1 decomposition optimization in the
+  // solver, which is currently force-disabled by SyncSolverOptions ctor.
+  // If anyone re-enables it, codegen needs a matching update before this
+  // assert can be relaxed.
+  assert(!setWait->checkFirstIter &&
+         "checkFirstIter wrapping not implemented in codegen");
+  assert(!setWait->checkLastIter &&
+         "checkLastIter wrapping not implemented in codegen");
+
+  // One set/wait op per assigned event id. The current solver only assigns
+  // a single id per node, but the codegen handles multi-id assignments so a
+  // future multi-buffer pass can plug in without re-touching this layer.
+  auto srcAttr = makePipe(rewriter.getContext(), setWait->pipeSrc);
+  auto dstAttr = makePipe(rewriter.getContext(), setWait->pipeDst);
+  Location loc = resolveSyncLoc(setWait);
+  bool isSet = isa<SetFlagOp>(setWait);
+  bool isWait = isa<WaitFlagOp>(setWait);
+  for (int64_t eventId : setWait->eventIds) {
+    auto eventAttr = makeEvent(rewriter.getContext(), eventId);
+    if (isSet)
+      rewriter.create<pto::SetFlagOp>(loc, srcAttr, dstAttr, eventAttr);
+    else if (isWait)
+      rewriter.create<pto::WaitFlagOp>(loc, srcAttr, dstAttr, eventAttr);
+  }
+}
+
+void CodeGenerator::emitSyncMap(IRRewriter &rewriter, SyncMap &syncMap,
+                                bool insertAfter) {
+  for (auto &[opBase, syncOps] : syncMap) {
+    setInsertionPoint(rewriter, opBase, insertAfter);
+    for (auto &syncOp : syncOps)
+      emitSyncOp(rewriter, syncOp.get());
+  }
 }
 
 void CodeGenerator::generateResultOps() {
   IRRewriter rewriter(funcOp.getContext());
-  // Stable order: sort by (waitOp address, then id) just so codegen is
-  // deterministic regardless of DenseMap iteration; emission order does not
-  // affect correctness because each op is anchored independently.
-  std::vector<ConflictPair *> ordered;
-  ordered.reserve(chosenConflictedPairs.size());
-  for (auto &cp : chosenConflictedPairs)
-    ordered.push_back(cp.get());
-  std::sort(ordered.begin(), ordered.end(),
-            [](ConflictPair *a, ConflictPair *b) {
-              if (a->endIndex != b->endIndex)
-                return a->endIndex < b->endIndex;
-              return a->id < b->id;
-            });
-  for (auto *cp : ordered)
-    emitOne(rewriter, cp);
+  emitSyncMap(rewriter, syncMapBefore, /*insertAfter=*/false);
+  emitSyncMap(rewriter, syncMapAfter, /*insertAfter=*/true);
 }

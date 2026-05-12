@@ -1,0 +1,26 @@
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-materialize-tile-handles %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func @materialize_tile_handles_emitc() {
+    %scale = arith.constant 2.0 : f16
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.taxpy ins(%src, %scale : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f16)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// IR: IR Dump After PTOMaterializeTileHandles
+// IR: pto.alloc_tile addr = {{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// IR: pto.alloc_tile addr = {{.*}} : !pto.tile_buf<vec, 16x16xf32>
+// IR-NOT: pto.materialize_tile
+
+// EMITC-LABEL: __global__ AICORE void materialize_tile_handles_emitc()
+// EMITC: Tile<TileType::Vec, half, 16, 16, BLayout::RowMajor, 16, 16, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// EMITC: TASSIGN(
+// EMITC: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 16, 16, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// EMITC: TASSIGN(
+// EMITC: TAXPY(

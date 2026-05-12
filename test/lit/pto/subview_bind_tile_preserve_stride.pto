@@ -39,7 +39,13 @@ module {
   }
 }
 
-// CHECK-COUNT-4: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
-// CHECK-COUNT-4: TSTORE(
+// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// CHECK-DAG: TSTORE(
+// CHECK-DAG: TSTORE(
+// CHECK-DAG: TSTORE(
+// CHECK-DAG: TSTORE(
 // CHECK-NOT: Tile<TileType::Vec, float, 8, 8, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
 // CHECK-NOT: copy_ubuf_to_gm_align_b32(

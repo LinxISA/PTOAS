@@ -7,7 +7,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 cmake_minimum_required(VERSION 3.20.0)
-project(ptoas VERSION 0.37)
+project(ptoas VERSION 0.38)
 
 set(PTOAS_RELEASE_VERSION_OVERRIDE ""
     CACHE STRING "Override the version printed by ptoas --version")
@@ -74,6 +74,17 @@ include(AddMLIR)
 # =========================================================
 # 3. 配置构建环境
 # =========================================================
+# Keep warning policy in CMake so CI, wheel, and external build entrypoints
+# all enforce the same diagnostics contract.
+option(PTOAS_ENABLE_WERROR "Treat PTOAS warnings as errors" ON)
+if(PTOAS_ENABLE_WERROR)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror>)
+  elseif(MSVC)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/WX>)
+  endif()
+endif()
+
 # macOS: 移除已废弃的 -undefined suppress，避免 ld 警告（保留 -undefined dynamic_lookup 即可）
 if(APPLE)
   foreach(_var CMAKE_SHARED_MODULE_CREATE_CXX_FLAGS CMAKE_MODULE_LINKER_FLAGS)

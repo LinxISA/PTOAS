@@ -43,6 +43,7 @@ std::unique_ptr<Pass> createPTOVerifyTFreePass();
 
 // Creates a pass for ...
 std::unique_ptr<Pass> createPTOInsertSyncPass();
+std::unique_ptr<Pass> createPTOInjectBarrierAllSyncPass();
 
 // Graph-based intra-core sync solver (coexists with PTOInsertSync).
 std::unique_ptr<Pass>
@@ -66,6 +67,7 @@ createPlanMemoryPass(const PlanMemoryOptions &planMemoryOption = {});
 
 std::unique_ptr<Pass> createPTORemoveRedundantBarrierPass();
 std::unique_ptr<Pass> createPTOViewToMemrefPass();
+std::unique_ptr<Pass> createPTOMaterializeTileHandlesPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();
 

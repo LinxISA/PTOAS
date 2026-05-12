@@ -10,7 +10,7 @@
 Test that TGetValOp rejects MAT tile_buf (Ascend hardware does not support
 reading from MAT tile_buf to scalar). Verification must fail.
 """
-from mlir.ir import Context, Location, Module, InsertionPoint
+from mlir.ir import Context, Location, Module, InsertionPoint, MLIRError
 from mlir.dialects import func, arith, pto
 from mlir.ir import F32Type, IndexType
 
@@ -56,5 +56,7 @@ def build():
 
 
 if __name__ == "__main__":
-    build()
-    print("PASS: TGetValOp with MAT tile_buf correctly failed verification")
+    try:
+        print(build())
+    except MLIRError as err:
+        print(f"EXPECTED_VERIFIER_FAILURE: {err}")

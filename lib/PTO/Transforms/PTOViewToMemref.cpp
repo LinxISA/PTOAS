@@ -586,6 +586,46 @@ static LogicalResult reconcileSCFIfResultTypes(func::FuncOp func) {
   return success();
 }
 
+static LogicalResult reconcileSCFForResultTypes(func::FuncOp func) {
+  SmallVector<scf::ForOp, 8> forOps;
+  func.walk([&](scf::ForOp forOp) { forOps.push_back(forOp); });
+
+  for (scf::ForOp forOp : forOps) {
+    if (forOp.getNumResults() == 0)
+      continue;
+
+    auto yield = dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+    if (!yield) {
+      forOp.emitError("result-bearing scf.for must end with scf.yield");
+      return failure();
+    }
+
+    if (yield.getNumOperands() != forOp.getNumResults() ||
+        forOp.getInitArgs().size() != forOp.getNumResults()) {
+      forOp.emitError("scf.for result count does not match iter/yield values");
+      return failure();
+    }
+
+    for (unsigned i = 0; i < forOp.getNumResults(); ++i) {
+      Type initTy = forOp.getInitArgs()[i].getType();
+      Type yieldTy = yield.getOperand(i).getType();
+      if (initTy != yieldTy) {
+        forOp.emitError() << "scf.for init/yield type mismatch at result #" << i
+                          << ": init=" << initTy << ", yield=" << yieldTy;
+        return failure();
+      }
+
+      BlockArgument iterArg = forOp.getRegionIterArg(i);
+      if (iterArg.getType() != initTy)
+        iterArg.setType(initTy);
+      if (forOp.getResult(i).getType() != initTy)
+        forOp.getResult(i).setType(initTy);
+    }
+  }
+
+  return success();
+}
+
 static LogicalResult markLoweredSetValidShapeOps(func::FuncOp func,
                                                  MLIRContext *ctx) {
   WalkResult result = func.walk([&](mlir::pto::SetValidShapeOp op) {
@@ -3348,6 +3388,10 @@ struct PTOViewToMemrefPass
       // Stage 4: Reconcile control-flow result types
       // ------------------------------------------------------------------
       if (failed(reconcileSCFIfResultTypes(func))) {
+        signalPassFailure();
+        return;
+      }
+      if (failed(reconcileSCFForResultTypes(func))) {
         signalPassFailure();
         return;
       }

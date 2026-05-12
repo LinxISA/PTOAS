@@ -6,43 +6,73 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-//===- SyncSolverIR.h - GraphSyncSolver in-memory IR ------------*- C++ -*-===//
-//
-// In-memory hierarchical representation used by the GraphSyncSolver. It is a
-// trimmed port of bishengir's SyncSolverIR: scopes / loops / conditions /
-// place-holders + pipe-typed RWOperation leaves and Set/Wait/Barrier sync
-// nodes. MmadL1 decomposition and unit-flag fields are intentionally absent.
-//
+//===------------- SyncSolverIR.h ---- Graph Sync Solver ------------------===//
 //===----------------------------------------------------------------------===//
-
 #ifndef MLIR_DIALECT_PTO_TRANSFORMS_GRAPHSYNCSOLVER_SYNCSOLVERIR_H
 #define MLIR_DIALECT_PTO_TRANSFORMS_GRAPHSYNCSOLVER_SYNCSOLVERIR_H
 
 #include "PTO/IR/PTO.h"
+#include "PTO/Transforms/GraphSyncSolver/MemInfo.h"
 #include "PTO/Transforms/InsertSync/SyncCommon.h"
-#include "mlir/IR/Block.h"
-#include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 #include <memory>
-#include <string>
+#include <utility>
 
-namespace mlir {
-namespace pto {
-namespace syncsolver {
+namespace mlir::pto::syncsolver {
+
+// PTO does not currently expose HIVM's unit-flag interface. Keep the upstream
+// fields and method names, but make the feature inert unless matching PTO ops
+// are added later.
+class UnitFlagInfoBase {
+public:
+  virtual ~UnitFlagInfoBase() = default;
+  void reset() {}
+  void merge(const UnitFlagInfoBase &, bool = true, bool = true) {}
+  bool disabledAsSet() const { return true; }
+  bool disabledAsWait() const { return true; }
+  llvm::SmallVector<int64_t> getUnitFlagModesAsSet(bool = true) const {
+    return {};
+  }
+  llvm::SmallVector<int64_t> getUnitFlagModesAsWait(bool = true) const {
+    return {};
+  }
+};
 
 class OperationBase;
 class Scope;
-
+class Loop;
+class Condition;
+class RWOperation;
+class MmadL0Operation;
 using Body = std::vector<std::unique_ptr<OperationBase>>;
 
+// Currently gss-code-gen will handle offsetting induction variables for
+// multibuffer-enabled sync pairs, which can be done by create-preload.
+// TODO: move create-preload pass after gss in the PTO compilation pipeline and
+// let it handle preload-offset values.
+struct EventIdInfo {
+  int64_t eventIdNum{0};
+  int64_t eventIdRepeatNum{1};
+  int64_t preloadOffset1{0};
+  int64_t preloadOffset2{0};
+  LoopLikeOpInterface multibufferLoop{nullptr};
+  LoopLikeOpInterface multibufferUnrollLoop1{nullptr};
+  LoopLikeOpInterface multibufferUnrollLoop2{nullptr};
+  EventIdInfo() {};
+  explicit EventIdInfo(int64_t eventIdNum) : eventIdNum(eventIdNum) {};
+};
+
 enum struct OpType {
+  OPERATION,
   PLACE_HOLDER,
   SCOPE,
   FUNCTION,
   FUNCTION_BLOCK,
   LOOP,
   LOOP_END,
+  MMAD_SCOPE,
   CONDITION,
   SCOPE_END,
   SYNC_OP,
@@ -53,77 +83,119 @@ enum struct OpType {
   SW_FLAG_OP_END,
   SYNC_OP_END,
   RW_OPERATION,
+  MMAD_OPERATION,
+  MMAD_LOAD_L0A_OPERATION,
+  MMAD_LOAD_L0B_OPERATION,
+  MMAD_LOAD_BIAS_OPERATION,
   RW_OPERATION_END
 };
 
+std::string getOpTypeStr(OpType opType);
+
 class OperationBase {
-private:
-  static int globalIndex;
 
 public:
   int id{-1};
   const OpType opType;
-  Operation *op{nullptr};
+  mlir::Operation *op{nullptr};
   OperationBase *parentOp{nullptr};
 
+private:
+  // Monotonic id allocator used to assign stable ids to in-memory ops.
+  static int globalIndex;
+
+public:
   OperationBase() = delete;
-  OperationBase(OpType opType, Operation *op, OperationBase *parentOp)
+  OperationBase(const OpType &opType, Operation *op, OperationBase *parentOp)
       : opType(opType), op(op), parentOp(parentOp) {
     id = globalIndex++;
   }
+
+public:
   virtual ~OperationBase() = default;
 
-  static bool sameScope(OperationBase *a, OperationBase *b);
+  // Return true when op1 and op2 share the same immediate parent operation.
+  static bool sameScope(OperationBase *op1, OperationBase *op2);
+
+  // Compute the depth (levels up to root) of the provided operation.
   int getDepth() const;
+
+  // Return the ancestor `dist` levels above this operation.
   OperationBase *getNthParent(int dist);
+
+  // Given two operations, return the pair of operations directly below their
+  // LCA.
   static std::pair<OperationBase *, OperationBase *>
-  getLCAPair(OperationBase *a, OperationBase *b);
-  static OperationBase *getParentLoop(OperationBase *op);
+  getLCAPair(OperationBase *op1, OperationBase *op2);
+
+  template <typename TyOp> TyOp *getParentOfType() {
+    OperationBase *cur = this->parentOp;
+    while (cur != nullptr && !isa<TyOp>(cur)) {
+      cur = cur->parentOp;
+    }
+    return llvm::dyn_cast_if_present<TyOp>(cur);
+  }
+
+  // Find nearest parent operation that is a loop-like construct, or nullptr.
+  static OperationBase *getParentloop(OperationBase *op);
+
+  // Find the nearest parent condition operation, or nullptr.
+  static OperationBase *getParentCondition(OperationBase *op);
+
+  // Return true if this operation is a strict ancestor of `op`.
   bool isProperAncestor(OperationBase *op);
+
+  // Collect and return all parent operations (walking upwards).
   llvm::SmallVector<OperationBase *> getAllParents();
 
-  template <typename Ty> Ty *getParentOfType() {
-    OperationBase *cur = parentOp;
-    while (cur != nullptr && !llvm::isa<Ty>(cur))
-      cur = cur->parentOp;
-    return llvm::dyn_cast_if_present<Ty>(cur);
-  }
+  // Human-readable string representation (override in derived classes).
+  virtual std::string str(int indent = 0, bool recursive = false) const = 0;
+
+  static OperationBase *getUnlikelyParentCondition(OperationBase *op);
 };
 
-// Position anchor inside the IR tree. Used so the solver can refer to
-// the gap before/after a loop, the start/end of a block, etc.
 class PlaceHolder : public OperationBase {
 public:
-  Block *block{nullptr};
+  mlir::Block *block{nullptr};
   OperationBase *beforeOp{nullptr};
   OperationBase *afterOp{nullptr};
   Scope *scopeBegin{nullptr};
   Scope *scopeEnd{nullptr};
 
+public:
   PlaceHolder(Operation *op, OperationBase *parentOp)
       : OperationBase(OpType::PLACE_HOLDER, op, parentOp) {}
 
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::PLACE_HOLDER;
   }
+
+  std::string str(int indent, bool recursive) const override;
 };
 
 class Scope : public OperationBase {
+
 public:
   Body body;
+  std::optional<int64_t> preloadNum;
+  std::optional<int64_t> maxPreloadNum;
 
-  Scope(OpType opType = OpType::SCOPE, Operation *op = nullptr,
+public:
+  Scope(const OpType &opType = OpType::SCOPE, Operation *op = nullptr,
         OperationBase *parentOp = nullptr)
       : OperationBase(opType, op, parentOp) {}
 
   static bool classof(const OperationBase *e) {
     return e->opType >= OpType::SCOPE && e->opType < OpType::SCOPE_END;
   }
+
+  std::string str(int indent, bool recursive) const override;
 };
 
 class FunctionBlock : public Scope {
 public:
   FunctionBlock() : Scope(OpType::FUNCTION_BLOCK) {}
+
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::FUNCTION_BLOCK;
   }
@@ -131,78 +203,143 @@ public:
 
 class Function : public Scope {
 public:
-  explicit Function(Operation *op) : Scope(OpType::FUNCTION, op, nullptr) {}
+  Function(Operation *op) : Scope(OpType::FUNCTION, op, nullptr) {}
+
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::FUNCTION;
   }
 };
 
 class Loop : public Scope {
-public:
-  // Mark an scf.for as parallel: backward-sync is unnecessary for its
-  // cross-iteration dependencies (mirrors the HIVM `hivm.parallel_loop` attr).
-  bool isParallel{false};
 
+private:
+public:
+  bool isParallel{false};
+  std::optional<int64_t> multibufferUnrollNum;
   Loop(Operation *op, OperationBase *parentOp)
       : Scope(OpType::LOOP, op, parentOp) {}
+
   static bool classof(const OperationBase *e) {
     return e->opType >= OpType::LOOP && e->opType < OpType::LOOP_END;
+  }
+
+  std::string str(int indent, bool recursive) const override;
+};
+
+class MmadL1LoopOp : public Scope {
+private:
+public:
+  MmadL0Operation *mmadL0Op{nullptr};
+
+  MmadL1LoopOp(Operation *op, OperationBase *parentOp)
+      : Scope(OpType::MMAD_SCOPE, op, parentOp) {};
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::MMAD_SCOPE;
   }
 };
 
 class Condition : public Scope {
+
+private:
 public:
   Scope *trueScope{nullptr};
   Scope *falseScope{nullptr};
-
+  bool isUnlikely{false};
   Condition(Operation *op, OperationBase *parentOp,
             std::unique_ptr<Scope> trueScope, std::unique_ptr<Scope> falseScope)
       : Scope(OpType::CONDITION, op, parentOp) {
-    if (trueScope)
-      setTrueScope(std::move(trueScope));
-    if (falseScope) {
-      assert(this->trueScope != nullptr);
-      setFalseScope(std::move(falseScope));
+    if (trueScope != nullptr) {
+      this->setTrueScope(std::move(trueScope));
     }
+    if (falseScope != nullptr) {
+      assert(this->trueScope != nullptr);
+      this->setFalseScope(std::move(falseScope));
+    }
+  };
+
+  Scope *getTrueScope() const {
+    assert(this->trueScope != nullptr);
+    return this->trueScope;
   }
 
-  void setTrueScope(std::unique_ptr<Scope> s) {
-    s->parentOp = this;
-    trueScope = s.get();
-    body.push_back(std::move(s));
+  Scope *getFalseScope() const {
+    assert(this->falseScope != nullptr);
+    return this->falseScope;
   }
-  void setFalseScope(std::unique_ptr<Scope> s) {
-    s->parentOp = this;
-    falseScope = s.get();
-    body.push_back(std::move(s));
+
+  void setFalseScope(std::unique_ptr<Scope> falseScope) {
+    assert(falseScope != nullptr);
+    falseScope->parentOp = this;
+    this->falseScope = falseScope.get();
+    this->body.push_back(std::move(falseScope));
   }
-  bool hasFalseScope() const { return falseScope != nullptr; }
-  Scope *getTrueScope() const { return trueScope; }
-  Scope *getFalseScope() const { return falseScope; }
+
+  void setTrueScope(std::unique_ptr<Scope> trueScope) {
+    assert(trueScope != nullptr);
+    trueScope->parentOp = this;
+    this->trueScope = trueScope.get();
+    this->body.push_back(std::move(trueScope));
+  }
+
+  bool hasFalseScope() const { return this->falseScope != nullptr; }
 
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::CONDITION;
   }
+
+  std::string str(int indent, bool recursive) const override;
 };
 
-// Pipe-typed read/write op. Reuses InsertSync's BaseMemInfo for the address
-// model so we do not duplicate the alias-tracing logic.
 class RWOperation : public OperationBase {
 public:
-  PIPE pipeRead{PIPE::PIPE_UNASSIGNED};
-  PIPE pipeWrite{PIPE::PIPE_UNASSIGNED};
+  pto::TCoreType coreType{pto::TCoreType::CUBE_OR_VECTOR};
+  pto::PIPE pipeRead{pto::PIPE::PIPE_UNASSIGNED};
+  pto::PIPE pipeWrite{pto::PIPE::PIPE_UNASSIGNED};
+  llvm::SmallVector<MemInfo> readMemInfo;
+  llvm::SmallVector<MemInfo> writeMemInfo;
+  bool hasUnitFlagFeat{false};
+  UnitFlagInfoBase mergedUnitFlagInfo;
 
-  // Pointers into Buffer2MemInfoMap entries owned by IRTranslator.
-  llvm::SmallVector<const BaseMemInfo *> readMemInfo;
-  llvm::SmallVector<const BaseMemInfo *> writeMemInfo;
+  const llvm::SmallVector<Value> readMemVals;
+  const llvm::SmallVector<Value> writeMemVals;
+  const llvm::SmallVector<llvm::SmallVector<int64_t>> testReadMemVals;
+  const llvm::SmallVector<llvm::SmallVector<int64_t>> testWriteMemVals;
 
-  RWOperation(Operation *op, OperationBase *parentOp, PIPE pipeRead,
-              PIPE pipeWrite,
-              llvm::SmallVector<const BaseMemInfo *> readMemInfo,
-              llvm::SmallVector<const BaseMemInfo *> writeMemInfo)
-      : OperationBase(OpType::RW_OPERATION, op, parentOp), pipeRead(pipeRead),
-        pipeWrite(pipeWrite), readMemInfo(std::move(readMemInfo)),
-        writeMemInfo(std::move(writeMemInfo)) {}
+public:
+  RWOperation(Operation *op, OperationBase *parentOp, pto::TCoreType coreType,
+              pto::PIPE pipeRead, pto::PIPE pipeWrite,
+              const llvm::SmallVector<Value> &readMemVals,
+              const llvm::SmallVector<Value> &writeMemVals,
+              OpType opType = OpType::RW_OPERATION)
+      : OperationBase(opType, op, parentOp), coreType(coreType),
+        pipeRead(pipeRead), pipeWrite(pipeWrite), readMemVals(readMemVals),
+        writeMemVals(writeMemVals) {
+    for (auto &val : readMemVals) {
+      readMemInfo.push_back(getMemInfo(val));
+    }
+    for (auto &val : writeMemVals) {
+      writeMemInfo.push_back(getMemInfo(val));
+    }
+  };
+  RWOperation(
+      Operation *op, OperationBase *parentOp, pto::TCoreType coreType,
+      pto::PIPE pipeRead, pto::PIPE pipeWrite,
+      const llvm::SmallVector<llvm::SmallVector<int64_t>> &testReadMemVals,
+      const llvm::SmallVector<llvm::SmallVector<int64_t>> &testWriteMemVals,
+      OpType opType = OpType::RW_OPERATION)
+      : OperationBase(opType, op, parentOp), coreType(coreType),
+        pipeRead(pipeRead), pipeWrite(pipeWrite),
+        testReadMemVals(testReadMemVals), testWriteMemVals(testWriteMemVals) {
+    for (auto &val : testReadMemVals) {
+      readMemInfo.push_back(getMemInfo(val));
+    }
+    for (auto &val : testWriteMemVals) {
+      writeMemInfo.push_back(getMemInfo(val));
+    }
+  };
+
+  std::string str(int indent, bool recursive) const override;
 
   static bool classof(const OperationBase *e) {
     return e->opType >= OpType::RW_OPERATION &&
@@ -210,10 +347,73 @@ public:
   }
 };
 
+class LoadL0AOp : public RWOperation {
+private:
+public:
+  LoadL0AOp(Operation *op, OperationBase *parentOp, pto::TCoreType coreType,
+            pto::PIPE pipeRead, pto::PIPE pipeWrite,
+            const llvm::SmallVector<Value> &readMemVals,
+            const llvm::SmallVector<Value> &writeMemVals)
+      : RWOperation(op, parentOp, coreType, pipeRead, pipeWrite, readMemVals,
+                    writeMemVals, OpType::MMAD_LOAD_L0A_OPERATION) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::MMAD_LOAD_L0A_OPERATION;
+  }
+};
+
+class LoadL0BOp : public RWOperation {
+private:
+public:
+  LoadL0BOp(Operation *op, OperationBase *parentOp, pto::TCoreType coreType,
+            pto::PIPE pipeRead, pto::PIPE pipeWrite,
+            const llvm::SmallVector<Value> &readMemVals,
+            const llvm::SmallVector<Value> &writeMemVals)
+      : RWOperation(op, parentOp, coreType, pipeRead, pipeWrite, readMemVals,
+                    writeMemVals, OpType::MMAD_LOAD_L0B_OPERATION) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::MMAD_LOAD_L0B_OPERATION;
+  }
+};
+
+class LoadBiasOp : public RWOperation {
+private:
+public:
+  LoadBiasOp(Operation *op, OperationBase *parentOp, pto::TCoreType coreType,
+             pto::PIPE pipeRead, pto::PIPE pipeWrite,
+             const llvm::SmallVector<Value> &readMemVals,
+             const llvm::SmallVector<Value> &writeMemVals)
+      : RWOperation(op, parentOp, coreType, pipeRead, pipeWrite, readMemVals,
+                    writeMemVals, OpType::MMAD_LOAD_BIAS_OPERATION) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::MMAD_LOAD_BIAS_OPERATION;
+  }
+};
+
+class MmadL0Operation : public RWOperation {
+private:
+public:
+  MmadL0Operation(Operation *op, OperationBase *parentOp,
+                  pto::TCoreType coreType, pto::PIPE pipeRead,
+                  pto::PIPE pipeWrite,
+                  const llvm::SmallVector<Value> &readMemVals,
+                  const llvm::SmallVector<Value> &writeMemVals)
+      : RWOperation(op, parentOp, coreType, pipeRead, pipeWrite, readMemVals,
+                    writeMemVals, OpType::MMAD_OPERATION) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::MMAD_OPERATION;
+  }
+};
+
 class SyncOp : public OperationBase {
 public:
-  SyncOp(OpType opType, Operation *op, OperationBase *parentOp)
+  std::optional<int> debugId;
+  SyncOp(const OpType &opType, Operation *op, OperationBase *parentOp)
       : OperationBase(opType, op, parentOp) {}
+
   static bool classof(const OperationBase *e) {
     return e->opType >= OpType::SYNC_OP && e->opType < OpType::SYNC_OP_END;
   }
@@ -222,13 +422,20 @@ public:
 class SetWaitOp : public SyncOp {
 public:
   llvm::SmallVector<int64_t> eventIds;
-  PIPE pipeSrc{PIPE::PIPE_UNASSIGNED};
-  PIPE pipeDst{PIPE::PIPE_UNASSIGNED};
+  pto::TCoreType coreType{pto::TCoreType::CUBE_OR_VECTOR};
+  pto::PIPE pipeSrc{pto::PIPE::PIPE_UNASSIGNED};
+  pto::PIPE pipeDst{pto::PIPE::PIPE_UNASSIGNED};
+  EventIdInfo eventIdInfo;
+  bool allAtOnce{false};
+  bool checkFirstIter{false};
+  bool checkLastIter{false};
 
-  SetWaitOp(OpType t, Operation *op, OperationBase *parent,
-            llvm::SmallVector<int64_t> eids, PIPE pSrc, PIPE pDst)
-      : SyncOp(t, op, parent), eventIds(std::move(eids)), pipeSrc(pSrc),
-        pipeDst(pDst) {}
+  SetWaitOp(const OpType &opType, Operation *op, OperationBase *parentOp,
+            const llvm::SmallVector<int64_t> &eventIds, pto::PIPE pipeSrc,
+            pto::PIPE pipeDst)
+      : SyncOp(opType, op, parentOp), eventIds(eventIds), pipeSrc(pipeSrc),
+        pipeDst(pipeDst) {}
+
   static bool classof(const OperationBase *e) {
     return e->opType >= OpType::SW_FLAG_OP &&
            e->opType < OpType::SW_FLAG_OP_END;
@@ -236,39 +443,68 @@ public:
 };
 
 class SetFlagOp : public SetWaitOp {
+
+private:
 public:
-  SetFlagOp(Operation *op, OperationBase *parent,
-            llvm::SmallVector<int64_t> eids, PIPE pSrc, PIPE pDst)
-      : SetWaitOp(OpType::SET_FLAG_OP, op, parent, std::move(eids), pSrc,
-                  pDst) {}
+  SetFlagOp(Operation *op, OperationBase *parentOp,
+            const llvm::SmallVector<int64_t> &eventIds, pto::PIPE pipeSrc,
+            pto::PIPE pipeDst)
+      : SetWaitOp(OpType::SET_FLAG_OP, op, parentOp, eventIds, pipeSrc,
+                  pipeDst) {}
+
+  std::unique_ptr<SetFlagOp> clone() {
+    return std::make_unique<SetFlagOp>(op, parentOp, eventIds, pipeSrc,
+                                       pipeDst);
+  }
+
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::SET_FLAG_OP;
   }
+
+  std::string str(int indent, bool recursive) const override;
 };
 
 class WaitFlagOp : public SetWaitOp {
+
+private:
 public:
-  WaitFlagOp(Operation *op, OperationBase *parent,
-             llvm::SmallVector<int64_t> eids, PIPE pSrc, PIPE pDst)
-      : SetWaitOp(OpType::WAIT_FLAG_OP, op, parent, std::move(eids), pSrc,
-                  pDst) {}
+  WaitFlagOp(Operation *op, OperationBase *parentOp,
+             const llvm::SmallVector<int64_t> &eventIds, pto::PIPE pipeSrc,
+             pto::PIPE pipeDst)
+      : SetWaitOp(OpType::WAIT_FLAG_OP, op, parentOp, eventIds, pipeSrc,
+                  pipeDst) {}
+
+  std::unique_ptr<WaitFlagOp> clone() {
+    return std::make_unique<WaitFlagOp>(op, parentOp, eventIds, pipeSrc,
+                                        pipeDst);
+  }
+
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::WAIT_FLAG_OP;
   }
+
+  std::string str(int indent, bool recursive) const override;
 };
 
 class BarrierOp : public SyncOp {
+
 public:
-  PIPE pipe{PIPE::PIPE_UNASSIGNED};
-  BarrierOp(Operation *op, OperationBase *parent, PIPE pipe)
-      : SyncOp(OpType::BARRIER_OP, op, parent), pipe(pipe) {}
+  pto::PIPE pipe{pto::PIPE::PIPE_UNASSIGNED};
+
+private:
+public:
+  BarrierOp(Operation *op, OperationBase *parentOp, pto::PIPE pipe)
+      : SyncOp(OpType::BARRIER_OP, op, parentOp), pipe(pipe) {}
+
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::BARRIER_OP;
   }
+
+  std::string str(int indent, bool recursive) const override;
 };
 
-} // namespace syncsolver
-} // namespace pto
-} // namespace mlir
+// Bool comparator for sync ops ordering (used for containers).
+bool operator<(const SyncOp &op1, const SyncOp &op2);
+} // namespace mlir::pto::syncsolver
 
 #endif // MLIR_DIALECT_PTO_TRANSFORMS_GRAPHSYNCSOLVER_SYNCSOLVERIR_H

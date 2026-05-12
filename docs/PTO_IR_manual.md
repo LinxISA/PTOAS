@@ -1686,6 +1686,8 @@ All vector arithmetic operations execute on the **Vector pipeline** (`PIPE_V`) a
 | `pto.tpartadd` | Partial elementwise add |
 | `pto.tpartmax` | Partial elementwise max |
 | `pto.tpartmin` | Partial elementwise min |
+| `pto.tpartargmax` | Partial elementwise max with index propagation |
+| `pto.tpartargmin` | Partial elementwise min with index propagation |
 | `pto.tpartmul` | Partial elementwise mul |
 | `pto.tprelu` | `dst[i,j] = src0[i,j] > 0 ? src0[i,j] : src1[i,j] * src0[i,j]` |
 
@@ -2302,6 +2304,170 @@ pto.tpartmin ins(%a, %b : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32,
              outs(%c : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32,
                  v_row=32, v_col=32, blayout=row_major, slayout=none_box,
                  fractal=512, pad=0>)
+```
+
+---
+
+##### `pto.tpartargmax` - Partial Elementwise ArgMax
+
+**Summary:** Partial elementwise max that also propagates the selected element index.
+
+**Semantics:**
+
+```
+For each element (i, j) in the valid region:
+    if src0[i, j] is selected:
+        dst[i, j] = src0[i, j]
+        dstIdx[i, j] = src0Idx[i, j]
+    else:
+        dst[i, j] = src1[i, j]
+        dstIdx[i, j] = src1Idx[i, j]
+```
+
+The selection is the target-defined partial max comparison between `src0` and `src1`. Equal-value tie behavior follows the underlying PTO ISA implementation.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src0` | `pto.tile_buf` | First source value tile buffer |
+| `src1` | `pto.tile_buf` | Second source value tile buffer |
+| `src0Idx` | `pto.tile_buf` | Index tile paired with `src0` |
+| `src1Idx` | `pto.tile_buf` | Index tile paired with `src1` |
+| `dst` | `pto.tile_buf` | Destination value tile buffer |
+| `dstIdx` | `pto.tile_buf` | Destination index tile buffer |
+
+**Results:** None. Writes into `dst` and `dstIdx` via DPS pattern.
+
+**Assembly Format:**
+
+```
+pto.tpartargmax ins(<src0>, <src1>, <src0Idx>, <src1Idx> :
+                    <src0_type>, <src1_type>, <src0Idx_type>, <src1Idx_type>)
+                outs(<dst>, <dstIdx> : <dst_type>, <dstIdx_type>)
+```
+
+**Constraints & Verification:**
+
+- `src0`, `src1`, and `dst` element types must be identical and have the same shape.
+- `src0Idx`, `src1Idx`, and `dstIdx` element types must be identical and must be `i32`.
+- Data tiles and index tiles must have the same shape.
+- Each data tile and its paired index tile must have the same valid shape.
+- Uses the same partial valid-region constraints as `pto.tpartmax`.
+- **Implementation checks (A2A3)**: data element type must be one of `i32`, `i16`, `f16`, `f32`.
+- **Implementation checks (A5)**: data element type must be one of `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+- Operates on data in the **VEC (UB)** memory space
+- EmitC lowers to `TPARTARGMAX(dst, src0, src1, dstIdx, src0Idx, src1Idx)`
+
+**Basic Example:**
+
+```mlir
+pto.tpartargmax ins(%a, %b, %a_idx, %b_idx :
+                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>)
+                outs(%c, %c_idx :
+                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>)
+```
+
+---
+
+##### `pto.tpartargmin` - Partial Elementwise ArgMin
+
+**Summary:** Partial elementwise min that also propagates the selected element index.
+
+**Semantics:**
+
+```
+For each element (i, j) in the valid region:
+    if src0[i, j] is selected:
+        dst[i, j] = src0[i, j]
+        dstIdx[i, j] = src0Idx[i, j]
+    else:
+        dst[i, j] = src1[i, j]
+        dstIdx[i, j] = src1Idx[i, j]
+```
+
+The selection is the target-defined partial min comparison between `src0` and `src1`. Equal-value tie behavior follows the underlying PTO ISA implementation.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src0` | `pto.tile_buf` | First source value tile buffer |
+| `src1` | `pto.tile_buf` | Second source value tile buffer |
+| `src0Idx` | `pto.tile_buf` | Index tile paired with `src0` |
+| `src1Idx` | `pto.tile_buf` | Index tile paired with `src1` |
+| `dst` | `pto.tile_buf` | Destination value tile buffer |
+| `dstIdx` | `pto.tile_buf` | Destination index tile buffer |
+
+**Results:** None. Writes into `dst` and `dstIdx` via DPS pattern.
+
+**Assembly Format:**
+
+```
+pto.tpartargmin ins(<src0>, <src1>, <src0Idx>, <src1Idx> :
+                    <src0_type>, <src1_type>, <src0Idx_type>, <src1Idx_type>)
+                outs(<dst>, <dstIdx> : <dst_type>, <dstIdx_type>)
+```
+
+**Constraints & Verification:**
+
+- `src0`, `src1`, and `dst` element types must be identical and have the same shape.
+- `src0Idx`, `src1Idx`, and `dstIdx` element types must be identical and must be `i32`.
+- Data tiles and index tiles must have the same shape.
+- Each data tile and its paired index tile must have the same valid shape.
+- Uses the same partial valid-region constraints as `pto.tpartmin`.
+- **Implementation checks (A2A3)**: data element type must be one of `i32`, `i16`, `f16`, `f32`.
+- **Implementation checks (A5)**: data element type must be one of `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+- Operates on data in the **VEC (UB)** memory space
+- EmitC lowers to `TPARTARGMIN(dst, src0, src1, dstIdx, src0Idx, src1Idx)`
+
+**Basic Example:**
+
+```mlir
+pto.tpartargmin ins(%a, %b, %a_idx, %b_idx :
+                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>)
+                outs(%c, %c_idx :
+                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>,
+                    !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=32,
+                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                    fractal=512, pad=0>)
 ```
 
 ---
@@ -5311,7 +5477,7 @@ pto.texpands ins(<scalar> : <scalar_type>) outs(<dst> : <dst_type>)
    - Tile must use row-major layout (`blayout=row_major`).
    - Valid bounds: `valid row <= rows` and `valid column <= cols`.
 - **Implementation checks (A5)**
-  - Tile element type must be one of: `i8`, `i16`, `i32`, `f16`, `f32`.
+  - Tile element type must be one of: `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`.
   - Tile must use `loc=vec` or `loc=mat`.
   - If `loc=vec`:
    - Valid bounds: `valid row <= rows` and `valid column <= cols`.
@@ -6962,6 +7128,63 @@ Constraint: dst.rows >= src.rows and dst.cols >= src.cols
 
 ```mlir
 pto.tfillpad_expand ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)
+```
+
+---
+
+##### `pto.tfillpad_inplace` - Fill Padding Region In Place
+
+**Summary:** Fills the padding region in place on shared backing storage. `src` provides the valid-region bounds and `dst` provides the target pad bounds/configuration.
+
+**Semantics:**
+
+```
+For elements inside src valid_shape:
+    dst keeps the existing value
+For padded elements described by dst:
+    dst = PadVal(dst)
+```
+
+This operation is intended for the in-place case where `src` and `dst` refer to the same tile storage, often the same SSA value.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src` | `pto.tile_buf` | Source tile supplying valid-region bounds |
+| `dst` | `pto.tile_buf` | Destination tile supplying pad configuration and receiving the in-place update |
+
+**Results:** None. Writes into `dst` via DPS pattern.
+
+**Assembly Format:**
+
+```
+pto.tfillpad_inplace ins(<src> : <src_type>)
+                     outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- `dst.pad` must not be `null`.
+- `src` and `dst` element sizes must match, and the element size must be `1`, `2`, or `4` bytes.
+- `src.rows/cols` and `dst.rows/cols` must have the same static shape.
+- The verifier uses the same non-expand shape constraints as `pto.tfillpad`.
+- Unlike `pto.tfillpad_expand`, `dst` is not allowed to have a larger static shape than `src`.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+- EmitC lowers to `TFILLPAD_INPLACE(dst, src)`
+
+**Basic Example:**
+
+```mlir
+pto.tfillpad_inplace ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32,
+                         v_row=32, v_col=32, blayout=row_major, slayout=none_box,
+                         fractal=512, pad=1>)
+                     outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32,
+                         v_row=32, v_col=32, blayout=row_major, slayout=none_box,
+                         fractal=512, pad=1>)
 ```
 
 ---
@@ -8685,7 +8908,7 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 
 - Synchronous point-to-point ops: `pto.comm.tput`, `pto.comm.tget`
 - Synchronous signal ops: `pto.comm.tnotify`, `pto.comm.twait`, `pto.comm.ttest`
-- Synchronous collective ops: `pto.comm.tbroadcast`, `pto.comm.comm_tgather`, `pto.comm.comm_tscatter`, `pto.comm.treduce`
+- Synchronous collective ops: `pto.comm.tbroadcast`, `pto.comm.tgather`, `pto.comm.tscatter`, `pto.comm.treduce`
 - Asynchronous communication/session ops: `pto.comm.build_async_session`, `pto.comm.tput_async`, `pto.comm.tget_async`, `pto.comm.wait_async_event`, `pto.comm.test_async_event`
 
 ##### `pto.comm.build_async_session` - Create Async DMA Session
@@ -8811,9 +9034,8 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 |------|------|-------------|
 | `dst` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Remote destination buffer |
 | `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Local source buffer |
-| `ping` | `pto.tile_buf` / local VEC memref | Required staging tile |
-| `pong` | `pto.tile_buf` / local VEC memref | Optional second staging tile for ping-pong transfer |
-| `atomicType` | `#pto.atomic_type<...>` | Atomic mode, default `atomic_none` |
+| `buf` | `buf(%ping)` or `buf(%ping, %pong)` | Staging bundle: one or two local VEC tiles |
+| `atomicType` | `#pto<atomic_type ...>` | Atomic mode, e.g. `atomic_none` or `atomic_add` |
 
 **Constraints & Verification:**
 
@@ -8821,14 +9043,14 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 - `dst` and `src` must have the same element type and static shape.
 - `ping` / `pong` must be local VEC tile-like values whose element type matches `src`.
 
-**Basic Example:**
+**Examples:**
+
+Staging operands use the `buf(...)` bundle: one tile `buf(%ping)`, or ping–pong `buf(%ping, %pong)` for overlapping transfers.
 
 ```mlir
-pto.comm.tput %dst, %src, %ping {atomicType = #pto.atomic_type<atomic_none>} :
-  !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+pto.comm.tput(%dst, %src, buf(%ping) : !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {atomicType = #pto<atomic_type atomic_none>}
 
-pto.comm.tput %dst, %src, %ping, %pong {atomicType = #pto.atomic_type<atomic_add>} :
-  !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+pto.comm.tput(%dst, %src, buf(%ping, %pong) : !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {atomicType = #pto<atomic_type atomic_add>}
 ```
 
 ---
@@ -8843,19 +9065,20 @@ pto.comm.tput %dst, %src, %ping, %pong {atomicType = #pto.atomic_type<atomic_add
 |------|------|-------------|
 | `dst` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Local destination buffer |
 | `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Remote source buffer |
-| `ping` | `pto.tile_buf` / local VEC memref | Required staging tile |
-| `pong` | `pto.tile_buf` / local VEC memref | Optional second staging tile for ping-pong transfer |
+| `ping` | `pto.tile_buf` / local VEC memref | Required staging tile (wrapped in `buf(%ping)`) |
+| `pong` | `pto.tile_buf` / local VEC memref | Optional second staging tile (`buf(%ping, %pong)`) |
 
 **Constraints & Verification:**
 
 - Same GM/global-like and staging constraints as `pto.comm.tput`.
 - `dst` and `src` must have the same element type and static shape.
 
-**Basic Example:**
+**Examples:**
 
 ```mlir
-pto.comm.tget %dst, %src, %ping :
-  !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+pto.comm.tget(%dst, %src, buf(%ping) : !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+pto.comm.tget(%dst, %src, buf(%ping, %pong) : !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
 ```
 
 ---
@@ -8868,21 +9091,22 @@ pto.comm.tget %dst, %src, %ping :
 
 | Op | Operands | Attributes | Result |
 |----|----------|------------|--------|
-| `pto.comm.tnotify` | `signal`, `value` | `notifyOp = #pto.notify_op<atomic_add/set>` | none |
-| `pto.comm.twait` | `signal`, `cmpValue` | `cmp = #pto.wait_cmp<eq/ne/gt/ge/lt/le>` | none |
-| `pto.comm.ttest` | `signal`, `cmpValue` | `cmp = #pto.wait_cmp<eq/ne/gt/ge/lt/le>` | `i1` |
+| `pto.comm.tnotify` | `signal`, `value` | `notifyOp = #pto<notify_op atomic_add>` or `#pto<notify_op set>` | none |
+| `pto.comm.twait` | `signal`, `cmpValue` | `cmp = #pto<wait_cmp eq/ne/gt/ge/lt/le>` | none |
+| `pto.comm.ttest` | `signal`, `cmpValue` | `cmp = #pto<wait_cmp eq/ne/gt/ge/lt/le>` | `i1` |
 
 **Constraints & Verification:**
 
 - `signal` must be a GM-shaped value with element type `i32`.
 - `value` / `cmpValue` must be signless integer scalars.
 
-**Basic Example:**
+**Examples:**
 
 ```mlir
-pto.comm.tnotify %sig, %v {notifyOp = #pto.notify_op<set>} : !pto.partition_tensor_view<1xi32>, i32
-pto.comm.twait %sig, %v {cmp = #pto.wait_cmp<ge>} : !pto.partition_tensor_view<1xi32>, i32
-%ok = pto.comm.ttest %sig, %v {cmp = #pto.wait_cmp<eq>} : !pto.partition_tensor_view<1xi32>, i32 -> i1
+pto.comm.tnotify(%sig, %v : !pto.partition_tensor_view<1xi32>, i32) {notifyOp = #pto<notify_op set>}
+pto.comm.tnotify(%sig, %v : !pto.partition_tensor_view<1xi32>, i32) {notifyOp = #pto<notify_op atomic_add>}
+pto.comm.twait(%sig, %v : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+%ok = pto.comm.ttest(%sig, %v : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp eq>} -> i1
 ```
 
 ---
@@ -8896,7 +9120,7 @@ pto.comm.twait %sig, %v {cmp = #pto.wait_cmp<ge>} : !pto.partition_tensor_view<1
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | GM-shaped value | Root source buffer |
-| `ping` / `pong` | local VEC tile-like values | Staging tiles |
+| `recv` | `recv(%ping)` or `recv(%ping, %pong)` | One or two local VEC staging tiles |
 | `group` | variadic GM-shaped values | Parallel group members |
 | `root` | `i32` attr | Root rank index inside `group` |
 
@@ -8906,20 +9130,45 @@ pto.comm.twait %sig, %v {cmp = #pto.wait_cmp<ge>} : !pto.partition_tensor_view<1
 - `src` must have the same type as each `group` member.
 - `root` must be in range `[0, group.size)`.
 
-**Basic Example:**
+**Examples:**
+
+Single receive buffer:
 
 ```mlir
-pto.comm.tbroadcast %src, %ping, %g0, %g1, %g2 {root = 1, operandSegmentSizes = array<i32: 1, 1, 0, 3>} :
-  !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>
+pto.comm.tbroadcast(%src, recv(%ping), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {root = 1 : i32}
+```
+
+Optional ping–pong (`recv(%ping, %pong)` adds a second tile type in the operand-type list):
+
+```mlir
+pto.comm.tbroadcast(%src, recv(%ping, %pong), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {root = 1 : i32}
 ```
 
 ---
 
-##### `pto.comm.comm_tgather` - Collective Gather
+##### `pto.comm.tgather` - Collective Gather
 
 **Summary:** Communication collective that lowers to `pto::comm::TGATHER(...)`. This op is distinct from tile-level `pto.tgather`.
 
-**Arguments:** `dst`, `ping`, optional `pong`, variadic `group`, `root`
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `dst` | GM-shaped value | Destination buffer (gather target) |
+| `recv` | `recv(%ping)` or `recv(%ping, %pong)` | Staging tile(s) |
+| `group` | variadic GM-shaped values | Parallel group members |
+| `root` | `i32` attr | Root rank index inside `group` |
 
 **Constraints & Verification:**
 
@@ -8927,19 +9176,64 @@ pto.comm.tbroadcast %src, %ping, %g0, %g1, %g2 {root = 1, operandSegmentSizes = 
 - `dst` element type must match the group element type.
 - `ping` / `pong` must be local VEC tile-like values with matching element type.
 
+**Examples:**
+
+```mlir
+pto.comm.tgather(%dst, recv(%ping), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {root = 1 : i32}
+
+pto.comm.tgather(%dst, recv(%ping, %pong), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {root = 1 : i32}
+```
+
 ---
 
-##### `pto.comm.comm_tscatter` - Collective Scatter
+##### `pto.comm.tscatter` - Collective Scatter
 
 **Summary:** Communication collective that lowers to `pto::comm::TSCATTER(...)`. This op is distinct from tile-level `pto.tscatter`.
 
-**Arguments:** `src`, `ping`, optional `pong`, variadic `group`, `root`
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src` | GM-shaped value | Source buffer (scatter root) |
+| `recv` | `recv(%ping)` or `recv(%ping, %pong)` | Staging tile(s) |
+| `group` | variadic GM-shaped values | Parallel group members |
+| `root` | `i32` attr | Root rank index inside `group` |
 
 **Constraints & Verification:**
 
 - `group` must be non-empty and all members must have identical types.
 - `src` element type must match the group element type.
 - `ping` / `pong` must be local VEC tile-like values with matching element type.
+
+**Examples:**
+
+```mlir
+pto.comm.tscatter(%src, recv(%ping), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {root = 1 : i32}
+
+pto.comm.tscatter(%src, recv(%ping, %pong), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {root = 1 : i32}
+```
 
 ---
 
@@ -8951,18 +9245,45 @@ pto.comm.tbroadcast %src, %ping, %g0, %g1, %g2 {root = 1, operandSegmentSizes = 
 
 | Name | Type | Description |
 |------|------|-------------|
-| `dst` | GM-shaped value | Root destination buffer |
+| `dst` | GM-shaped value | Reduced output buffer |
 | `acc` | local VEC tile-like value | Accumulation tile |
-| `recvPing` / `recvPong` | local VEC tile-like values | Receive staging tiles |
+| `recv` | `recv(%ping)` or `recv(%ping, %pong)` | One or two receive staging tiles |
 | `group` | variadic GM-shaped values | Parallel group members |
-| `reduceOp` | `#pto.reduce_op<sum/max/min>` | Reduction mode |
+| `reduceOp` | `#pto<reduce_op sum>` / `#pto<reduce_op max>` / `#pto<reduce_op min>` | Reduction mode |
 | `root` | `i32` attr | Root rank index inside `group` |
 
 **Constraints & Verification:**
 
 - `group` must be non-empty and all members must have identical types.
 - `dst` element type must match the group element type.
-- `acc` and `recvPing` / `recvPong` must be local VEC tile-like values whose element type matches `dst`.
+- `acc` and `recv(%ping)` / `recv(%ping, %pong)` operands must be local VEC tile-like values whose element type matches `dst`.
+
+**Examples:**
+
+Sum with a single receive tile:
+
+```mlir
+pto.comm.treduce(%dst, %acc, recv(%ping), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {reduceOp = #pto<reduce_op sum>, root = 1 : i32}
+```
+
+Max with ping–pong receive buffers (two staging tiles — operand-type list includes three `tile_buf` entries: `acc`, `ping`, `pong`):
+
+```mlir
+pto.comm.treduce(%dst, %acc, recv(%ping, %pong), group(%g0, %g1, %g2) :
+  !pto.partition_tensor_view<128xf32>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>,
+  !pto.partition_tensor_view<128xf32>) {reduceOp = #pto<reduce_op max>, root = 1 : i32}
+```
 
 ---
 

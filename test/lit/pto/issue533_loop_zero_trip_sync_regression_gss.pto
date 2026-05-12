@@ -1,4 +1,4 @@
-// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s | FileCheck %s
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s -o %t && FileCheck %s < %t
 //
 // Regression guard for issue #533 (zero-trip loop):
 // a post-loop vector consumer must wait on MTE2->V before TROWEXPANDDIV.

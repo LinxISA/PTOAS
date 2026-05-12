@@ -385,9 +385,9 @@ static std::optional<Layout> inferMakeTensorViewLayout(
     MakeTensorViewOp op, ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
     bool &isAmbiguous) {
   auto pref = collectPreferredLayoutFromConsumers(op.getResult());
-  auto preferredForAmbiguous =
-      (!pref.conflict && isMinorColsOne(shape)) ? pref.preferred
-                                                : std::nullopt;
+  std::optional<Layout> preferredForAmbiguous = std::nullopt;
+  if (!pref.conflict && isMinorColsOne(shape))
+    preferredForAmbiguous = pref.preferred;
   return inferLayout5D(
       shape, strides,
       elemByteSize(

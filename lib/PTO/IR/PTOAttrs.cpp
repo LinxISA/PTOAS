@@ -144,7 +144,7 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
       sl = toSLayoutAttr(ctx, a);
       if (!sl) return {};
     } else if (key == "s_fractal_size") {
-      int32_t v;
+      int32_t v = 0;
       if (p.parseInteger(v)) return {};
       sz = IntegerAttr::get(IntegerType::get(ctx, 32), v);
     } else if (key == "pad") {

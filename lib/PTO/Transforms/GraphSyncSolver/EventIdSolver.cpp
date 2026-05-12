@@ -6,286 +6,375 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+//===----------- EventIdSolver.cpp ---- Graph Sync Solver -----------------===//
+//===----------------------------------------------------------------------===//
+
 #include "PTO/Transforms/GraphSyncSolver/EventIdSolver.h"
+#include "PTO/Transforms/GraphSyncSolver/Utility.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/STLExtras.h"
-#include <algorithm>
-#include <cassert>
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/raw_ostream.h"
+#include <cstdint>
 #include <numeric>
-#include <set>
 #include <utility>
 
+#define DEBUG_TYPE "PTO-gss-eventidsolver"
+
 using namespace mlir;
-using namespace mlir::pto;
-using namespace mlir::pto::syncsolver;
+using namespace pto::syncsolver;
 
-// ---- private mutators -------------------------------------------------------
-
-void EventIdSolver::addNode(std::unique_ptr<EventIdNode> n) {
-  Action a;
-  a.type = ActionType::ADD_NODE;
-  a.node = n.get();
-  actionsStack.push(std::move(a));
-  nodes.push_back(std::move(n));
+int64_t EventIdSolver::getEventIdsNum(bool dontCalcEventIds) {
+  if (!dontCalcEventIds) {
+    calcEventIds();
+  }
+  assert(!needRecalculateEventIds);
+  llvm::SmallDenseSet<int64_t> usedEventIds;
+  for (auto &node : nodes) {
+    auto &eventIds = node->getEventIds();
+    assert(!eventIds.empty());
+    usedEventIds.insert(eventIds.begin(), eventIds.end());
+  }
+  return usedEventIds.size();
 }
 
-void EventIdSolver::removeNode(EventIdNode *n) {
-  // Only valid when n has no remaining adjacency entries.
-  assert(adjList[n].empty());
-  assert(!sumAdjListSizes[n]);
-  adjList.erase(n);
-  sumAdjListSizes.erase(n);
-  assert(!nodes.empty() && nodes.back().get() == n);
+llvm::LogicalResult EventIdSolver::shrinkEventIdMaxToEventIdNum() {
+  if (needRecalculateEventIds || !actionsStack.empty() || !isColorable()) {
+    return llvm::failure();
+  }
+  this->eventIdsNumMax = getEventIdsNum();
+  calcEventIds();
+  clearActionStack();
+  return llvm::success();
+}
+
+bool EventIdSolver::isColorable() {
+  if (needRecalculateEventIds) {
+    calcEventIds();
+  }
+  return getEventIdsNum(/*dontCalcEventIds=*/true) <= eventIdsNumMax;
+}
+
+void EventIdSolver::addNode(std::unique_ptr<EventIdNode> node) {
+  actionsStack.push(std::make_unique<ActionAddNode>(node.get()));
+  nodes.push_back(std::move(node));
+}
+
+void EventIdSolver::removeNode(EventIdNode *node) {
+  assert(adjList[node].empty());
+  assert(!sumAdjListSizes[node]);
+  adjList.erase(node);
+  sumAdjListSizes.erase(node);
+  assert(nodes.back().get() == node);
   nodes.pop_back();
 }
 
-void EventIdSolver::insertConflictPair(EventIdNode *n, ConflictPair *cp) {
-  assert(n && cp);
-  Action a;
-  a.type = ActionType::INSERT_CONFLICT_PAIR;
-  a.node = n;
-  a.conflictPair = cp;
-  actionsStack.push(std::move(a));
-  conflictPair2Node[cp] = n;
-  n->insertConflictPair(cp);
+void EventIdSolver::insertConflictPair(EventIdNode *node,
+                                       ConflictPair *conflictPair) {
+  assert(node != nullptr && conflictPair != nullptr);
+  actionsStack.push(
+      std::make_unique<ActionInsertConflictPair>(node, conflictPair));
+  conflictPair2Node[conflictPair] = node;
+  node->insertConflictPair(conflictPair);
 }
 
-void EventIdSolver::eraseConflictPair(EventIdNode *n, ConflictPair *cp) {
-  assert(n && cp);
-  conflictPair2Node.erase(cp);
-  n->eraseConflictPair(cp);
+void EventIdSolver::eraseConflictPair(EventIdNode *node,
+                                      ConflictPair *conflictPair) {
+  assert(node != nullptr && conflictPair != nullptr);
+  conflictPair2Node.erase(conflictPair);
+  node->eraseConflictPair(conflictPair);
 }
 
-void EventIdSolver::addEdge(EventIdNode *a, EventIdNode *b) {
-  assert(a && b);
-  if (a == b)
+void EventIdSolver::addEdge(EventIdNode *node1, EventIdNode *node2) {
+  assert(node1 != nullptr && node2 != nullptr);
+  LLVM_DEBUG({
+    llvm::dbgs() << "add-edge: " << node1->str(false) << ' '
+                 << node2->str(false) << '\n';
+  });
+  if (node1 == node2) {
     return;
-  Action act;
-  act.type = ActionType::ADD_EDGE;
-  act.node = a;
-  act.node2 = b;
-  actionsStack.push(std::move(act));
-  if (!adjList[a][b]++)
-    sumAdjListSizes[a] += b->eventIdNum;
-  if (!adjList[b][a]++)
-    sumAdjListSizes[b] += a->eventIdNum;
+  }
+  actionsStack.push(std::make_unique<ActionAddEdge>(node1, node2));
+  if (!adjList[node1][node2]++) {
+    sumAdjListSizes[node1] += node2->eventIdNum;
+  }
+  if (!adjList[node2][node1]++) {
+    sumAdjListSizes[node2] += node1->eventIdNum;
+  }
   if (!needRecalculateEventIds) {
-    if (sumAdjListSizes[a] + a->eventIdNum > eventIdsNumMax ||
-        sumAdjListSizes[b] + b->eventIdNum > eventIdsNumMax) {
+    if ((sumAdjListSizes[node1] + node1->eventIdNum > eventIdsNumMax) ||
+        (sumAdjListSizes[node2] + node2->eventIdNum > eventIdsNumMax)) {
       assignNeedRecalc(true);
     }
   }
 }
 
-void EventIdSolver::removeEdge(EventIdNode *a, EventIdNode *b) {
-  assert(a && b);
-  if (--adjList[a][b] == 0) {
-    adjList[a].erase(b);
-    sumAdjListSizes[a] -= b->eventIdNum;
+void EventIdSolver::removeEdge(EventIdNode *node1, EventIdNode *node2) {
+  assert(node1 != nullptr && node2 != nullptr);
+  if (!(adjList[node1][node2] -= 1)) {
+    adjList[node1].erase(node2);
+    sumAdjListSizes[node1] -= node2->eventIdNum;
   }
-  if (--adjList[b][a] == 0) {
-    adjList[b].erase(a);
-    sumAdjListSizes[b] -= a->eventIdNum;
+  if (!(adjList[node2][node1] -= 1)) {
+    adjList[node2].erase(node1);
+    sumAdjListSizes[node2] -= node1->eventIdNum;
   }
 }
 
-void EventIdSolver::assignEventIds(EventIdNode *n,
-                                   llvm::SmallVector<int64_t> eids,
+void EventIdSolver::assignEventIds(EventIdNode *node,
+                                   const llvm::SmallVector<int64_t> &eventIds,
                                    bool pushAction) {
-  assert(n);
-  if (n->getEventIds() == eids)
+  assert(node != nullptr);
+  if (node->getEventIds() == eventIds) {
     return;
-  if (pushAction) {
-    Action a;
-    a.type = ActionType::ASSIGN_EVENT_IDS;
-    a.node = n;
-    a.oldEventIds = n->getEventIds();
-    a.newEventIds = eids;
-    actionsStack.push(std::move(a));
   }
-  n->setEventIds(std::move(eids));
+  if (pushAction) {
+    actionsStack.push(std::make_unique<ActionAssignEventIds>(
+        node, node->getEventIds(), eventIds));
+  }
+  node->setEventIds(eventIds);
 }
 
 void EventIdSolver::assignNeedRecalc(bool newValue, bool pushAction) {
-  if (newValue == needRecalculateEventIds)
+  if (newValue == needRecalculateEventIds) {
     return;
+  }
   if (pushAction) {
-    Action a;
-    a.type = ActionType::ASSIGN_NEED_RECALC;
-    a.oldBool = needRecalculateEventIds;
-    a.newBool = newValue;
-    actionsStack.push(std::move(a));
+    actionsStack.push(std::make_unique<ActionAssignNeedRecalc>(
+        needRecalculateEventIds, newValue));
   }
   needRecalculateEventIds = newValue;
 }
 
-EventIdNode *EventIdSolver::getNode(ConflictPair *cp) {
-  assert(cp);
-  auto it = conflictPair2Node.find(cp);
+EventIdNode *EventIdSolver::getNode(ConflictPair *conflictPair) {
+  assert(conflictPair != nullptr);
+  auto it = conflictPair2Node.find(conflictPair);
   assert(it != conflictPair2Node.end());
   return it->second;
 }
 
-EventIdNode *EventIdSolver::createNode(ConflictPair *cp, int64_t eventIdNum) {
-  assert(cp);
+std::unique_ptr<EventIdSolver> EventIdSolver::clone() {
+  auto clonedEventIdSolver = std::make_unique<EventIdSolver>(eventIdsNumMax);
+  llvm::DenseMap<EventIdNode *, EventIdNode *> mp;
+  for (auto &node : nodes) {
+    auto clonedNode = node->clone();
+    mp[node.get()] = clonedNode.get();
+    clonedEventIdSolver->nodes.push_back(std::move(clonedNode));
+  }
+  for (auto [nodeSrc, nodesDstFrq] : adjList) {
+    auto *clonedNodeSrc = mp.at(nodeSrc);
+    for (auto [nodeDst, frq] : nodesDstFrq) {
+      assert(frq > 0);
+      auto *clonedNodeDst = mp.at(nodeDst);
+      clonedEventIdSolver->adjList[clonedNodeSrc][clonedNodeDst] += frq;
+    }
+  }
+  for (auto [node, val] : sumAdjListSizes) {
+    auto *clonedNode = mp.at(node);
+    clonedEventIdSolver->sumAdjListSizes[clonedNode] = val;
+  }
+  for (auto [conflictPair, eventIdNode] : conflictPair2Node) {
+    auto *clonedNode = mp.at(eventIdNode);
+    clonedEventIdSolver->conflictPair2Node[conflictPair] = clonedNode;
+  }
+  return clonedEventIdSolver;
+}
+
+EventIdNode *EventIdSolver::createNode(ConflictPair *conflictPair,
+                                       int64_t eventIdNum,
+                                       bool reversePriority) {
+  assert(conflictPair != nullptr);
   assert(eventIdNum > 0);
-  auto n = std::make_unique<EventIdNode>(cp, eventIdNum);
-  auto *raw = n.get();
-  addNode(std::move(n));
-  insertConflictPair(raw, cp);
-  // Pre-seed colors as [0..eventIdNum) so isColorable does the right thing
-  // before calcEventIds is called (matches the upstream behavior).
-  llvm::SmallVector<int64_t> initial(eventIdNum, 0);
-  std::iota(initial.begin(), initial.end(), 0);
-  assignEventIds(raw, std::move(initial));
-  return raw;
+  auto node =
+      std::make_unique<EventIdNode>(conflictPair, eventIdNum, reversePriority);
+  auto *nodePtr = node.get();
+  addNode(std::move(node));
+  insertConflictPair(nodePtr, conflictPair);
+  llvm::SmallVector<int64_t> eventIds(eventIdNum, 0);
+  std::iota(eventIds.begin(), eventIds.end(), 0);
+  assignEventIds(nodePtr, eventIds);
+  return nodePtr;
 }
 
 void EventIdSolver::addConflicts(
-    ConflictPair *src, const std::vector<ConflictPair *> &dsts) {
-  assert(src);
-  EventIdNode *a = getNode(src);
-  for (auto *d : dsts) {
-    EventIdNode *b = getNode(d);
-    addEdge(a, b);
+    ConflictPair *conflictPairSrc,
+    const std::vector<ConflictPair *> &conflictPairsDst) {
+  assert(conflictPairSrc != nullptr);
+  EventIdNode *node1 = getNode(conflictPairSrc);
+  for (auto *conflictPairDst : conflictPairsDst) {
+    LLVM_DEBUG({
+      llvm::dbgs() << "add-conflict: " << conflictPairDst->str() << '\n';
+    });
+    EventIdNode *node2 = getNode(conflictPairDst);
+    addEdge(node1, node2);
   }
 }
 
-// ---- coloring ---------------------------------------------------------------
-
 llvm::SmallVector<int64_t>
-EventIdSolver::getAdjUsedEventIds(EventIdNode *n) {
-  llvm::SmallDenseSet<int64_t> used;
-  for (auto [other, frq] : adjList[n]) {
-    (void)frq;
-    auto &ids = other->getEventIds();
-    used.insert(ids.begin(), ids.end());
+EventIdSolver::getAdjNodesUsedEventIds(EventIdNode *node) {
+  llvm::SmallDenseSet<int64_t> usedEventIds;
+  for (auto [otherNode, frq] : adjList[node]) {
+    assert(frq > 0);
+    auto &otherEventIds = otherNode->getEventIds();
+    usedEventIds.insert(otherEventIds.begin(), otherEventIds.end());
   }
-  llvm::SmallVector<int64_t> v(used.begin(), used.end());
-  llvm::sort(v);
-  return v;
+  LLVM_DEBUG({
+    llvm::dbgs() << "used-event-ids: ";
+    for (auto e : usedEventIds)
+      llvm::dbgs() << e << ' ';
+    llvm::dbgs() << "\n";
+  });
+  llvm::SmallVector<int64_t> usedEventIdsVec(usedEventIds.begin(),
+                                             usedEventIds.end());
+  llvm::sort(usedEventIdsVec);
+  return usedEventIdsVec;
 }
 
 llvm::SmallVector<int64_t>
-EventIdSolver::getChosenEventIds(EventIdNode *n) {
-  llvm::SmallVector<int64_t> chosen;
-  llvm::SmallVector<int64_t> used = getAdjUsedEventIds(n);
-  int64_t cur = 0;
-  auto *it = used.begin();
-  while ((int64_t)chosen.size() < n->eventIdNum) {
-    while (it != used.end() && *it < cur)
-      ++it;
-    if (it != used.end() && *it == cur)
-      ++it;
-    else
-      chosen.push_back(cur);
-    ++cur;
+EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
+  llvm::SmallVector<int64_t> chosenEventIds;
+  llvm::SmallVector<int64_t> usedEventIds = getAdjNodesUsedEventIds(node);
+  if (!node->reversePriority) {
+    int64_t curEventId = 0;
+    auto *it = usedEventIds.begin();
+    while (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum) {
+      while ((it != usedEventIds.end()) && ((*it) < curEventId)) {
+        it++;
+      }
+      if ((it != usedEventIds.end()) && ((*it) == curEventId)) {
+        it++;
+      } else {
+        chosenEventIds.push_back(curEventId);
+      }
+      curEventId++;
+    }
+  } else {
+    int64_t curEventId = std::max(eventIdMax, this->eventIdsNumMax - 1);
+    auto it = usedEventIds.rbegin();
+    while ((curEventId >= 0) &&
+           (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum)) {
+      while ((it != usedEventIds.rend()) && ((*it) > curEventId)) {
+        it++;
+      }
+      if ((it != usedEventIds.rend()) && ((*it) == curEventId)) {
+        it++;
+      } else {
+        chosenEventIds.push_back(curEventId);
+      }
+      curEventId--;
+    }
+    std::reverse(chosenEventIds.begin(), chosenEventIds.end());
+    if (int64_t rem =
+            node->eventIdNum - static_cast<int64_t>(chosenEventIds.size());
+        rem > 0) {
+      for (int64_t i = 0; i < rem; i++) {
+        chosenEventIds.push_back(eventIdMax + i + 1);
+      }
+    }
   }
-  llvm::sort(chosen);
-  return chosen;
+  LLVM_DEBUG({
+    llvm::dbgs() << "chosen-event-ids: ";
+    for (auto e : chosenEventIds)
+      llvm::dbgs() << e << ' ';
+    llvm::dbgs() << '\n';
+  });
+  assert(node->eventIdNum == static_cast<int64_t>(chosenEventIds.size()));
+  assert(llvm::is_sorted(chosenEventIds));
+  return chosenEventIds;
 }
 
 void EventIdSolver::calcEventIds() {
-  // Smallest-degree-first ordering, then assign colors in reverse.
   auto cmp = [](const std::pair<int64_t, EventIdNode *> &a,
                 const std::pair<int64_t, EventIdNode *> &b) {
-    if (a.first != b.first)
+    if (a.first != b.first) {
       return a.first < b.first;
+    }
+    if (a.second->reversePriority != b.second->reversePriority) {
+      return a.second->reversePriority < b.second->reversePriority;
+    }
     return a.second->id < b.second->id;
   };
   std::set<std::pair<int64_t, EventIdNode *>, decltype(cmp)> st(cmp);
-  llvm::DenseMap<EventIdNode *, int64_t> nodeValue;
 
-  for (auto &n : nodes) {
-    assignEventIds(n.get(), {});
-    int64_t v = sumAdjListSizes[n.get()] + n->eventIdNum;
-    nodeValue[n.get()] = v;
-    st.emplace(v, n.get());
+  llvm::DenseMap<EventIdNode *, int64_t> nodeValue;
+  for (auto &node : nodes) {
+    assignEventIds(node.get(), {});
+    int64_t curNodeValue = sumAdjListSizes[node.get()] + node->eventIdNum;
+    nodeValue[node.get()] = curNodeValue;
+    st.emplace(curNodeValue, node.get());
   }
 
-  llvm::SmallVector<EventIdNode *> ordered;
+  llvm::SmallVector<EventIdNode *> orderedNodes;
   while (!st.empty()) {
     auto *node = st.begin()->second;
     st.erase(st.begin());
     nodeValue.erase(node);
-    ordered.push_back(node);
-    for (auto [adj, frq] : adjList[node]) {
-      (void)frq;
-      if (nodeValue.contains(adj)) {
-        st.erase({nodeValue[adj], adj});
-        nodeValue[adj] -= node->eventIdNum;
-        st.insert({nodeValue[adj], adj});
+    orderedNodes.emplace_back(node);
+    for (auto [adjNode, frq] : adjList[node]) {
+      if (nodeValue.contains(adjNode)) {
+        assert(st.count({nodeValue[adjNode], adjNode}));
+        st.erase({nodeValue[adjNode], adjNode});
+        nodeValue[adjNode] -= node->eventIdNum;
+        st.insert({nodeValue[adjNode], adjNode});
       }
     }
   }
-  for (auto *n : llvm::reverse(ordered)) {
-    auto eids = getChosenEventIds(n);
-    assert(!eids.empty());
-    assignEventIds(n, eids);
+
+  int64_t eventIdMax = 0;
+  for (auto *node : llvm::reverse(orderedNodes)) {
+    auto chosenEventIds = getChosenEventIds(node, eventIdMax);
+    assert(!chosenEventIds.empty());
+    assignEventIds(node, chosenEventIds);
+    eventIdMax = std::max(eventIdMax, chosenEventIds.back());
+    LLVM_DEBUG({ llvm::dbgs() << node->str(false) << '\n'; });
   }
+
   assignNeedRecalc(false);
 }
 
-int64_t EventIdSolver::getUsedEventIdsNum(bool dontCalc) {
-  if (!dontCalc)
-    calcEventIds();
-  assert(!needRecalculateEventIds);
-  llvm::SmallDenseSet<int64_t> used;
-  for (auto &n : nodes) {
-    auto &eids = n->getEventIds();
-    if (eids.empty())
-      continue;
-    used.insert(eids.begin(), eids.end());
+void EventIdSolver::debugPrint() {
+  llvm::dbgs() << "EventIdSolver:\n";
+  for (auto &node : nodes) {
+    llvm::dbgs() << node->str() << '\n';
+    llvm::dbgs() << "adj:";
+    for (auto [otherNode, frq] : adjList[node.get()]) {
+      assert(frq > 0);
+      llvm::dbgs() << otherNode->id << ", ";
+    }
+    llvm::dbgs() << "\n";
   }
-  return static_cast<int64_t>(used.size());
-}
-
-bool EventIdSolver::isColorable() {
-  if (needRecalculateEventIds)
-    calcEventIds();
-  return getUsedEventIdsNum(/*dontCalc=*/true) <= eventIdsNumMax;
-}
-
-// ---- journaling -------------------------------------------------------------
-
-void EventIdSolver::pushActionNone() {
-  Action a;
-  a.type = ActionType::NONE;
-  actionsStack.push(std::move(a));
-}
-
-void EventIdSolver::clearActionStack() {
-  while (!actionsStack.empty())
-    actionsStack.pop();
 }
 
 void EventIdSolver::undoActions() {
-  while (!actionsStack.empty() && actionsStack.top().type != ActionType::NONE) {
-    Action a = std::move(actionsStack.top());
+  while (!actionsStack.empty() &&
+         (actionsStack.top()->actionType != ACTION_TYPE::NONE)) {
+    auto action = std::move(actionsStack.top());
+    LLVM_DEBUG(llvm::dbgs() << "undo: " << action->str() << "\n";);
     actionsStack.pop();
-    switch (a.type) {
-    case ActionType::ADD_NODE:
-      removeNode(a.node);
-      break;
-    case ActionType::ADD_EDGE:
-      removeEdge(a.node, a.node2);
-      break;
-    case ActionType::INSERT_CONFLICT_PAIR:
-      eraseConflictPair(a.node, a.conflictPair);
-      break;
-    case ActionType::ASSIGN_EVENT_IDS:
-      assignEventIds(a.node, a.oldEventIds, /*pushAction=*/false);
-      break;
-    case ActionType::ASSIGN_NEED_RECALC:
-      assignNeedRecalc(a.oldBool, /*pushAction=*/false);
-      break;
-    default:
-      break;
-    }
+    llvm::TypeSwitch<Action *, void>(action.get())
+        .Case([this](ActionAddNode *action) { removeNode(action->node); })
+        .Case([this](ActionAddEdge *action) {
+          removeEdge(action->node1, action->node2);
+        })
+        .Case([this](ActionInsertConflictPair *action) {
+          eraseConflictPair(action->node, action->conflictPair);
+        })
+        .Case([this](ActionAssignEventIds *action) {
+          assignEventIds(action->node, action->oldEventIds,
+                         /*pushAction=*/false);
+        })
+        .Case([this](ActionAssignNeedRecalc *action) {
+          assignNeedRecalc(action->oldValue, /*pushAction=*/false);
+        })
+        .Default([](Action *action) {
+          llvm_unreachable("EventIdSolver: unhandled action_type.");
+        });
   }
   if (!actionsStack.empty()) {
-    assert(actionsStack.top().type == ActionType::NONE);
+    assert(actionsStack.top()->actionType == ACTION_TYPE::NONE);
     actionsStack.pop();
   }
 }

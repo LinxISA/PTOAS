@@ -156,7 +156,8 @@ jobs:
             -Dpybind11_DIR=$(python -m pybind11 --cmakedir) \
             -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
             -DPTOAS_RELEASE_VERSION_OVERRIDE=${PTOAS_VERSION} \
-            -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR}
+            -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR} \
+            -DCMAKE_BUILD_TYPE=Release
           ninja -C build
           ninja -C build install
 

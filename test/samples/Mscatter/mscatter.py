@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint
+from mlir.ir import Context, Location, Module, InsertionPoint, StringAttr
 from mlir.dialects import func, arith, pto
 from mlir.ir import IndexType, IntegerType
 
@@ -17,6 +17,7 @@ def build():
 
         with Location.unknown(ctx):
             m = Module.create()
+            m.operation.attributes["pto.target_arch"] = StringAttr.get("a5")
 
             i32 = IntegerType.get_signless(32, ctx)
             ptr_i32 = pto.PtrType.get(i32, ctx)

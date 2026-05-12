@@ -6,36 +6,113 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+//===----------- GraphSolver.cpp ---- Graph Sync Solver -------------------===//
+//===----------------------------------------------------------------------===//
+
 #include "PTO/Transforms/GraphSyncSolver/GraphSolver.h"
-#include <cassert>
+
+#include "PTO/IR/PTO.h"
+#include "PTO/Transforms/GraphSyncSolver/Utility.h"
+#include "llvm/Support/Debug.h"
+#include <optional>
 #include <queue>
+#include <utility>
+
+#define DEBUG_TYPE "PTO-gss-graph-solver"
 
 using namespace mlir;
-using namespace mlir::pto;
-using namespace mlir::pto::syncsolver;
+using namespace pto::syncsolver;
 
-bool GraphSolver::Edge::operator<(const Edge &o) const {
-  // The set is per-(src, dst) bucket so endpoints must match by construction.
-  assert(corePipeSrc == o.corePipeSrc);
-  assert(corePipeDst == o.corePipeDst);
-  if (startIndex != o.startIndex)
-    return startIndex < o.startIndex;
-  return endIndex < o.endIndex;
+// Compare edges (used for ordered sets). Edges must share endpoints when
+// compared.
+bool GraphSolver::Edge::operator<(const Edge &other) const {
+  assert(corePipeSrc == other.corePipeSrc);
+  assert(corePipeDst == other.corePipeDst);
+  if (startIndex != other.startIndex) {
+    return startIndex < other.startIndex;
+  }
+  return endIndex < other.endIndex;
 }
 
-void GraphSolver::addPair(ConflictPair *cp, CorePipeInfo src, CorePipeInfo dst,
-                          int sIdx, int eIdx) {
-  Edge edge(cp, src, dst, sIdx, eIdx);
-  adjacencyList[src][dst].insert(edge);
+// Add an adjacency edge annotated with an active index interval.
+void GraphSolver::addPair(ConflictPair *conflictPair, CorePipeInfo corePipeSrc,
+                          CorePipeInfo corePipeDst, int startIndex,
+                          int endIndex, bool isUnitFlag) {
+  Edge edge(conflictPair, corePipeSrc, corePipeDst, startIndex, endIndex,
+            isUnitFlag);
+  adjacencyList[edge.corePipeSrc][edge.corePipeDst].insert(edge);
 }
 
-void GraphSolver::addConflictPair(ConflictPair *cp) {
-  assert(cp);
-  // Minimal port: no PIPE_ALL fanout, no PIPE_S broadcast, no unit-flag.
-  addPair(cp, cp->setCorePipeInfo, cp->waitCorePipeInfo, cp->startIndex,
-          cp->endIndex);
+// Convert a ConflictPair into adjacency edges (handles PIPE_ALL
+// special-casing).
+void GraphSolver::addConflictPair(ConflictPair *conflictPair) {
+  assert(conflictPair != nullptr);
+  DEBUG_WITH_TYPE("gss-graph-solver-add-conflict-pair", {
+    llvm::dbgs() << "add-conflict-pair:\n";
+    llvm::dbgs() << conflictPair->str() << '\n';
+  });
+  if (conflictPair->isBarrier() &&
+      conflictPair->setCorePipeInfo.pipe == pto::PIPE::PIPE_ALL) {
+    llvm::SmallVector<std::pair<pto::TCoreType, pto::TCoreType>> srcDstCores;
+    if (options.isCrossCoreMode()) {
+      srcDstCores.push_back(
+          std::make_pair(pto::TCoreType::CUBE, pto::TCoreType::VECTOR));
+      srcDstCores.push_back(
+          std::make_pair(pto::TCoreType::VECTOR, pto::TCoreType::CUBE));
+    } else {
+      srcDstCores.push_back(std::make_pair(pto::TCoreType::CUBE_OR_VECTOR,
+                                           pto::TCoreType::CUBE_OR_VECTOR));
+    }
+    for (auto [srcCore, dstCore] : srcDstCores) {
+      for (int i = 0; i < static_cast<int>(pto::PIPE::PIPE_NUM); i++) {
+        auto setPipe = static_cast<pto::PIPE>(i);
+        auto waitPipe = pto::PIPE::PIPE_ALL;
+        int startIndex = conflictPair->startIndex;
+        int endIndex = conflictPair->endIndex;
+        assert(startIndex == endIndex);
+        addPair(conflictPair, CorePipeInfo(srcCore, setPipe),
+                CorePipeInfo(dstCore, waitPipe), startIndex, endIndex);
+      }
+    }
+  } else if (!conflictPair->isBarrier() &&
+             conflictPair->waitCorePipeInfo.pipe == pto::PIPE::PIPE_S) {
+    for (int i = 0; i < static_cast<int>(pto::PIPE::PIPE_NUM); i++) {
+      auto coreDst = conflictPair->waitCorePipeInfo.coreType;
+      auto waitPipe = static_cast<pto::PIPE>(i);
+      addPair(conflictPair, conflictPair->setCorePipeInfo,
+              CorePipeInfo(coreDst, waitPipe), conflictPair->startIndex,
+              conflictPair->endIndex);
+    }
+  } else {
+    auto corePipeSrc = conflictPair->setCorePipeInfo;
+    auto corePipeDst = conflictPair->waitCorePipeInfo;
+    int startIndex = conflictPair->startIndex;
+    int endIndex = conflictPair->endIndex;
+    addPair(conflictPair, corePipeSrc, corePipeDst, startIndex, endIndex,
+            conflictPair->replacedWithUnitFlag);
+  }
 }
 
+// Compact adjacency lists by removing dominated edges to accelerate queries.
+void GraphSolver::optimizeAdjacencyList() {
+  for (auto &[corePipeSrc, dstMap] : adjacencyList) {
+    for (auto &[corePipeDst, edges] : dstMap) {
+      std::set<Edge> optimizedEdges;
+      for (auto &edge : edges) {
+        while (!optimizedEdges.empty() &&
+               optimizedEdges.rbegin()->endIndex >= edge.endIndex) {
+          optimizedEdges.erase(*optimizedEdges.rbegin());
+        }
+        optimizedEdges.insert(edge);
+      }
+      edges = std::move(optimizedEdges);
+    }
+  }
+}
+
+// Run a Dijkstra-like search over pipes using index intervals as
+// weights/constraints. Returns minimal reachable index for endPipe or empty
+// optional if unreachable.
 std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
                                             CorePipeInfo corePipeDst,
                                             int startIndex, int endIndex) {
@@ -47,34 +124,41 @@ std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
   que.emplace(startIndex, corePipeSrc);
   auto [coreDst, pipeDst] = corePipeDst;
 
+  LLVM_DEBUG(llvm::dbgs() << "dij-start-end-indices: " << startIndex << ' '
+                          << endIndex << '\n');
+
   while (!que.empty()) {
     auto [curIndex, curCorePipe] = que.top();
+    auto [curCore, curPipe] = curCorePipe;
     que.pop();
 
-    if (curCorePipe == corePipeDst && distance.count(corePipeDst))
-      break;
-    if (distance.count(curCorePipe) && distance[curCorePipe] < curIndex)
-      continue;
-    if (distance.count(curCorePipe) && distance[curCorePipe] > endIndex)
-      break;
+    LLVM_DEBUG(llvm::dbgs() << "dij-step: " << curCore << ' ' << curPipe << ' '
+                            << curIndex << '\n');
 
-    auto [curCore, curPipe] = curCorePipe;
-    // PIPE_S / PIPE_ALL act as soft "any pipe" sinks on the destination core
-    // (mirrors the upstream HIVM semantics): once we reach them, we can
-    // claim arrival at corePipeDst at the same index.
+    if (curCorePipe == corePipeDst && distance.count(corePipeDst)) {
+      break;
+    }
+
+    if (distance.count(curCorePipe) && distance[curCorePipe] < curIndex) {
+      continue;
+    }
+
+    if (distance.count(curCorePipe) && distance[curCorePipe] > endIndex) {
+      break;
+    }
+
     if (curCore == coreDst &&
-        ((curIndex != startIndex && curPipe == PIPE::PIPE_S) ||
-         curPipe == PIPE::PIPE_ALL)) {
+        ((curIndex != startIndex && curPipe == pto::PIPE::PIPE_S) ||
+         curPipe == pto::PIPE::PIPE_ALL)) {
       distance[corePipeDst] = curIndex;
       break;
     }
 
     for (auto &[endCorePipe, edges] : adjacencyList[curCorePipe]) {
-      auto it = edges.lower_bound(Edge(nullptr, curCorePipe, endCorePipe,
-                                       curIndex, /*eIdx=*/-1));
-      for (; it != edges.end(); ++it) {
+      auto it = edges.lower_bound(Edge(curCorePipe, endCorePipe, curIndex, -1));
+      for (; it != edges.end(); it++) {
         if (!distance.count(endCorePipe) ||
-            distance[endCorePipe] > it->endIndex) {
+            (distance[endCorePipe] > (it->endIndex))) {
           distance[endCorePipe] = it->endIndex;
           que.emplace(it->endIndex, endCorePipe);
         }
@@ -82,7 +166,86 @@ std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
     }
   }
 
-  if (distance.count(corePipeDst))
-    return distance[corePipeDst];
-  return std::nullopt;
+  return distance.count(corePipeDst) ? distance[corePipeDst]
+                                     : std::optional<int>();
+}
+
+std::optional<int> GraphSolver::runDijkstraUnitFlagEnabled(
+    Occurrence *occ1, Occurrence *occ2, CorePipeInfo corePipeSrc,
+    CorePipeInfo corePipeDst, int startIndex, int endIndex) {
+  // (is-unit-flag, last-node-is-occ-dst, core-pipe-info)
+  using DistKey = std::tuple<int, int, CorePipeInfo>;
+
+  llvm::DenseMap<DistKey, int> distance;
+  std::priority_queue<std::pair<int, DistKey>,
+                      std::vector<std::pair<int, DistKey>>,
+                      std::greater<std::pair<int, DistKey>>>
+      que;
+  que.emplace(startIndex, DistKey(false, false, corePipeSrc));
+  auto [coreDst, pipeDst] = corePipeDst;
+  LLVM_DEBUG(llvm::dbgs() << "dij-start-end-indices: " << startIndex << ' '
+                          << endIndex << '\n');
+
+  while (!que.empty()) {
+    auto [curIndex, curDistKey] = que.top();
+    auto [curIsUnitFlag, curIsOccDst, curCorePipe] = curDistKey;
+    auto [curCore, curPipe] = curCorePipe;
+    que.pop();
+
+    LLVM_DEBUG(llvm::dbgs() << "dij-step: " << curCore << ' ' << curPipe << ' '
+                            << curIsUnitFlag << ' ' << curIsOccDst << ' '
+                            << curIndex << '\n');
+
+    if (distance.count(curDistKey) && distance[curDistKey] < curIndex) {
+      continue;
+    }
+
+    if (distance.count(curDistKey) && distance[curDistKey] > endIndex) {
+      break;
+    }
+
+    if (curCore == coreDst &&
+        ((curIndex != startIndex && curPipe == pto::PIPE::PIPE_S) ||
+         curPipe == pto::PIPE::PIPE_ALL)) {
+      distance[DistKey(false, false, corePipeDst)] = curIndex;
+      break;
+    }
+
+    for (auto &[endCorePipe, edges] : adjacencyList[curCorePipe]) {
+      auto it = edges.lower_bound(Edge(curCorePipe, endCorePipe, curIndex, -1));
+      for (; it != edges.end(); it++) {
+        auto &edge = *it;
+        if (edge.isUnitFlag) {
+          if (curIndex == startIndex && edge.startIndex != startIndex) {
+            continue;
+          }
+        }
+        assert(edge.conflictPair != nullptr);
+        DistKey nxtKey(edge.isUnitFlag, (edge.conflictPair->waitOcc == occ2),
+                       endCorePipe);
+        if (!distance.count(nxtKey) || (distance[nxtKey] > edge.endIndex)) {
+          distance[nxtKey] = edge.endIndex;
+          que.emplace(edge.endIndex, nxtKey);
+        }
+      }
+    }
+  }
+
+  std::optional<int> retDist;
+  if (auto it = distance.find(DistKey(false, false, corePipeDst));
+      it != distance.end()) {
+    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
+                                  : it->second;
+  }
+  if (auto it = distance.find(DistKey(false, true, corePipeDst));
+      it != distance.end()) {
+    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
+                                  : it->second;
+  }
+  if (auto it = distance.find(DistKey(true, true, corePipeDst));
+      it != distance.end()) {
+    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
+                                  : it->second;
+  }
+  return retDist;
 }

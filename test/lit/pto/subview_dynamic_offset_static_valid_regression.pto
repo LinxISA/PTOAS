@@ -24,4 +24,4 @@ module {
 }
 
 // CHECK: func.func @subview_dynamic_offset_static_valid_regression
-// CHECK: Tile<TileType::Vec, float, 8, 64, BLayout::RowMajor, 8, 64, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// CHECK: Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, 1, 64, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>

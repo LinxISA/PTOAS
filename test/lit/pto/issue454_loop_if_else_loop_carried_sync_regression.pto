@@ -1,16 +1,34 @@
 // RUN: ptoas --pto-arch=a3 --enable-insert-sync %s | FileCheck %s
 //
 // Regression guard for loop-carried sync under if/else in loop body:
-// - Loop-head wait on PIPE_M -> PIPE_MTE1 must remain paired with pre-loop set.
-// - Presence of else-branch must not let loop-carried sync be hoisted/sunk incorrectly.
+// - The carried handshake must still sit in the loop body before the branch.
+// - The if/else must not reorder that wait/set sequence across the branch.
 //
 // CHECK-LABEL: __global__ AICORE void loop_if_else_loop_carried_sync()
-// CHECK: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY:[0-9]+]]);
-// CHECK: for (size_t
-// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY]]);
-// CHECK: if ((int32_t)
+// CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
+// CHECK: TMOV(v10, v6);
+// CHECK: TMOV(v12, v8);
+// CHECK: set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+// CHECK: TMATMUL(v14, v10, v12);
+// CHECK: set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+// CHECK: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+// CHECK: TMOV(v6, v14);
+// CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+// CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+// CHECK: for (size_t v16 = (size_t) v1; v16 < ((size_t) v3); v16 += (size_t) v2) {
+// CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
+// CHECK: TMOV(v10, v6);
+// CHECK: set_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+// CHECK: TMATMUL(v14, v10, v12);
+// CHECK: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+// CHECK: set_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+// CHECK: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+// CHECK: if ((int32_t) v16 == v1) {
 // CHECK: } else {
-// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[CARRY]]);
+// CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
 // CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
 
 module {

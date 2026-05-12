@@ -1,0 +1,95 @@
+// RUN: ptoas --pto-arch=a3 --enable-inject-barrier-all-sync --emit-pto-ir %s 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a3 --enable-inject-barrier-all-sync %s 2>&1 | FileCheck %s --check-prefix=CPP
+
+module {
+  func.func @regular_pipe_memory_ops(%src: memref<16x16xf32, #pto.address_space<gm>>) {
+    // CHECK-LABEL: func.func @regular_pipe_memory_ops
+    %mat = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %left = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: pto.tload
+    pto.tload ins(%src : memref<16x16xf32, #pto.address_space<gm>>)
+              outs(%mat : !pto.tile_buf<loc=mat, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: pto.tmov
+    pto.tmov ins(%mat : !pto.tile_buf<loc=mat, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+             outs(%left : !pto.tile_buf<loc=left, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=row_major, fractal=512, pad=0>)
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: return
+    return
+  }
+
+  func.func @manual_pipe_all_barrier_not_duplicated(%src: memref<16x16xf32, #pto.address_space<gm>>) {
+    // CHECK-LABEL: func.func @manual_pipe_all_barrier_not_duplicated
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: pto.tload
+    %mat = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.barrier <PIPE_ALL>
+    pto.tload ins(%src : memref<16x16xf32, #pto.address_space<gm>>)
+              outs(%mat : !pto.tile_buf<loc=mat, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: return
+    return
+  }
+
+  func.func @cube_push_gm(%gm_slot_buffer: memref<256xf32, #pto.address_space<gm>>,
+                          %c2v_consumer_buf: i32)
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    // CHECK-LABEL: func.func @cube_push_gm
+    // CHECK-NOT: pto.barrier <PIPE_ALL>
+    // CHECK: %{{.*}} = pto.initialize_l2g2l_pipe
+    %pipe = pto.initialize_l2g2l_pipe {
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      local_slot_num = 8,
+      flag_base = 0
+    }(%gm_slot_buffer : memref<256xf32, #pto.address_space<gm>>,
+      %c2v_consumer_buf : i32) -> !pto.pipe
+    %acc_tile = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: pto.tpush
+    pto.tpush(%acc_tile, %pipe : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.pipe) {split = 0}
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: return
+    return
+  }
+
+  func.func @vector_pop_gm(%gm_slot_buffer: memref<256xf32, #pto.address_space<gm>>,
+                           %c2v_consumer_buf: i32)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    // CHECK-LABEL: func.func @vector_pop_gm
+    // CHECK-NOT: pto.barrier <PIPE_ALL>
+    // CHECK: %{{.*}} = pto.initialize_l2g2l_pipe
+    %pipe = pto.initialize_l2g2l_pipe {
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      local_slot_num = 8,
+      flag_base = 0
+    }(%gm_slot_buffer : memref<256xf32, #pto.address_space<gm>>,
+      %c2v_consumer_buf : i32) -> !pto.pipe
+    %fifo_tile = pto.declare_tile -> !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: pto.tpop
+    pto.tpop(%fifo_tile, %pipe : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.pipe) {split = 1}
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: pto.tfree
+    pto.tfree(%pipe : !pto.pipe) {split = 2}
+    // CHECK: pto.barrier <PIPE_ALL>
+    // CHECK-NEXT: return
+    return
+  }
+}
+
+// CPP-LABEL: AICORE void cube_push_gm
+// CPP: pipe_barrier(PIPE_ALL);
+// CPP-NEXT: TPUSH
+// CPP: pipe_barrier(PIPE_ALL);
+
+// CPP-LABEL: AICORE void vector_pop_gm
+// CPP: pipe_barrier(PIPE_ALL);
+// CPP-NEXT: TPOP
+// CPP: pipe_barrier(PIPE_ALL);
+// CPP-NEXT: TFREE
+// CPP: pipe_barrier(PIPE_ALL);

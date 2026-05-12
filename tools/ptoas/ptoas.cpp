@@ -42,6 +42,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/StringMap.h"
+#include <memory>
 #include <string>
 
 using namespace mlir;
@@ -183,11 +184,18 @@ static llvm::cl::opt<bool> enableInsertSync("enable-insert-sync",
                                             llvm::cl::desc("Enable automatic synchronization insertion pass"),
                                             llvm::cl::init(false));
 
+static llvm::cl::opt<bool> enableInjectBarrierAllSync(
+    "enable-inject-barrier-all-sync",
+    llvm::cl::desc("Enable conservative synchronization by inserting "
+                   "pto.barrier PIPE_ALL before memory-effecting PTO pipe ops"),
+    llvm::cl::init(false));
+
 static llvm::cl::opt<bool> enableGraphSyncSolver(
     "enable-graph-sync-solver",
     llvm::cl::desc("Enable the graph-based intra-core sync solver "
                    "(experimental). Mutually exclusive with "
-                   "--enable-insert-sync."),
+                   "--enable-insert-sync and "
+                   "--enable-inject-barrier-all-sync."),
     llvm::cl::init(false));
 
 static llvm::cl::opt<int> graphSyncSolverEventIdMax(
@@ -1083,9 +1091,18 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (enableInsertSync && enableGraphSyncSolver) {
-    llvm::errs() << "Error: --enable-insert-sync and "
+  int enabledAutoSyncModes =
+      (enableInsertSync ? 1 : 0) + (enableInjectBarrierAllSync ? 1 : 0) +
+      (enableGraphSyncSolver ? 1 : 0);
+  if (enabledAutoSyncModes > 1) {
+    llvm::errs() << "Error: --enable-insert-sync, "
+                    "--enable-inject-barrier-all-sync, and "
                     "--enable-graph-sync-solver are mutually exclusive.\n";
+    return 1;
+  }
+  if (hasTAssign && enableInjectBarrierAllSync) {
+    llvm::errs() << "Error: pto.tassign requires "
+                    "--enable-inject-barrier-all-sync to be disabled.\n";
     return 1;
   }
   if (hasTAssign && enableGraphSyncSolver) {
@@ -1145,11 +1162,14 @@ int main(int argc, char **argv) {
   }
   pm.addPass(pto::createPTOResolveReservedBuffersPass());
 
-  // Conditionally add Sync pass based on flag. The two solvers are mutually
-  // exclusive (validated above); GraphSyncSolver is the experimental new
-  // path that lives next to PTOInsertSync.
+  // Conditionally add one automatic synchronization mode. Barrier-all is a
+  // conservative standalone pass; InsertSync and GraphSyncSolver are set/wait
+  // solvers.
   if (enableInsertSync)
     pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertSyncPass());
+  else if (enableInjectBarrierAllSync)
+    pm.addNestedPass<mlir::func::FuncOp>(
+        pto::createPTOInjectBarrierAllSyncPass());
   else if (enableGraphSyncSolver) {
     PTOGraphSyncSolverOptions graphSyncOpts;
     graphSyncOpts.eventIdNumMax = graphSyncSolverEventIdMax;
@@ -1159,12 +1179,17 @@ int main(int argc, char **argv) {
 
   
 
-  // [Fix] ToolOutputFile Usage
-  std::error_code ec;
-  llvm::ToolOutputFile outputFile(outputFilename, ec, llvm::sys::fs::OF_None);
-  if (ec) {
-    llvm::errs() << ec.message() << "\n";
-    return 1;
+  std::unique_ptr<llvm::ToolOutputFile> outputFile;
+  llvm::raw_ostream *outputOS = &llvm::outs();
+  if (outputFilename != "-") {
+    std::error_code ec;
+    outputFile = std::make_unique<llvm::ToolOutputFile>(
+        outputFilename, ec, llvm::sys::fs::OF_None);
+    if (ec) {
+      llvm::errs() << ec.message() << "\n";
+      return 1;
+    }
+    outputOS = &outputFile->os();
   }
 
   if (emitMlirIR) {
@@ -1172,10 +1197,13 @@ int main(int argc, char **argv) {
       llvm::errs() << "Error: Pass execution failed.\n";
       return 1;
     }
-    module->print(outputFile.os());
+    module->print(*outputOS);
+    if (outputFile)
+      outputFile->keep();
     return 0;
   }
 
+  pm.addPass(pto::createPTOMaterializeTileHandlesPass());
   pm.addPass(createCSEPass());
   if (arch == "a3") {
     pm.addPass(pto::createEmitPTOManualPass(pto::PTOArch::A3));
@@ -1218,9 +1246,11 @@ int main(int argc, char **argv) {
   rewriteScalarConstantDecls(cppOutput);
   rewriteHoistedGlobalTensorDecls(cppOutput);
   
-  outputFile.os() << cppOutput;
+  *outputOS << cppOutput;
+  outputOS->flush();
 
-  outputFile.keep(); // Success, keep the file
+  if (outputFile)
+    outputFile->keep(); // Success, keep the file
 
   return 0;
 }

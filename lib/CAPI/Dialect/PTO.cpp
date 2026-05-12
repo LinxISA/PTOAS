@@ -625,7 +625,7 @@ int32_t mlirPTOReluPreModeAttrGetValue(MlirAttribute attr) {
 }
 
 bool mlirPTOAttrIsAAtomicTypeAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::pto::AtomicTypeAttr>();
+  return mlir::isa<mlir::pto::AtomicTypeAttr>(unwrap(attr));
 }
 
 MlirAttribute mlirPTOAtomicTypeAttrGet(MlirContext ctx, int32_t value) {
@@ -640,7 +640,7 @@ int32_t mlirPTOAtomicTypeAttrGetValue(MlirAttribute attr) {
 }
 
 bool mlirPTOAttrIsANotifyOpAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::pto::NotifyOpAttr>();
+  return mlir::isa<mlir::pto::NotifyOpAttr>(unwrap(attr));
 }
 
 MlirAttribute mlirPTONotifyOpAttrGet(MlirContext ctx, int32_t value) {
@@ -655,7 +655,7 @@ int32_t mlirPTONotifyOpAttrGetValue(MlirAttribute attr) {
 }
 
 bool mlirPTOAttrIsAWaitCmpAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::pto::WaitCmpAttr>();
+  return mlir::isa<mlir::pto::WaitCmpAttr>(unwrap(attr));
 }
 
 MlirAttribute mlirPTOWaitCmpAttrGet(MlirContext ctx, int32_t value) {
@@ -670,7 +670,7 @@ int32_t mlirPTOWaitCmpAttrGetValue(MlirAttribute attr) {
 }
 
 bool mlirPTOAttrIsAReduceOpAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::pto::ReduceOpAttr>();
+  return mlir::isa<mlir::pto::ReduceOpAttr>(unwrap(attr));
 }
 
 MlirAttribute mlirPTOReduceOpAttrGet(MlirContext ctx, int32_t value) {

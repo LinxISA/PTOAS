@@ -38,11 +38,30 @@ def PTOInsertSync : Pass<"pto-insert-sync", "func::FuncOp"> {
   ];
 }
 
+def PTOInjectBarrierAllSync : Pass<"pto-inject-barrier-all-sync", "func::FuncOp"> {
+  let summary = "Conservatively insert PIPE_ALL barriers for PTO dialect";
+  let description = [{
+    Inserts a `pto.barrier <PIPE_ALL>` before each PTO pipe operation that has
+    MemoryEffects read/write side effects. This mode does not reuse set/wait
+    dependency analysis and does not replace the internal synchronization
+    protocol of composite pipe ops such as `pto.tpush`, `pto.tpop`, and
+    `pto.tfree`; it only adds conservative barriers at operation boundaries.
+  }];
+
+  let constructor = "mlir::pto::createPTOInjectBarrierAllSyncPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::arith::ArithDialect"
+  ];
+}
+
 // Define PTOGraphSyncSolver Pass (graph-based intra-core sync solver).
 // Coexists with PTOInsertSync; selectable via the driver flag
-// `--enable-graph-sync-solver`. Minimal port of bishengir's GraphSyncSolver:
-// Dijkstra-based reachability pruning + Welsh-Powell event-id coloring with
-// fallback to a single PIPE_ALL barrier when the budget is exceeded.
+// `--enable-graph-sync-solver`. Ported from bishengir's GraphSyncSolver core:
+// hierarchical SyncSolver IR, conflict graph pruning, event-id coloring and
+// barrier fallback, with PTO-specific IR translation and sync op codegen.
 def PTOGraphSyncSolver : Pass<"pto-graph-sync-solver", "func::FuncOp"> {
   let summary = "Graph-based intra-core synchronization solver for PTO";
   let description = [{
@@ -57,8 +76,8 @@ def PTOGraphSyncSolver : Pass<"pto-graph-sync-solver", "func::FuncOp"> {
   let options = [
     Option<"eventIdNumMax", "event-id-num-max", "int64_t",
            /*default=*/"8",
-           "Maximum EVENT_ID slots usable by Welsh-Powell coloring; exceeding "
-           "the budget falls back to a single PIPE_ALL barrier.">,
+           "Maximum EVENT_ID slots usable by coloring; this caps the hardware "
+           "available event-id budget used by the graph solver.">,
   ];
 
   let dependentDialects = [
@@ -270,6 +289,24 @@ def PTOViewToMemref : Pass<"pto-view-to-memref", "ModuleOp"> {
   }];
 
   let constructor = "mlir::pto::createPTOViewToMemrefPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::func::FuncDialect"
+  ];
+}
+
+def PTOMaterializeTileHandles : Pass<"pto-materialize-tile-handles", "ModuleOp"> {
+  let summary = "Materialize tile_buf handles from planned memrefs before EmitC";
+  let description = [{
+    Re-wraps local memref values used by tile operations into explicit
+    pto.materialize_tile ops. This keeps PlanMemory and InjectSync in memref IR
+    while making the tile handle boundary visible to EmitC lowering.
+  }];
+
+  let constructor = "mlir::pto::createPTOMaterializeTileHandlesPass()";
 
   let dependentDialects = [
     "mlir::pto::PTODialect",

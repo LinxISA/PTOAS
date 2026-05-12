@@ -29,8 +29,8 @@ module {
   }
 }
 
-// A5-NOT: error: 'pto.tsel' op expects A2/A3 tsel src0, src1, and dst element type to be i16/i32/f16/f32
+// A5-NOT: error: 'pto.tsel' op expects A2/A3 tsel src0, src1, and dst element type to be i16/i32/f16/bf16/f32
 // A5: AICORE void f0()
 // A5: AICORE void f1()
 
-// A3: error: 'pto.tsel' op expects A2/A3 tsel src0, src1, and dst element type to be i16/i32/f16/f32
+// A3: error: 'pto.tsel' op expects A2/A3 tsel src0, src1, and dst element type to be i16/i32/f16/bf16/f32

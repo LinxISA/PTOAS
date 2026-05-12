@@ -1,0 +1,53 @@
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s | FileCheck %s
+//
+// Regression guard for issue #226: RemoveRedundantSync should prune an outer
+// set/wait pair when the interval contains a complete inner set/wait pair on
+// the same pipe pair, even if those syncs came from different dep roots.
+//
+// CHECK-LABEL: __global__ AICORE void remove_redundant_pipe_pair
+// CHECK: set_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[M2MTE1:[0-9]+]]);
+// CHECK: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[M2MTE1]]);
+// CHECK-NOT: wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID[[M2MTE1]]);
+// CHECK: set_flag(PIPE_MTE1, PIPE_M, EVENT_ID[[MTE12M:[0-9]+]]);
+// CHECK: wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID[[MTE12M]]);
+// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID[[MTE12M]]);
+// CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
+
+module {
+  func.func @remove_redundant_pipe_pair(%arg0: !pto.ptr<f16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %tv = pto.make_tensor_view %arg0, shape = [%c64, %c1], strides = [%c1, %c1] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xf16>
+    %pview = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c64, %c1] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<64x1xf16>
+
+    pto.section.cube {
+      %mat_a = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      %mat_b = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      %left = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+      %right = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+      %acc = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+
+      scf.for %i = %c0 to %c2 step %c1 {
+        pto.tload ins(%pview : !pto.partition_tensor_view<64x1xf16>)
+            outs(%mat_a : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        pto.tmov ins(%mat_a : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+            outs(%left : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>)
+        pto.tmov ins(%mat_b : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+            outs(%right : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+        pto.tmatmul ins(%left, %right : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+            outs(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+        %is_first = arith.cmpi eq, %i, %c0 : index
+        scf.if %is_first {
+          pto.tmov ins(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+              outs(%mat_a : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        } else {
+          pto.tmov ins(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+              outs(%mat_b : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        }
+      }
+    }
+    return
+  }
+}

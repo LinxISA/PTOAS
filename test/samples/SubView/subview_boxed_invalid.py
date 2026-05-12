@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint
+from mlir.ir import Context, Location, Module, InsertionPoint, MLIRError
 from mlir.dialects import func, arith, pto
 from mlir.ir import F16Type, IndexType
 
@@ -55,4 +55,7 @@ def build():
 
 
 if __name__ == "__main__":
-    print(build())
+    try:
+        print(build())
+    except MLIRError as err:
+        print(f"EXPECTED_VERIFIER_FAILURE: {err}")

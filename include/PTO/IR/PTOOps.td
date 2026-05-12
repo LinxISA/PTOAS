@@ -273,6 +273,34 @@ def BindTileOp : PTO_Op<"bind_tile", [
   }];
 }
 
+def MaterializeTileOp : PTO_Op<"materialize_tile", [
+    Pure,
+    AttrSizedOperandSegments
+  ]> {
+  let summary = "Materializes a tile buffer handle from a planned memref";
+  let description = [{
+    Bridges the memref-based memory-planning/sync IR back into tile-buffer
+    handle IR immediately before EmitC. The source remains the planned memref
+    address, while the result carries the tile type, valid dims, and config
+    expected by tile operations and C++ tile codegen.
+  }];
+
+  let arguments = (ins
+    AnyMemRef:$source,
+    Optional<Index>:$valid_row,
+    Optional<Index>:$valid_col,
+    TileBufConfigAttr:$config
+  );
+
+  let results = (outs TileBufType:$result);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $source (`,` $valid_row^ `,` $valid_col)? attr-dict `:` qualified(type($source)) `->` qualified(type($result))
+  }];
+}
+
 def SubViewOp : PTO_Op<"subview", [
     Pure,
     ViewLikeOpInterface,
@@ -1681,6 +1709,11 @@ def TPutOp : PTO_Op<"comm.tput", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $dst `,` $src `,` `buf` `(` $ping (`,` $pong^)? `)`
+    `:` type($dst) `,` type($src) `,` type($ping) (`,` type($pong)^)? `)`
+    attr-dict
+  }];
 }
 
 def TGetOp : PTO_Op<"comm.tget", [
@@ -1695,6 +1728,11 @@ def TGetOp : PTO_Op<"comm.tget", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $dst `,` $src `,` `buf` `(` $ping (`,` $pong^)? `)`
+    `:` type($dst) `,` type($src) `,` type($ping) (`,` type($pong)^)? `)`
+    attr-dict
+  }];
 }
 
 def TNotifyOp : PTO_Op<"comm.tnotify", [
@@ -1708,6 +1746,10 @@ def TNotifyOp : PTO_Op<"comm.tnotify", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $signal `,` $value `:` type($signal) `,` type($value) `)`
+    attr-dict
+  }];
 }
 
 def TWaitOp : PTO_Op<"comm.twait", [
@@ -1721,6 +1763,10 @@ def TWaitOp : PTO_Op<"comm.twait", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $signal `,` $cmpValue `:` type($signal) `,` type($cmpValue) `)`
+    attr-dict
+  }];
 }
 
 def TTestOp : PTO_Op<"comm.ttest", [
@@ -1734,6 +1780,10 @@ def TTestOp : PTO_Op<"comm.ttest", [
   );
   let results = (outs I1:$result);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $signal `,` $cmpValue `:` type($signal) `,` type($cmpValue) `)`
+    attr-dict `->` type($result)
+  }];
 }
 
 def TBroadcastOp : PTO_Op<"comm.tbroadcast", [
@@ -1750,9 +1800,10 @@ def TBroadcastOp : PTO_Op<"comm.tbroadcast", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
-def CommTGatherOp : PTO_Op<"comm.comm_tgather", [
+def CommTGatherOp : PTO_Op<"comm.tgather", [
     AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1766,9 +1817,10 @@ def CommTGatherOp : PTO_Op<"comm.comm_tgather", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
-def CommTScatterOp : PTO_Op<"comm.comm_tscatter", [
+def CommTScatterOp : PTO_Op<"comm.tscatter", [
     AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1782,6 +1834,7 @@ def CommTScatterOp : PTO_Op<"comm.comm_tscatter", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
 def TReduceOp : PTO_Op<"comm.treduce", [
@@ -1800,6 +1853,7 @@ def TReduceOp : PTO_Op<"comm.treduce", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
 def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
@@ -4524,6 +4578,80 @@ def TPartMinOp: PTO_TOp<"tpartmin", [
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TPartArgMaxOp: PTO_TOp<"tpartargmax", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Partial elementwise max with value and index tiles.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$src0Idx,
+    PTODpsType:$src1Idx,
+    PTODpsType:$dst,
+    PTODpsType:$dstIdx
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `,` $src0Idx `,` $src1Idx `:`
+      qualified(type($src0)) `,` qualified(type($src1)) `,`
+      qualified(type($src0Idx)) `,` qualified(type($src1Idx)) `)`
+    `outs` `(` $dst `,` $dstIdx `:`
+      qualified(type($dst)) `,` qualified(type($dstIdx)) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return ::mlir::MutableOperandRange(getOperation(), 4, 2);
+    }
+  }];
+}
+
+def TPartArgMinOp: PTO_TOp<"tpartargmin", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Partial elementwise min with value and index tiles.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$src0Idx,
+    PTODpsType:$src1Idx,
+    PTODpsType:$dst,
+    PTODpsType:$dstIdx
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `,` $src0Idx `,` $src1Idx `:`
+      qualified(type($src0)) `,` qualified(type($src1)) `,`
+      qualified(type($src0Idx)) `,` qualified(type($src1Idx)) `)`
+    `outs` `(` $dst `,` $dstIdx `:`
+      qualified(type($dst)) `,` qualified(type($dstIdx)) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return ::mlir::MutableOperandRange(getOperation(), 4, 2);
+    }
   }];
 }
 //===----------------------------------------------------------------------===//

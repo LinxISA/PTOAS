@@ -83,16 +83,17 @@ module {
 // Case 2: Two consecutive vector ops writing/reading the same tile.
 //
 // Both producer and consumer are on PIPE_V, so the candidate sync collapses
-// into the `handleBarrierConflict` path; the minimal port unconditionally
-// emits a `pto.barrier <PIPE_V>` between them. Skipping that barrier (when
-// PIPE_V same-pipe sequencing is already enforced by hardware on A5) is a
-// follow-up optimization.
+// into the `handleBarrierConflict` path. On A5 (register-based) PIPE_V
+// same-pipe sequencing is enforced by hardware, so the solver drops the
+// PIPE_V barrier. Only the MTE2->V sync from the preceding tload remains
+// between the load and the first tmuls; nothing is emitted between the two
+// tmuls.
 // ----------------------------------------------------------------------------
 
   // CHECK-LABEL: func.func @same_pipe_barrier
   // CHECK: pto.tload
   // CHECK: pto.tmuls
-  // CHECK: pto.barrier <PIPE_V>
+  // CHECK-NOT: pto.barrier
   // CHECK: pto.tmuls
 
   func.func @same_pipe_barrier(%arg0: !pto.ptr<f32>,

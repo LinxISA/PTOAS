@@ -13,6 +13,7 @@
 
 add_mlir_dialect_library(PTOTransforms
   InsertSync/PTOInsertSync.cpp
+  PTOInjectBarrierAllSync.cpp
   InsertSync/InsertSyncDebug.cpp
   PTOViewToMemref.cpp
   PTOToEmitC.cpp
@@ -24,6 +25,7 @@ add_mlir_dialect_library(PTOTransforms
   PTORemoveRedundantBarrier.cpp
   InferPTOLayout.cpp
   PTOA5NormalizeTMovPass.cpp
+  PTOMaterializeTileHandles.cpp
   BufferizableOpInterfaceImpl.cpp
   ConvertToPTOOp.cpp
   PTOAssignDefaultFrontendPipeIdPass.cpp
@@ -43,6 +45,7 @@ add_mlir_dialect_library(PTOTransforms
   GraphSyncSolver/SyncSolverIR.cpp
   GraphSyncSolver/SyncSolverIRTranslator.cpp
   GraphSyncSolver/Utility.cpp
+  GraphSyncSolver/MemInfo.cpp
   GraphSyncSolver/GraphSolver.cpp
   GraphSyncSolver/EventIdSolver.cpp
   GraphSyncSolver/SyncSolver.cpp

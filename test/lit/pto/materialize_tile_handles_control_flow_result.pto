@@ -1,0 +1,75 @@
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-materialize-tile-handles %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func @control_flow_result_tile_materialization(%cond: i1) {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %add = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %mul = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+
+    %selected = scf.if %cond -> (!pto.tile_buf<vec, 16x16xf16>) {
+      pto.tadd ins(%src, %src
+        : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>)
+        outs(%add : !pto.tile_buf<vec, 16x16xf16>)
+      scf.yield %add : !pto.tile_buf<vec, 16x16xf16>
+    } else {
+      pto.tmul ins(%src, %src
+        : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>)
+        outs(%mul : !pto.tile_buf<vec, 16x16xf16>)
+      scf.yield %mul : !pto.tile_buf<vec, 16x16xf16>
+    }
+
+    pto.tadd ins(%selected, %selected
+      : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>)
+      outs(%dst : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+
+  func.func @loop_carried_tile_materialization() {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %tmp = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+
+    %result = scf.for %i = %c0 to %c2 step %c1
+        iter_args(%iter = %src) -> (!pto.tile_buf<vec, 16x16xf16>) {
+      pto.tadd ins(%iter, %iter
+        : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>)
+        outs(%tmp : !pto.tile_buf<vec, 16x16xf16>)
+      scf.yield %tmp : !pto.tile_buf<vec, 16x16xf16>
+    }
+
+    pto.tmul ins(%result, %result
+      : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>)
+      outs(%src : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+}
+
+// IR: %[[SEL:.*]] = scf.if {{.*}} -> (!pto.tile_buf<vec, 16x16xf16>) {
+// IR:   pto.tadd
+// IR:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// IR: } else {
+// IR:   pto.tmul
+// IR:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// IR: }
+// IR: pto.tadd ins(%[[SEL]], %[[SEL]]
+// IR-LABEL: func.func @loop_carried_tile_materialization
+// IR: %[[RES:.*]] = scf.for {{.*}} -> (!pto.tile_buf<vec, 16x16xf16>) {
+// IR:   pto.tadd
+// IR:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// IR: }
+// IR: pto.tmul ins(%[[RES]], %[[RES]]
+
+// EMITC-LABEL: AICORE void control_flow_result_tile_materialization
+// EMITC: if (
+// EMITC: TADD(
+// EMITC: } else {
+// EMITC: TMUL(
+// EMITC: TADD(
+// EMITC-LABEL: AICORE void loop_carried_tile_materialization
+// EMITC: for (
+// EMITC: TADD(
+// EMITC: TMUL(

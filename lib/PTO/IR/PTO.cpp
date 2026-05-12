@@ -3021,8 +3021,6 @@ static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name)
     if (isPTOLowPrecisionType(elemTy))
       return op->emitOpError() << name << ": dtype " << elemTy
                                << " is not supported by this op yet";
-    if (failed(verifyTileBufLayoutConstraints(op, tb, name)))
-      return failure();
   } else if (auto mr = dyn_cast<MemRefType>(ty)) {
     if (mr.getRank() != 2)
       return op->emitOpError() << "expects " << name << " to be a rank-2 memref";

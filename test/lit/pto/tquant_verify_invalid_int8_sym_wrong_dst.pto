@@ -13,13 +13,13 @@
 // CHECK: AICORE void tquant_sym_wrong_dst()
 
 func.func @tquant_sym_wrong_dst() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-  %src = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
-  %fp = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
-  %dst = memref.alloc() : memref<16x32xui8, #pto.address_space<vec>>
+  %src = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+  %fp = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+  %dst = memref.alloc() : memref<16x16xui8, #pto.address_space<vec>>
 
-  pto.tquant ins(%src, %fp : memref<16x32xf32, #pto.address_space<vec>>,
-                             memref<16x32xf32, #pto.address_space<vec>>)
-             outs(%dst : memref<16x32xui8, #pto.address_space<vec>>)
+  pto.tquant ins(%src, %fp : memref<16x16xf32, #pto.address_space<vec>>,
+                             memref<16x16xf32, #pto.address_space<vec>>)
+             outs(%dst : memref<16x16xui8, #pto.address_space<vec>>)
              {quant_type = #pto<quant_type INT8_SYM>}
 
   return

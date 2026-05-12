@@ -1,0 +1,10 @@
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+module {
+  func.func @bad_col_major_nonebox() {
+    %tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=7, cols=2, v_row=7, v_col=2, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    return
+  }
+}
+
+// CHECK: error: 'pto.alloc_tile' op expects result col-major none_box tile column byte size (rows * sizeof(dtype)) to be 32-byte aligned, but got 28 bytes

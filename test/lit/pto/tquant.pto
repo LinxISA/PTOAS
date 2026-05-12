@@ -3,28 +3,28 @@
 
 module attributes {"pto.device-spec" = "Ascend910B3"} {
   func.func @tquant_sym() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-    %src = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-    %fp  = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-    %dst = memref.alloc() : memref<16x16xi8, #pto.address_space<vec>>
+    %src = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
+    %fp  = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
+    %dst = memref.alloc() : memref<16x32xi8, #pto.address_space<vec>>
 
-    pto.tquant ins(%src, %fp : memref<16x16xf32, #pto.address_space<vec>>,
-                               memref<16x16xf32, #pto.address_space<vec>>)
-               outs(%dst : memref<16x16xi8, #pto.address_space<vec>>)
+    pto.tquant ins(%src, %fp : memref<16x32xf32, #pto.address_space<vec>>,
+                               memref<16x32xf32, #pto.address_space<vec>>)
+               outs(%dst : memref<16x32xi8, #pto.address_space<vec>>)
                {quant_type = #pto<quant_type INT8_SYM>}
 
     return
   }
 
   func.func @tquant_asym() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-    %src    = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-    %fp     = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-    %offset = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-    %dst    = memref.alloc() : memref<16x16xui8, #pto.address_space<vec>>
+    %src    = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
+    %fp     = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
+    %offset = memref.alloc() : memref<16x32xf32, #pto.address_space<vec>>
+    %dst    = memref.alloc() : memref<16x32xui8, #pto.address_space<vec>>
 
-    pto.tquant ins(%src, %fp, %offset : memref<16x16xf32, #pto.address_space<vec>>,
-                                        memref<16x16xf32, #pto.address_space<vec>>,
-                                        memref<16x16xf32, #pto.address_space<vec>>)
-               outs(%dst : memref<16x16xui8, #pto.address_space<vec>>)
+    pto.tquant ins(%src, %fp, %offset : memref<16x32xf32, #pto.address_space<vec>>,
+                                        memref<16x32xf32, #pto.address_space<vec>>,
+                                        memref<16x32xf32, #pto.address_space<vec>>)
+               outs(%dst : memref<16x32xui8, #pto.address_space<vec>>)
                {quant_type = #pto<quant_type INT8_ASYM>}
 
     return

@@ -16,13 +16,13 @@
 
 module {
   func.func @TPRELU_OVERFLOW() {
-    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    pto.tprelu ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-               outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=200, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tprelu ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=224, v_row=256, v_col=200, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return
   }
 }

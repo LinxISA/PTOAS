@@ -1,0 +1,10 @@
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+module {
+  func.func @bad_boxed_layout() {
+    %tile = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f32, rows=8, cols=8, v_row=8, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    return
+  }
+}
+
+// CHECK: error: 'pto.alloc_tile' op expects result boxed tile rows to be a multiple of innerRows (16), but got 8

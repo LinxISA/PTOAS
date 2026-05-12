@@ -1326,6 +1326,129 @@ static unsigned getElemByteSize(Type ty) {
   return getPTOStorageElemByteSize(ty);
 }
 
+static LogicalResult verifyTileBufLayoutConstraints(Operation *op,
+                                                    pto::TileBufType tb,
+                                                    StringRef name) {
+  auto shape = tb.getShape();
+  if (shape.size() != 2)
+    return op->emitOpError() << "expects " << name << " to be rank-2";
+
+  int64_t rows = shape[0];
+  int64_t cols = shape[1];
+  if (rows != ShapedType::kDynamic && rows <= 0)
+    return op->emitOpError() << "expects " << name << " rows to be positive";
+  if (cols != ShapedType::kDynamic && cols <= 0)
+    return op->emitOpError() << "expects " << name << " cols to be positive";
+
+  unsigned elemBytes = getElemByteSize(tb.getElementType());
+  if (elemBytes == 0)
+    return op->emitOpError() << "expects " << name
+                             << " element type to have a byte size";
+
+  auto cfg = tb.getConfigAttr();
+  if (!cfg)
+    cfg = TileBufConfigAttr::getDefault(tb.getContext());
+  auto readBLayout = [](Attribute attr, int32_t &out) -> bool {
+    if (auto layout = dyn_cast_or_null<BLayoutAttr>(attr)) {
+      out = static_cast<int32_t>(layout.getValue());
+      return true;
+    }
+    if (auto value = dyn_cast_or_null<IntegerAttr>(attr)) {
+      out = static_cast<int32_t>(value.getInt());
+      return true;
+    }
+    return false;
+  };
+  auto readSLayout = [](Attribute attr, int32_t &out) -> bool {
+    if (auto layout = dyn_cast_or_null<SLayoutAttr>(attr)) {
+      out = static_cast<int32_t>(layout.getValue());
+      return true;
+    }
+    if (auto value = dyn_cast_or_null<IntegerAttr>(attr)) {
+      out = static_cast<int32_t>(value.getInt());
+      return true;
+    }
+    return false;
+  };
+  int32_t blayout = 0;
+  int32_t slayout = 0;
+  if (!readBLayout(cfg.getBLayout(), blayout) ||
+      !readSLayout(cfg.getSLayout(), slayout))
+    return op->emitOpError() << "expects " << name
+                             << " to have concrete tile layout attributes";
+  constexpr int64_t kAlignedBytes = 32;
+
+  auto checkByteAlignment = [&](int64_t dim, StringRef layoutName,
+                                StringRef byteExpr) -> LogicalResult {
+    if (dim == ShapedType::kDynamic)
+      return success();
+    int64_t bytes = dim * static_cast<int64_t>(elemBytes);
+    if (bytes % kAlignedBytes == 0)
+      return success();
+    return op->emitOpError()
+           << "expects " << name << " " << layoutName
+           << " none_box tile " << byteExpr
+           << " to be 32-byte aligned, but got " << bytes << " bytes";
+  };
+
+  if (slayout == static_cast<int32_t>(SLayout::NoneBox)) {
+    if (blayout == static_cast<int32_t>(BLayout::RowMajor))
+      return checkByteAlignment(cols, "row-major",
+                                "row byte size (cols * sizeof(dtype))");
+    return checkByteAlignment(rows, "col-major",
+                              "column byte size (rows * sizeof(dtype))");
+  }
+
+  int64_t innerRows = 0;
+  int64_t innerCols = 0;
+  int32_t fractal = static_cast<int32_t>(cfg.getSFractalSize().getInt());
+  switch (fractal) {
+  case 1024:
+    innerRows = 16;
+    innerCols = 16;
+    break;
+  case 32:
+    innerRows = 16;
+    innerCols = 2;
+    break;
+  case 512:
+    if (kAlignedBytes % elemBytes != 0)
+      return op->emitOpError() << "expects " << name
+                               << " element byte size to divide 32 for boxed "
+                                  "fractal-512 tile layout";
+    if (slayout == static_cast<int32_t>(SLayout::RowMajor)) {
+      innerRows = 16;
+      innerCols = kAlignedBytes / static_cast<int64_t>(elemBytes);
+    } else if (slayout == static_cast<int32_t>(SLayout::ColMajor)) {
+      innerRows = kAlignedBytes / static_cast<int64_t>(elemBytes);
+      innerCols = 16;
+    }
+    break;
+  default:
+    break;
+  }
+  if (innerRows <= 0 || innerCols <= 0)
+    return op->emitOpError() << "expects " << name
+                             << " to use a supported boxed tile layout";
+
+  auto loc = getPTOMemorySpaceEnum(tb);
+  bool allowUnalignedRows =
+      (loc && *loc == pto::AddressSpace::VEC) || fractal == 32 || rows == 1;
+  if (!allowUnalignedRows && rows != ShapedType::kDynamic &&
+      rows % innerRows != 0)
+    return op->emitOpError()
+           << "expects " << name
+           << " boxed tile rows to be a multiple of innerRows (" << innerRows
+           << "), but got " << rows;
+  if (cols != ShapedType::kDynamic && cols % innerCols != 0)
+    return op->emitOpError()
+           << "expects " << name
+           << " boxed tile cols to be a multiple of innerCols (" << innerCols
+           << "), but got " << cols;
+
+  return success();
+}
+
 [[maybe_unused]] static bool isSupportedLoadStoreElemTypeA2A3(Type ty) {
   if (ty.isF16() || ty.isBF16() || ty.isF32())
     return true;
@@ -1981,6 +2104,9 @@ LogicalResult AllocTileOp::verify() {
     return emitOpError() << "result dtype " << elemTy
                          << " is not supported by pto.alloc_tile yet";
 
+  if (failed(verifyTileBufLayoutConstraints(*this, ty, "result")))
+    return failure();
+
   // op 上有没有传 operands
   bool hasVR = getValidRow() != nullptr;
   bool hasVC = getValidCol() != nullptr;
@@ -2020,6 +2146,8 @@ LogicalResult MaterializeTileOp::verify() {
     return emitOpError("source memref must be rank-2 to materialize a tile handle");
   if (resultTy.getRank() != 2)
     return emitOpError("result tile_buf must be rank-2");
+  if (failed(verifyTileBufLayoutConstraints(*this, resultTy, "result")))
+    return failure();
 
   auto viewSemantics = (*this)->getAttrOfType<StringAttr>("pto.view_semantics");
   bool isSubview = viewSemantics && viewSemantics.getValue() == "subview";

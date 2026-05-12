@@ -1,0 +1,25 @@
+// RUN: ptoas %s 2>&1 | FileCheck %s
+
+module {
+  func.func @vector_local_array(%value: i32, %idx: index) {
+    %c0 = arith.constant 0 : i32
+    %c1 = arith.constant 1 : i32
+    %c2 = arith.constant 2 : i32
+    %c3 = arith.constant 3 : i32
+    %arr0 = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xi32>
+    %arr1 = vector.insert %value, %arr0[%idx] : i32 into vector<4xi32>
+    %loaded = vector.extract %arr1[%idx] : i32 from vector<4xi32>
+    %eid = arith.index_cast %loaded : i32 to index
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %eid]
+    return
+  }
+}
+
+// CHECK: struct PTOAS_LocalArray
+// CHECK: PTOAS__LOCAL_ARRAY_MAKE
+// CHECK: PTOAS__LOCAL_ARRAY_INSERT
+// CHECK-LABEL: __global__ AICORE void vector_local_array
+// CHECK: PTOAS_LocalArray<int32_t, 4> {{v[0-9]+}} = PTOAS__LOCAL_ARRAY_MAKE<int32_t, 4>
+// CHECK: PTOAS_LocalArray<int32_t, 4> {{v[0-9]+}} = PTOAS__LOCAL_ARRAY_INSERT
+// CHECK: event_t {{v[0-9]+}} = (event_t) {{v[0-9]+}}[{{v[0-9]+}}]
+// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3

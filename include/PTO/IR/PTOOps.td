@@ -2086,6 +2086,57 @@ def EventIdArraySetOp : PTO_Op<"eventid_array_set"> {
   }];
 }
 
+def LocalArrayFromElementsOp : PTO_Op<"local_array_from_elements", [Pure]> {
+  let summary = "Build a fixed-size local scalar array from element values";
+
+  let arguments = (ins
+    Variadic<ScalarType>:$elements
+  );
+  let results = (outs LocalArrayType:$array);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $elements attr-dict `:` type($elements) `->` qualified(type($array))
+  }];
+}
+
+def LocalArrayInsertOp : PTO_Op<"local_array_insert", [Pure]> {
+  let summary = "Return a local scalar array with one updated element";
+
+  let arguments = (ins
+    ScalarType:$value,
+    LocalArrayType:$array,
+    Index:$index
+  );
+  let results = (outs LocalArrayType:$result);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $value `,` $array `[` $index `]`
+    attr-dict `:` qualified(type($array)) `,` type($value) `->`
+    qualified(type($result))
+  }];
+}
+
+def LocalArrayExtractOp : PTO_Op<"local_array_extract", [Pure]> {
+  let summary = "Read one element from a fixed-size local scalar array";
+
+  let arguments = (ins
+    LocalArrayType:$array,
+    Index:$index
+  );
+  let results = (outs ScalarType:$value);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $array `[` $index `]` attr-dict `:` qualified(type($array)) `->`
+    type($value)
+  }];
+}
+
 def DeclareTileMemRefOp : PTO_Op<"declare_tile_memref"> {
   let summary = "Internal memref placeholder for a tile whose address is assigned later";
   let description = [{

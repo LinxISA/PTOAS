@@ -5898,6 +5898,38 @@ LogicalResult StoreScalarOp::verify() {
   return success();
 }
 
+// ---- LocalArrayFromElementsOp ----
+LogicalResult LocalArrayFromElementsOp::verify() {
+  auto arrayTy = getArray().getType();
+  if (static_cast<int64_t>(getElements().size()) != arrayTy.getSize())
+    return emitOpError("expects number of elements to match local_array size");
+
+  Type elemTy = arrayTy.getElementType();
+  for (Value element : getElements()) {
+    if (element.getType() != elemTy)
+      return emitOpError("expects every element type to match local_array element type");
+  }
+  return success();
+}
+
+// ---- LocalArrayInsertOp ----
+LogicalResult LocalArrayInsertOp::verify() {
+  auto arrayTy = getArray().getType();
+  if (getResult().getType() != arrayTy)
+    return emitOpError("expects result type to match input local_array type");
+  if (getValue().getType() != arrayTy.getElementType())
+    return emitOpError("expects inserted value type to match local_array element type");
+  return success();
+}
+
+// ---- LocalArrayExtractOp ----
+LogicalResult LocalArrayExtractOp::verify() {
+  auto arrayTy = getArray().getType();
+  if (getValue().getType() != arrayTy.getElementType())
+    return emitOpError("expects result type to match local_array element type");
+  return success();
+}
+
 // ---- GetBufOp / RlsBufOp ----
 static LogicalResult verifyBufSyncOp(Operation *op, Attribute opTypeAttr,
                                      IntegerAttr bufIdAttr, IntegerAttr modeAttr) {

@@ -25,6 +25,7 @@ add_mlir_dialect_library(PTOTransforms
   PTORemoveRedundantBarrier.cpp
   InferPTOLayout.cpp
   PTOA5NormalizeTMovPass.cpp
+  PTOLowerVectorLocalArrayPass.cpp
   PTOMaterializeTileHandles.cpp
   BufferizableOpInterfaceImpl.cpp
   ConvertToPTOOp.cpp
@@ -73,6 +74,7 @@ add_mlir_dialect_library(PTOTransforms
   MLIRTransformUtils
   MLIRTransforms
   MLIRTensorDialect
+  MLIRVectorDialect
   MLIRSCFToEmitC
   MLIRSCFDialect
 )

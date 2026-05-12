@@ -7504,6 +7504,29 @@ pto.tsetval ins(%off, %val : index, f16) outs(%dst : !pto.tile_buf<loc=vec, dtyp
 
 ---
 
+#### Fixed Local Arrays From MLIR Vector
+
+PTOAS accepts a narrow front-end idiom for fixed-size local scalar arrays:
+one-dimensional, fixed-length MLIR `vector<NxT>` values with scalar
+`vector.from_elements`, `vector.insert`, and `vector.extract`. The
+`pto-lower-vector-local-array` pass lowers this idiom to PTO local-array helper
+ops:
+
+```mlir
+%arr0 = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+%arr1 = vector.insert %x, %arr0[%idx] : i32 into vector<4xi32>
+%y = vector.extract %arr1[%idx] : i32 from vector<4xi32>
+```
+
+The generated C++ uses `PTOAS_LocalArray<T, N>` plus helper calls that preserve
+MLIR vector value semantics: `vector.insert` returns a new local-array value
+rather than mutating the old one in place. This path is intended for scalar
+bookkeeping arrays; tile data access should continue to use `pto.tgetval` /
+`pto.tsetval`, and global pointer element access should use `pto.load_scalar` /
+`pto.store_scalar`.
+
+---
+
 ### 4.15 MX Quantized Operations
 
 ##### `pto.tget_scale_addr` - Bind Scaling Tile View

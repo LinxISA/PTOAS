@@ -230,6 +230,16 @@ def EventIdArrayType : TypeDef<PTO_Dialect, "EventIdArray"> {
   let assemblyFormat = "`<` $size `>`";
 }
 
+def LocalArrayType : TypeDef<PTO_Dialect, "LocalArray"> {
+  let mnemonic = "local_array";
+  let summary = "Fixed-size local scalar array helper";
+  let parameters = (ins
+    "int64_t":$size,
+    "mlir::Type":$elementType
+  );
+  let assemblyFormat = "`<` $size `x` $elementType `>`";
+}
+
 def PipeType : TypeDef<PTO_Dialect, "Pipe"> {
   let mnemonic = "pipe";
   let summary = "Opaque pipe handle type for TPUSH/TPOP communication";

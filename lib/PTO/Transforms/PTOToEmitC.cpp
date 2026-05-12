@@ -29,6 +29,7 @@
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 
 #include "mlir/IR/AffineExpr.h"
@@ -451,6 +452,13 @@ public:
 
     addConversion([Ctx](pto::EventIdArrayType type) -> Type {
       std::string tok = "PTOAS_EventIdArray<" + std::to_string(type.getSize()) + ">";
+      return emitc::OpaqueType::get(Ctx, tok);
+    });
+
+    addConversion([Ctx](pto::LocalArrayType type) -> Type {
+      std::string tok = "PTOAS_LocalArray<" +
+                        getEmitCScalarTypeToken(type.getElementType()) + ", " +
+                        std::to_string(type.getSize()) + ">";
       return emitc::OpaqueType::get(Ctx, tok);
     });
 
@@ -6264,6 +6272,79 @@ struct PTOEventIdArraySetToEmitC
   }
 };
 
+static ArrayAttr getLocalArrayTemplateArgs(PatternRewriter &rewriter,
+                                           pto::LocalArrayType arrayTy) {
+  MLIRContext *ctx = rewriter.getContext();
+  return rewriter.getArrayAttr({
+      emitc::OpaqueAttr::get(ctx,
+                             getEmitCScalarTypeToken(arrayTy.getElementType())),
+      emitc::OpaqueAttr::get(ctx, std::to_string(arrayTy.getSize())),
+  });
+}
+
+struct PTOLocalArrayFromElementsToEmitC
+    : public OpConversionPattern<mlir::pto::LocalArrayFromElementsOp> {
+  using OpConversionPattern<
+      mlir::pto::LocalArrayFromElementsOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::LocalArrayFromElementsOp op,
+                                OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto arrayTy = op.getArray().getType();
+    Type resultTy = getTypeConverter()->convertType(arrayTy);
+    if (!resultTy)
+      return rewriter.notifyMatchFailure(op,
+                                         "failed to map local_array result type");
+
+    auto call = rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{resultTy}, "PTOAS__LOCAL_ARRAY_MAKE",
+        ArrayAttr{}, getLocalArrayTemplateArgs(rewriter, arrayTy),
+        adaptor.getElements());
+    rewriter.replaceOp(op, call.getResults());
+    return success();
+  }
+};
+
+struct PTOLocalArrayInsertToEmitC
+    : public OpConversionPattern<mlir::pto::LocalArrayInsertOp> {
+  using OpConversionPattern<mlir::pto::LocalArrayInsertOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::LocalArrayInsertOp op,
+                                OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Type resultTy = getTypeConverter()->convertType(op.getResult().getType());
+    if (!resultTy)
+      return rewriter.notifyMatchFailure(op,
+                                         "failed to map local_array insert result type");
+
+    auto call = rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{resultTy}, "PTOAS__LOCAL_ARRAY_INSERT",
+        ArrayAttr{}, ArrayAttr{},
+        ValueRange{adaptor.getArray(), adaptor.getIndex(), adaptor.getValue()});
+    rewriter.replaceOp(op, call.getResults());
+    return success();
+  }
+};
+
+struct PTOLocalArrayExtractToEmitC
+    : public OpConversionPattern<mlir::pto::LocalArrayExtractOp> {
+  using OpConversionPattern<mlir::pto::LocalArrayExtractOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::LocalArrayExtractOp op,
+                                OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Type resultTy = getTypeConverter()->convertType(op.getValue().getType());
+    if (!resultTy)
+      return rewriter.notifyMatchFailure(op,
+                                         "failed to map local_array extract result type");
+
+    auto load = rewriter.create<emitc::SubscriptOp>(
+        op.getLoc(), resultTy, adaptor.getArray(), adaptor.getIndex());
+    rewriter.replaceOp(op, load.getResult());
+    return success();
+  }
+};
+
 static std::optional<int64_t> getStaticIndexLikeValue(Value value) {
   if (!value)
     return std::nullopt;
@@ -11827,6 +11908,9 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTODeclareEventIdArrayToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArrayGetToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArraySetToEmitC>(typeConverter, ctx);
+  patterns.add<PTOLocalArrayFromElementsToEmitC>(typeConverter, ctx);
+  patterns.add<PTOLocalArrayInsertToEmitC>(typeConverter, ctx);
+  patterns.add<PTOLocalArrayExtractToEmitC>(typeConverter, ctx);
   patterns.add<PTOTReshapeToEmitC>(typeConverter, ctx);
   patterns.add<PTOBitcastToEmitC>(typeConverter, ctx);
   patterns.add<PTOTAllocToEmitC>(typeConverter, ctx, targetArch);
@@ -11886,7 +11970,8 @@ struct EmitPTOManualPass
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<emitc::EmitCDialect, func::FuncDialect, arith::ArithDialect,
                     memref::MemRefDialect, affine::AffineDialect,
-                    mlir::cf::ControlFlowDialect, mlir::pto::PTODialect>();
+                    vector::VectorDialect, mlir::cf::ControlFlowDialect,
+                    mlir::pto::PTODialect>();
   }
 
   void runOnOperation() override {
@@ -11916,12 +12001,17 @@ struct EmitPTOManualPass
     }
 
         bool needsEventIdArrayHelper = false;
+        bool needsLocalArrayHelper = false;
         bool needsTRandomHelper = false;
         bool needsGlobalTensorDataHelper = false;
         bool needsCommInclude = false;
         mop.walk([&](Operation *op) {
           if (isa<mlir::pto::DeclareEventIdArrayOp>(op))
             needsEventIdArrayHelper = true;
+          if (isa<mlir::pto::LocalArrayFromElementsOp,
+                  mlir::pto::LocalArrayInsertOp,
+                  mlir::pto::LocalArrayExtractOp>(op))
+            needsLocalArrayHelper = true;
           if (isa<mlir::pto::TRandomOp>(op))
             needsTRandomHelper = true;
           if (isa<mlir::pto::PartitionViewOp>(op))
@@ -11975,6 +12065,39 @@ struct PTOAS_EventIdArray {
   AICORE inline int32_t &operator[](int32_t idx) { return data[idx]; }
   AICORE inline const int32_t &operator[](int32_t idx) const { return data[idx]; }
 };
+)cpp"));
+        }
+        if (needsLocalArrayHelper) {
+	      builder.create<emitc::VerbatimOp>(
+	          loc, builder.getStringAttr(R"cpp(
+template <typename T, int N>
+struct PTOAS_LocalArray {
+  static_assert(N > 0, "PTOAS_LocalArray requires a positive static size");
+  T data[N] = {};
+
+  AICORE inline T &operator[](int32_t idx) { return data[idx]; }
+  AICORE inline const T &operator[](int32_t idx) const { return data[idx]; }
+};
+
+template <typename T, int N, typename... Args>
+static AICORE inline PTOAS_LocalArray<T, N> PTOAS__LOCAL_ARRAY_MAKE(
+    Args... args) {
+  static_assert(sizeof...(Args) == N,
+                "PTOAS__LOCAL_ARRAY_MAKE expects exactly N elements");
+  PTOAS_LocalArray<T, N> out;
+  T init[N] = {static_cast<T>(args)...};
+  for (int32_t i = 0; i < N; ++i) {
+    out.data[i] = init[i];
+  }
+  return out;
+}
+
+template <typename Array, typename Value>
+static AICORE inline Array PTOAS__LOCAL_ARRAY_INSERT(
+    Array array, int32_t idx, Value value) {
+  array[idx] = value;
+  return array;
+}
 )cpp"));
         }
         if (needsTRandomHelper) {
@@ -12124,6 +12247,7 @@ static AICORE inline void ptoas_auto_sync_tail(
     target.addIllegalDialect<pto::PTODialect>();
     target.addIllegalDialect<arith::ArithDialect>();
     target.addIllegalDialect<mlir::scf::SCFDialect>(); 
+    target.addIllegalDialect<vector::VectorDialect>();
     
     // If we introduced CFG branches (e.g. from scf.while), make sure they are
     // updated to use legalized operand types.

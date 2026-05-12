@@ -96,6 +96,22 @@ def ConvertToPTOOp : Pass<"convert-to-pto-op"> {
   ];
 }
 
+def PTOLowerVectorLocalArray : Pass<"pto-lower-vector-local-array", "ModuleOp"> {
+  let summary = "Lower one-dimensional MLIR vector array idioms to PTO local arrays";
+  let description = [{
+    Converts fixed-size one-dimensional `vector` values used with
+    `vector.from_elements`, `vector.insert`, and `vector.extract` into
+    `pto.local_array_*` helper operations. The lowering preserves vector SSA
+    value semantics by making insert return a new local-array value.
+  }];
+  let constructor = "mlir::pto::createPTOLowerVectorLocalArrayPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::arith::ArithDialect",
+    "mlir::vector::VectorDialect"
+  ];
+}
+
 def InferPTOLayout : Pass<"pto-infer-layout", "func::FuncOp"> {
   let summary = "Infer GlobalTensor layout (ND/DN/NZ) for make_tensor_view";
   let description = [{

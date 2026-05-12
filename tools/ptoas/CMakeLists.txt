@@ -56,6 +56,7 @@ target_link_libraries(pto-opt PRIVATE
   MLIRAffineDialect
   MLIRArithDialect
   MLIRTensorDialect
+  MLIRVectorDialect
   MLIRControlFlowDialect
   MLIRBufferizationDialect
   MLIRFuncDialect

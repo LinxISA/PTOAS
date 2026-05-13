@@ -2270,9 +2270,10 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
   //
   // We keep the lower-id ConflictPair (deterministic, and tends to keep
   // the forward pair which was usually allocated first).
+  using AnchorEnd = std::pair<OperationBase *, pto::PIPE>;
+
   llvm::DenseSet<ConflictPair *> bufIdRedundantMirror;
   if (options.isBufIdEmit()) {
-    using AnchorEnd = std::pair<OperationBase *, pto::PIPE>;
     using AnchorKey = std::pair<AnchorEnd, AnchorEnd>;
     llvm::DenseMap<AnchorKey, ConflictPair *> seen;
     for (auto *cp : conflictPairs) {
@@ -2296,6 +2297,157 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
     }
   }
 
+  // Buf-id emit takes a separate path: collect unique (anchor_op, pipe, bufId)
+  // brackets from the forward ConflictPair set with a buffer-aware id-grouping
+  // pre-pass, then emit one bracket per unique triple. See the long comment
+  // inside the if-block.
+  if (options.isBufIdEmit()) {
+    // === Buffer-aware id grouping ===
+    //
+    // Two ConflictPairs that synchronize on the same buffer must share a
+    // buf-id so that the (get_cnt, rel_cnt) chain in the forward bracket
+    // sequence transitively orders cross-iter conflicts (e.g. iter i+1's
+    // load after iter i's store) for free. Two pairs on different buffers
+    // can keep distinct ids for parallelism.
+    //
+    // ConflictPair doesn't carry buffer info directly. Proxy:
+    //   F1, F2 are on the same buffer chain iff
+    //     - they share an anchor (op, pipe), AND
+    //     - some backward ConflictPair B has F1's non-shared endpoint and
+    //       F2's non-shared endpoint as its two anchors.
+    // Rationale: same buffer means iter i's read on one endpoint conflicts
+    // with iter i+1's write on the other endpoint, which is exactly what
+    // the solver records as a backward edge between them.
+    //
+    // We union-find forward pairs by this relation, then each group gets a
+    // single shared bufId (the smallest among members' allocated ids).
+    // Backward pairs are never emitted — their semantic is folded into the
+    // forward chain through id sharing.
+
+    llvm::DenseMap<ConflictPair *, ConflictPair *> ufParent;
+    std::function<ConflictPair *(ConflictPair *)> ufFind =
+        [&](ConflictPair *x) -> ConflictPair * {
+      while (ufParent[x] != x) {
+        ufParent[x] = ufParent[ufParent[x]];
+        x = ufParent[x];
+      }
+      return x;
+    };
+    auto ufUnion = [&](ConflictPair *a, ConflictPair *b) {
+      auto *ra = ufFind(a);
+      auto *rb = ufFind(b);
+      if (ra != rb)
+        ufParent[ra] = rb;
+    };
+
+    llvm::SmallVector<ConflictPair *> forwardPairs;
+    llvm::SmallVector<ConflictPair *> backwardPairs;
+    for (auto *cp : conflictPairs) {
+      if (cp->isUseless || cp->replacedWithUnitFlag || cp->isBarrier())
+        continue;
+      if (bufIdRedundantMirror.contains(cp))
+        continue;
+      if (cp->isInnerBackward) {
+        backwardPairs.push_back(cp);
+      } else {
+        forwardPairs.push_back(cp);
+        ufParent[cp] = cp;
+      }
+    }
+
+    auto anchorsOf = [](ConflictPair *cp) -> std::array<AnchorEnd, 2> {
+      return {{{cp->setOp, cp->setCorePipeInfo.pipe},
+               {cp->waitOp, cp->waitCorePipeInfo.pipe}}};
+    };
+
+    for (size_t i = 0; i < forwardPairs.size(); ++i) {
+      for (size_t j = i + 1; j < forwardPairs.size(); ++j) {
+        auto *f1 = forwardPairs[i];
+        auto *f2 = forwardPairs[j];
+        auto a1 = anchorsOf(f1);
+        auto a2 = anchorsOf(f2);
+        bool bridged = false;
+        for (int k = 0; k < 2 && !bridged; ++k) {
+          for (int l = 0; l < 2 && !bridged; ++l) {
+            if (a1[k] != a2[l])
+              continue;
+            AnchorEnd ns1 = a1[1 - k];
+            AnchorEnd ns2 = a2[1 - l];
+            if (ns1 == ns2)
+              continue;
+            for (auto *b : backwardPairs) {
+              auto ab = anchorsOf(b);
+              bool hasNs1 = (ab[0] == ns1 || ab[1] == ns1);
+              bool hasNs2 = (ab[0] == ns2 || ab[1] == ns2);
+              if (hasNs1 && hasNs2) {
+                bridged = true;
+                break;
+              }
+            }
+          }
+        }
+        if (bridged)
+          ufUnion(f1, f2);
+      }
+    }
+
+    llvm::DenseMap<ConflictPair *, int64_t> groupId;
+    for (auto *f : forwardPairs) {
+      if (!f->eventIdNode || f->eventIdNode->getEventIds().empty())
+        continue;
+      int64_t myId = f->eventIdNode->getEventIds().front();
+      auto *root = ufFind(f);
+      auto it = groupId.find(root);
+      if (it == groupId.end() || myId < it->second)
+        groupId[root] = myId;
+    }
+
+    // === Emit unique (anchor_op, pipe, bufId) brackets from forward pairs ===
+    //
+    // Multiple ConflictPairs in the same group will contribute the same
+    // (op, pipe, groupId) on each shared anchor; emit each unique triple
+    // only once so that we don't violate spec constraint 1 (no two
+    // consecutive get_buf(pipe, #id) before a single op).
+    llvm::DenseSet<std::pair<AnchorEnd, int64_t>> emittedBefore;
+    llvm::DenseSet<std::pair<AnchorEnd, int64_t>> emittedAfter;
+    auto emitBracket = [&](AnchorEnd anchor, int64_t bufId,
+                           ConflictPair *debugCp) {
+      auto key = std::make_pair(anchor, bufId);
+      if (emittedBefore.insert(key).second) {
+        auto getBuf = std::make_unique<GetBufOp>(
+            anchor.first->op, anchor.first->parentOp, anchor.second, bufId);
+        LLVM_DEBUG(getBuf->debugId = debugCp->id);
+        syncMapBefore[anchor.first].push_back(std::move(getBuf));
+      }
+      if (emittedAfter.insert(key).second) {
+        auto rlsBuf = std::make_unique<RlsBufOp>(
+            anchor.first->op, anchor.first->parentOp, anchor.second, bufId);
+        LLVM_DEBUG(rlsBuf->debugId = debugCp->id);
+        syncMapAfter[anchor.first].push_back(std::move(rlsBuf));
+      }
+    };
+
+    for (auto *cp : conflictPairs) {
+      if (cp->isUseless || cp->replacedWithUnitFlag || cp->isBarrier())
+        continue;
+      if (cp->isInnerBackward)
+        continue;
+      if (bufIdRedundantMirror.contains(cp))
+        continue;
+      if (!cp->eventIdNode || cp->eventIdNode->getEventIds().empty())
+        continue;
+      auto gIt = groupId.find(ufFind(cp));
+      int64_t bufId = (gIt != groupId.end())
+                          ? gIt->second
+                          : cp->eventIdNode->getEventIds().front();
+      emitBracket({cp->setOp, cp->setCorePipeInfo.pipe}, bufId, cp);
+      emitBracket({cp->waitOp, cp->waitCorePipeInfo.pipe}, bufId, cp);
+    }
+
+    return std::make_pair(std::move(syncMapBefore), std::move(syncMapAfter));
+  }
+
+  // === set-wait path (unchanged) ===
   for (auto *conflictPair : conflictPairs) {
     if (conflictPair->isUseless) {
       continue;
@@ -2303,64 +2455,13 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
     if (conflictPair->replacedWithUnitFlag) {
       continue;
     }
-    // buf-id mode: loop-carried (backward) ConflictPairs are entirely
-    // redundant. Unlike set/wait — where set on producer + wait on consumer
-    // is a one-shot signal that must be paired across the loop edge — the
-    // buf-id (get_cnt, rel_cnt) counters monotonically advance per anchor
-    // per iter, so iter i+1's get_buf on a shared id is automatically
-    // ordered after iter i's matching rls_buf. The forward brackets
-    // already in place handle backward semantics transitively; emitting an
-    // extra bracket pair for the backward edge just wastes an id and
-    // serializes more than the spec requires.
-    if (options.isBufIdEmit() && conflictPair->isInnerBackward) {
-      continue;
-    }
-    if (bufIdRedundantMirror.contains(conflictPair)) {
-      continue;
-    }
     assert(conflictPair->setOp != nullptr && conflictPair->waitOp != nullptr);
     if (conflictPair->isBarrier()) {
-      // A5 hardware preserves same-pipe order, so buf-id mode drops barriers
-      // entirely. set-wait keeps the existing pto.barrier path.
-      if (options.isBufIdEmit()) {
-        continue;
-      }
       auto barrierOp = std::make_unique<BarrierOp>(
           conflictPair->waitOp->op, conflictPair->waitOp->parentOp,
           conflictPair->waitCorePipeInfo.pipe);
       LLVM_DEBUG(barrierOp->debugId = conflictPair->id);
       syncMapBefore[conflictPair->waitOp].push_back(std::move(barrierOp));
-    } else if (options.isBufIdEmit()) {
-      assert(conflictPair->eventIdNode != nullptr);
-      auto srcPipe = conflictPair->setCorePipeInfo.pipe;
-      auto dstPipe = conflictPair->waitCorePipeInfo.pipe;
-      // Producer-side bracket on src pipe, consumer-side bracket on dst pipe.
-      // The shared bufId between both brackets is what enforces ordering — the
-      // hw scoreboard serializes same-id get/rel across pipes.
-      for (int64_t bufId : conflictPair->eventIdNode->getEventIds()) {
-        auto getProd = std::make_unique<GetBufOp>(
-            conflictPair->setOp->op, conflictPair->setOp->parentOp, srcPipe,
-            bufId);
-        auto rlsProd = std::make_unique<RlsBufOp>(
-            conflictPair->setOp->op, conflictPair->setOp->parentOp, srcPipe,
-            bufId);
-        auto getCons = std::make_unique<GetBufOp>(
-            conflictPair->waitOp->op, conflictPair->waitOp->parentOp, dstPipe,
-            bufId);
-        auto rlsCons = std::make_unique<RlsBufOp>(
-            conflictPair->waitOp->op, conflictPair->waitOp->parentOp, dstPipe,
-            bufId);
-        LLVM_DEBUG({
-          getProd->debugId = conflictPair->id;
-          rlsProd->debugId = conflictPair->id;
-          getCons->debugId = conflictPair->id;
-          rlsCons->debugId = conflictPair->id;
-        });
-        syncMapBefore[conflictPair->setOp].push_back(std::move(getProd));
-        syncMapAfter[conflictPair->setOp].push_back(std::move(rlsProd));
-        syncMapBefore[conflictPair->waitOp].push_back(std::move(getCons));
-        syncMapAfter[conflictPair->waitOp].push_back(std::move(rlsCons));
-      }
     } else {
       assert(conflictPair->eventIdNode != nullptr);
       auto setOp = std::make_unique<SetFlagOp>(
@@ -2389,14 +2490,6 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
       syncMapAfter[conflictPair->setOp].push_back(std::move(setOp));
       syncMapBefore[conflictPair->waitOp].push_front(std::move(waitOp));
     }
-  }
-
-  // In buf-id mode the producer/consumer brackets sit at their natural
-  // anchors and the hw scoreboard counters handle loop-carried (backward)
-  // sync without any out-of-loop compensation. Skip the backward-sync hoist
-  // pipeline that exists to manage set/wait strict pairing.
-  if (options.isBufIdEmit()) {
-    return std::make_pair(std::move(syncMapBefore), std::move(syncMapAfter));
   }
 
   collectBackwardSyncEventIds();

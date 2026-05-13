@@ -1,0 +1,114 @@
+// RUN: ptoas --pto-level=level3 --pto-arch a5 --enable-graph-sync-solver --graph-sync-solver-sync-style=buf-id --graph-sync-solver-event-id-max=8 --emit-pto-ir %s | FileCheck %s
+
+// Doc §1.3 two-buffer pingpong-like pattern (case 1 from the user's
+// reference): forward deps split across two distinct tile buffers, so
+// buffer-aware id grouping should give them DIFFERENT ids, enabling
+// pipelining (next iter's tload can advance ahead of this iter's tstore
+// because they don't share the same scoreboard counter).
+//
+//   for i:
+//     tload  gm  -> tile_a          # MTE2 -> tile_a
+//     tmuls  tile_a -> tile_b       # V    -> tile_b
+//     tstore tile_b -> gm_out       # MTE3 -> tile_b
+//
+// Expected output:
+//   * F1 (load->vadd) and F2 (vadd->store) get DISTINCT ids.
+//   * vadd has TWO brackets on PIPE_V (one per chain).
+//   * load has one bracket on MTE2 (F1's id), store has one bracket on MTE3
+//     (F2's id).
+//   * No bracket pair has matching id on both sides (constraint 1 holds).
+//   * No backward bracket emitted, no scf.if, no out-of-loop ops.
+
+module {
+
+// CHECK-LABEL: func.func @two_buffer_loop
+// CHECK: pto.bind_tile
+// CHECK: pto.bind_tile
+//
+// Producer-side bracket on tile_a's chain (id A):
+// CHECK: pto.get_buf[#pto.pipe_event_type<TLOAD>, [[IDA:[0-9]+]]]
+// CHECK-NEXT: pto.tload
+// CHECK-NEXT: pto.rls_buf[#pto.pipe_event_type<TLOAD>, [[IDA]]]
+//
+// vadd is in BOTH chains: tile_a's consumer bracket (id A) AND tile_b's
+// producer bracket (id B). The two ids MUST differ (mirror-image dedup +
+// share-pipe conflict rule both ensure this).
+// CHECK: pto.get_buf[#pto.pipe_event_type<TVEC>, [[IDA]]]
+// CHECK-NEXT: pto.get_buf[#pto.pipe_event_type<TVEC>, [[IDB:[0-9]+]]]
+// CHECK-NOT: pto.get_buf[#pto.pipe_event_type<TVEC>, [[IDA]]]
+// CHECK: pto.tmuls
+// CHECK: pto.rls_buf[#pto.pipe_event_type<TVEC>
+// CHECK-NEXT: pto.rls_buf[#pto.pipe_event_type<TVEC>
+//
+// Consumer-side bracket on tile_b's chain (id B):
+// CHECK: pto.get_buf[#pto.pipe_event_type<TSTORE_VEC>, [[IDB]]]
+// CHECK-NEXT: pto.tstore
+// CHECK-NEXT: pto.rls_buf[#pto.pipe_event_type<TSTORE_VEC>, [[IDB]]]
+//
+// CHECK-NOT: scf.if
+// CHECK-NOT: pto.set_flag
+// CHECK-NOT: pto.wait_flag
+// CHECK-NOT: pto.barrier
+
+  func.func @two_buffer_loop(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>,
+                             %arg_iters: index,
+                             %arg2: index, %arg3: index, %arg4: index,
+                             %arg5: index, %arg6: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c1024 = arith.constant 1024 : index
+    %c1048576 = arith.constant 1048576 : index
+    %c0_i64 = arith.constant 0 : i64
+    %c100_i64 = arith.constant 100 : i64
+    %cst = arith.constant 2.000000e+00 : f32
+
+    %src_view = pto.make_tensor_view %arg0,
+            shape = [%c1, %c1, %c16, %c1024, %c1024],
+            strides = [%c1048576, %c1048576, %c1048576, %c1024, %c1]
+            : !pto.tensor_view<1x1x16x1024x1024xf32>
+    %dst_view = pto.make_tensor_view %arg1,
+            shape = [%c1, %c1, %c16, %c1024, %c1024],
+            strides = [%c1048576, %c1048576, %c1048576, %c1024, %c1]
+            : !pto.tensor_view<1x1x16x1024x1024xf32>
+
+    %tmp0 = arith.muli %arg2, %arg3 : index
+    %tmp1 = arith.muli %tmp0, %arg4 : index
+    %tmp2 = arith.muli %tmp1, %arg5 : index
+
+    // Two distinct tiles -> the load/vadd chain and the vadd/store chain
+    // are on independent buffers -> buffer-aware id grouping yields TWO ids.
+    %tile_a = pto.alloc_tile addr = %c0_i64 valid_row = %tmp2 valid_col = %arg6
+            : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tile_b = pto.alloc_tile addr = %c100_i64 valid_row = %tmp2 valid_col = %arg6
+            : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    scf.for %i = %c0 to %arg_iters step %c1 {
+      %src_part = pto.partition_view %src_view,
+              offsets = [%c0, %c0, %i, %c0, %c0],
+              sizes = [%arg2, %arg3, %arg4, %arg5, %arg6]
+              : !pto.tensor_view<1x1x16x1024x1024xf32>
+                -> !pto.partition_tensor_view<?x?x?x?x?xf32>
+
+      // load writes tile_a
+      pto.tload ins(%src_part : !pto.partition_tensor_view<?x?x?x?x?xf32>)
+              outs(%tile_a : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+      // vadd reads tile_a, writes tile_b (different buffer)
+      pto.tmuls ins(%tile_a, %cst : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%tile_b : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+      %dst_part = pto.partition_view %dst_view,
+              offsets = [%c0, %c0, %i, %c0, %c0],
+              sizes = [%arg2, %arg3, %arg4, %arg5, %arg6]
+              : !pto.tensor_view<1x1x16x1024x1024xf32>
+                -> !pto.partition_tensor_view<?x?x?x?x?xf32>
+
+      // store reads tile_b
+      pto.tstore ins(%tile_b : !pto.tile_buf<loc=vec, dtype=f32, rows=256, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+              outs(%dst_part : !pto.partition_tensor_view<?x?x?x?x?xf32>)
+    }
+    return
+  }
+
+}

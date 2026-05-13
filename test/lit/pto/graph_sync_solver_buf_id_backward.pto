@@ -35,20 +35,22 @@ module {
 // CHECK-NOT: pto.wait_flag
 //
 // CHECK: scf.for
-// Only forward brackets in the body. The MTE3<-MTE2 backward dep
-// (tstore[i] -> tload[i+1]) is intentionally NOT bracketed — the
-// (get_cnt, rel_cnt) counters of the forward chain transitively serialize
-// iter i+1 after iter i, so an extra bracket would be redundant
-// (vs set/wait where the explicit pairing across the loop edge is mandatory).
-// CHECK: pto.get_buf[#pto.pipe_event_type<TLOAD>
-// CHECK: pto.tload
-// CHECK: pto.rls_buf[#pto.pipe_event_type<TLOAD>
-// CHECK: pto.get_buf[#pto.pipe_event_type<TVEC>
-// CHECK: pto.tmuls
-// CHECK: pto.rls_buf[#pto.pipe_event_type<TVEC>
-// CHECK: pto.get_buf[#pto.pipe_event_type<TSTORE_VEC>
-// CHECK: pto.tstore
-// CHECK: pto.rls_buf[#pto.pipe_event_type<TSTORE_VEC>
+// All three anchors share a single tile buffer, so buffer-aware id grouping
+// puts F1 (tload->tmuls) and F2 (tmuls->tstore) into the same id group
+// (bridged by the backward dep tstore[i]->tload[i+1] on the tile). Each
+// anchor gets exactly ONE bracket pair using the shared id; the counter
+// chain monotonically serializes iter i+1's tload after iter i's tstore
+// for free.
+//
+// CHECK: pto.get_buf[#pto.pipe_event_type<TLOAD>, [[ID:[0-9]+]]]
+// CHECK-NEXT: pto.tload
+// CHECK-NEXT: pto.rls_buf[#pto.pipe_event_type<TLOAD>, [[ID]]]
+// CHECK-NEXT: pto.get_buf[#pto.pipe_event_type<TVEC>, [[ID]]]
+// CHECK-NEXT: pto.tmuls
+// CHECK-NEXT: pto.rls_buf[#pto.pipe_event_type<TVEC>, [[ID]]]
+// CHECK: pto.get_buf[#pto.pipe_event_type<TSTORE_VEC>, [[ID]]]
+// CHECK-NEXT: pto.tstore
+// CHECK-NEXT: pto.rls_buf[#pto.pipe_event_type<TSTORE_VEC>, [[ID]]]
 // No form-1 isFirstIter / isLastIter guarding the buf-id ops:
 // CHECK-NOT: scf.if
 // End of loop. No out-of-loop compensation:

@@ -149,29 +149,52 @@ for i = 0:N
   get_buf(V,    #id); Vector(); rls_buf(V,    #id) // consumer 自然 bracket
 ```
 
-**结论：buf-id 模式下完全不需要任何 backward-sync 优化，连 backward ConflictPair 本身的 bracket 都不用发**。
+**结论：buf-id 模式下 backward ConflictPair 不需要单独发 bracket，但 backward 分析本身不能省**——它要用来决定 forward pair 之间是否要**复用同一个 id**。
 
-set/wait 必须给 backward 一对 set/wait，是因为 set/wait 是单次握手——iter i 的 set 必须有一个对应的 wait，跨循环边界的语义就靠 form 1（带守卫）或 form 2（外提补偿）来保证一对一配对。
+#### 单 buffer vs 多 buffer 的 id 分配
 
-buf-id 不一样：硬件 `(get_cnt, rel_cnt)` 是单调累加计数器。forward 边的 bracket 在 iter i 和 iter i+1 上各自就位之后，iter i+1 的 `get_buf` 自动等 iter i 的 `rls_buf` 推进计数器——这件事**对 forward 和 backward 都成立**，无需为 backward 再发一对额外的 bracket。
+考虑 doc §1.2 / §1.3 两个 case：
 
-举例（doc §1.2 canonical）：
-
+**Case 1（双 buffer，可并行）**：
 ```text
 for i = 0:N
-  get_buf(MTE2, #0); load();   rel_buf(MTE2, #0)
-  get_buf(V,    #0); Vector(); rel_buf(V,    #0)
+  load(gm -> ub0)   # MTE2, write ub0
+  vadd(ub0 -> ub1)  # V,    read ub0 write ub1
+  store(ub1 -> gm)  # MTE3, read ub1
 ```
+两条 forward dep 走两个不同 buffer：load/vadd 在 ub0 上同步，vadd/store 在 ub1 上同步。两条链应该用**不同的 id** 以获得最大并行度（下一轮的 load 不需要等本轮的 store 完成）。
 
-只发了 forward (load → vector) 的 bracket，没有为 backward (vector[i] → load[i+1]) 再发一对。但 iter i+1 的 `get_buf(MTE2, #0)` 拿到的号比 iter i 的 `rls_buf(V, #0)` 推进的 rel_cnt 大 1，自动等 vector[i] 跑完——backward 语义被 forward bracket 的计数器单调性"免费"覆盖。
+**Case 2（单 buffer，必须串行）**：
+```text
+for i = 0:N
+  load(gm -> ub0)
+  vadd(ub0 -> ub0)
+  store(ub0 -> gm)
+```
+所有 forward dep 都走 ub0。这种情况下下一轮的 load 写 ub0 必须等本轮的 store 读完 ub0——必须**复用同一个 id**，让计数器单调性串起整条 load→vadd→store→next-load 链。
 
-具体落实：
-- `tryMovingOutBackwardSyncPairsToOuterLoops`、`considerOuterBackwardSyncPairs`、
-  `mergeBackwardSyncPairs` 这些 set/wait 的 backward 外提路径在 buf-id 模式下**直接关掉**。
-- `backwardSyncEvents` / `backwardSyncEventsAfterMerge` 不会被填充。
-- **更进一步**：在 `getBeforeAfterSyncMaps` emit 时，
-  `conflictPair->isInnerBackward` 为 true 的 pair 直接 `continue` 不发 bracket——
-  它的 bracket 集合是 forward chain 的反向，发了纯属浪费 id。
+如果两条 forward 用不同 id（像 case 1 那样），iter i+1 的 load（在 id_A 上）只会等 iter i 的 vadd（也在 id_A 上），不会等 iter i 的 store（在 id_B 上）——结果 store 读 ub0 时被 load 覆写，data race。
+
+**判别准则**：两条 forward F1、F2 是否在同一 buffer chain 上？
+
+理论上需要 plumbing buffer 信息到 ConflictPair。但有个等价代理：
+
+> F1 和 F2 共享一个 anchor `(op, pipe)`，且存在 backward ConflictPair B 把 F1 的"非共享"端点和 F2 的"非共享"端点连起来 → F1、F2 必在同 buffer chain 上。
+
+理由：solver 的 backward 边正是 iter i 的某端读 / iter i+1 的某端写在同一 buffer 上产生的。如果两条 forward 链穿过同一 buffer，就一定有这种 backward 桥；如果是两条独立 buffer 的链，桥就找不到。
+
+所以：**backward 分析依旧需要做**，但产物不是 bracket，而是 id 合并提示。
+
+#### 落实
+
+1. `tryMovingOutBackwardSyncPairsToOuterLoops`、`considerOuterBackwardSyncPairs`、
+   `mergeBackwardSyncPairs` 这些 set/wait 的 backward 外提路径在 buf-id 模式下**直接关掉**。
+2. `backwardSyncEvents` / `backwardSyncEventsAfterMerge` 不会被填充。
+3. 在 `getBeforeAfterSyncMaps` emit 时，对所有 forward ConflictPair 做一个 **buffer-aware union-find 预处理**：
+   - 用 backward 边作为"同 buffer 桥"。
+   - 同一连通分量的 forward pair 共享一个 buf id（取分量内最小的 id 作代表）。
+   - 每个 `(anchor_op, pipe, id)` 三元组只发一对 bracket（dedup）——多个 ConflictPair 落到同一 (op, pipe, id) 上时合并。
+4. `conflictPair->isInnerBackward` 为 true 的 pair 不发 bracket（只参与 step 3 的 union-find 桥）。
 
 具体落实见 3.6 节。
 

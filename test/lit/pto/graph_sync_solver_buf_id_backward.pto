@@ -27,17 +27,19 @@ module {
 
 // CHECK-LABEL: func.func @backward_loop
 // CHECK: pto.bind_tile
-// Nothing buf-id-ish between the tile alloc and the loop entry (form-2
-// out-of-loop compensation in set/wait would land here):
+// Nothing buf-id-ish between the tile alloc and the loop entry (set/wait
+// form-2 out-of-loop compensation would land here):
 // CHECK-NOT: pto.get_buf
 // CHECK-NOT: pto.rls_buf
 // CHECK-NOT: pto.set_flag
 // CHECK-NOT: pto.wait_flag
 //
 // CHECK: scf.for
-// Forward + backward brackets in the body — exact id assignment is
-// solver-internal, just check that both producer (TLOAD/TVEC) and consumer
-// (TVEC/TSTORE_VEC) brackets appear.
+// Only forward brackets in the body. The MTE3<-MTE2 backward dep
+// (tstore[i] -> tload[i+1]) is intentionally NOT bracketed — the
+// (get_cnt, rel_cnt) counters of the forward chain transitively serialize
+// iter i+1 after iter i, so an extra bracket would be redundant
+// (vs set/wait where the explicit pairing across the loop edge is mandatory).
 // CHECK: pto.get_buf[#pto.pipe_event_type<TLOAD>
 // CHECK: pto.tload
 // CHECK: pto.rls_buf[#pto.pipe_event_type<TLOAD>
@@ -49,8 +51,7 @@ module {
 // CHECK: pto.rls_buf[#pto.pipe_event_type<TSTORE_VEC>
 // No form-1 isFirstIter / isLastIter guarding the buf-id ops:
 // CHECK-NOT: scf.if
-// End of loop. No out-of-loop compensation (form-2 in set/wait would emit
-// extra set_flag/wait_flag or get_buf/rls_buf here).
+// End of loop. No out-of-loop compensation:
 // CHECK: }
 // CHECK-NOT: pto.get_buf
 // CHECK-NOT: pto.rls_buf

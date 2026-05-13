@@ -149,14 +149,29 @@ for i = 0:N
   get_buf(V,    #id); Vector(); rls_buf(V,    #id) // consumer 自然 bracket
 ```
 
-**结论：buf-id 模式下完全不需要任何 backward-sync 外提优化**。这意味着：
+**结论：buf-id 模式下完全不需要任何 backward-sync 优化，连 backward ConflictPair 本身的 bracket 都不用发**。
 
+set/wait 必须给 backward 一对 set/wait，是因为 set/wait 是单次握手——iter i 的 set 必须有一个对应的 wait，跨循环边界的语义就靠 form 1（带守卫）或 form 2（外提补偿）来保证一对一配对。
+
+buf-id 不一样：硬件 `(get_cnt, rel_cnt)` 是单调累加计数器。forward 边的 bracket 在 iter i 和 iter i+1 上各自就位之后，iter i+1 的 `get_buf` 自动等 iter i 的 `rls_buf` 推进计数器——这件事**对 forward 和 backward 都成立**，无需为 backward 再发一对额外的 bracket。
+
+举例（doc §1.2 canonical）：
+
+```text
+for i = 0:N
+  get_buf(MTE2, #0); load();   rel_buf(MTE2, #0)
+  get_buf(V,    #0); Vector(); rel_buf(V,    #0)
+```
+
+只发了 forward (load → vector) 的 bracket，没有为 backward (vector[i] → load[i+1]) 再发一对。但 iter i+1 的 `get_buf(MTE2, #0)` 拿到的号比 iter i 的 `rls_buf(V, #0)` 推进的 rel_cnt 大 1，自动等 vector[i] 跑完——backward 语义被 forward bracket 的计数器单调性"免费"覆盖。
+
+具体落实：
 - `tryMovingOutBackwardSyncPairsToOuterLoops`、`considerOuterBackwardSyncPairs`、
-  `mergeBackwardSyncPairs` 这些路径在 buf-id 模式下**直接关掉**——它们
-  不仅没意义，强行外提反而会破坏 in-loop bracket 的天然语义；
-- `backwardSyncEvents` / `backwardSyncEventsAfterMerge` 这两个映射在
-  buf-id 模式下不会被填充；
-- 之前提到的"阶段二做 buf-id 形态二外提"——**取消，这是反向理解**。
+  `mergeBackwardSyncPairs` 这些 set/wait 的 backward 外提路径在 buf-id 模式下**直接关掉**。
+- `backwardSyncEvents` / `backwardSyncEventsAfterMerge` 不会被填充。
+- **更进一步**：在 `getBeforeAfterSyncMaps` emit 时，
+  `conflictPair->isInnerBackward` 为 true 的 pair 直接 `continue` 不发 bracket——
+  它的 bracket 集合是 forward chain 的反向，发了纯属浪费 id。
 
 具体落实见 3.6 节。
 
@@ -386,6 +401,20 @@ if (conflictPair->isBarrier()) {
 与 `syncMapAfter[X]` 里对应的 `rls_buf(P, id)` 之间隔着的只有 anchor op `X` 本身。
 codegen 按 "before 顺序 push → 原 op → after 顺序 push" 的固定模式落盘，不会有
 其他 (pipe, id) 的 bracket 插入到中间。
+
+**backward ConflictPair 处理**：
+
+在 `getBeforeAfterSyncMaps` 主循环的 `continue` 守卫加一条：
+
+```cpp
+if (options.isBufIdEmit() && conflictPair->isInnerBackward) {
+  continue;
+}
+```
+
+这样 backward ConflictPair 的 bracket 完全不发；其语义由 forward ConflictPair 的 bracket 通过计数器单调性间接覆盖。
+
+注意：此 backward 仍然会被 solver 计数和分配 id（因为 EventIdSolver 早就跑完了），分配掉的 id 实际未使用——是浪费但不影响正确性。后续如果 id 池紧张，可以把这个过滤前移到 `processConflict`/`handleSetWaitConflict`，从源头就不创建 backward pair。
 
 **backward-sync 路径处理**：
 

@@ -2303,6 +2303,18 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
     if (conflictPair->replacedWithUnitFlag) {
       continue;
     }
+    // buf-id mode: loop-carried (backward) ConflictPairs are entirely
+    // redundant. Unlike set/wait — where set on producer + wait on consumer
+    // is a one-shot signal that must be paired across the loop edge — the
+    // buf-id (get_cnt, rel_cnt) counters monotonically advance per anchor
+    // per iter, so iter i+1's get_buf on a shared id is automatically
+    // ordered after iter i's matching rls_buf. The forward brackets
+    // already in place handle backward semantics transitively; emitting an
+    // extra bracket pair for the backward edge just wastes an id and
+    // serializes more than the spec requires.
+    if (options.isBufIdEmit() && conflictPair->isInnerBackward) {
+      continue;
+    }
     if (bufIdRedundantMirror.contains(conflictPair)) {
       continue;
     }

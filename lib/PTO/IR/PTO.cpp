@@ -2593,6 +2593,9 @@ static LogicalResult verifyMGatherMScatterMemOperand(Operation *op,
       "expects mem to be !pto.partition_tensor_view or a GM/ZERO memref");
 }
 
+static bool hasCompatibleKnownExtent(int64_t lhs, int64_t rhs);
+static bool isKnownUnitExtent(int64_t value);
+
 static LogicalResult verifyMGatherMScatterTileShape(Operation *op, Type dataTy,
                                                     Type idxTy,
                                                     StringRef dataName) {

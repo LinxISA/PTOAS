@@ -2279,8 +2279,13 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
     for (auto *cp : conflictPairs) {
       if (cp->isUseless || cp->replacedWithUnitFlag || cp->isBarrier())
         continue;
-      AnchorEnd a{cp->setOp, cp->setCorePipeInfo.pipe};
-      AnchorEnd b{cp->waitOp, cp->waitCorePipeInfo.pipe};
+      // Key on the raw RWOperations (op1/op2), not the solver's hoisted
+      // setOp/waitOp, so that mirror pairs are recognized at the actual
+      // RWOperation level regardless of where the solver placed the anchor.
+      AnchorEnd a{static_cast<OperationBase *>(cp->op1),
+                  cp->setCorePipeInfo.pipe};
+      AnchorEnd b{static_cast<OperationBase *>(cp->op2),
+                  cp->waitCorePipeInfo.pipe};
       if (b < a)
         std::swap(a, b);
       AnchorKey key{a, b};
@@ -2355,9 +2360,19 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
       }
     }
 
+    // Use the RAW producer/consumer RWOperation anchors (op1, op2) rather
+    // than the solver's setOp/waitOp. The latter may have been hoisted to
+    // an LCA / PlaceHolder under the scope of the producer or consumer
+    // (correct for set/wait, which needs strict pairing along every CFG
+    // edge), but in buf-id mode we want brackets *tightly* around the
+    // actual RWOperation. Hoisting buf-id brackets above an scf.if would
+    // make the counter advance even when the conditional op doesn't run,
+    // which decouples the get_cnt/rel_cnt semantics from real pipe activity.
     auto anchorsOf = [](ConflictPair *cp) -> std::array<AnchorEnd, 2> {
-      return {{{cp->setOp, cp->setCorePipeInfo.pipe},
-               {cp->waitOp, cp->waitCorePipeInfo.pipe}}};
+      return {{{static_cast<OperationBase *>(cp->op1),
+                cp->setCorePipeInfo.pipe},
+               {static_cast<OperationBase *>(cp->op2),
+                cp->waitCorePipeInfo.pipe}}};
     };
 
     for (size_t i = 0; i < forwardPairs.size(); ++i) {
@@ -2440,8 +2455,13 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
       int64_t bufId = (gIt != groupId.end())
                           ? gIt->second
                           : cp->eventIdNode->getEventIds().front();
-      emitBracket({cp->setOp, cp->setCorePipeInfo.pipe}, bufId, cp);
-      emitBracket({cp->waitOp, cp->waitCorePipeInfo.pipe}, bufId, cp);
+      // Anchor at the raw RWOperations (see comment on anchorsOf).
+      emitBracket({static_cast<OperationBase *>(cp->op1),
+                   cp->setCorePipeInfo.pipe},
+                  bufId, cp);
+      emitBracket({static_cast<OperationBase *>(cp->op2),
+                   cp->waitCorePipeInfo.pipe},
+                  bufId, cp);
     }
 
     return std::make_pair(std::move(syncMapBefore), std::move(syncMapAfter));

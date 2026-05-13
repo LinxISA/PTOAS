@@ -52,3 +52,22 @@ PIPE mlir::pto::mapSyncOpTypeToPipe(SyncOpType opType) {
 bool mlir::pto::isConcreteSyncPipe(PIPE pipe) {
   return pipe != PIPE::PIPE_UNASSIGNED && pipe != PIPE::PIPE_ALL;
 }
+
+FailureOr<SyncOpType> mlir::pto::mapPipeToCanonicalSyncOpType(PIPE pipe) {
+  switch (pipe) {
+  case PIPE::PIPE_MTE2:
+    return SyncOpType::TLOAD;
+  case PIPE::PIPE_MTE3:
+    return SyncOpType::TSTORE_VEC;
+  case PIPE::PIPE_FIX:
+    return SyncOpType::TSTORE_ACC;
+  case PIPE::PIPE_MTE1:
+    return SyncOpType::TMOV_M2L;
+  case PIPE::PIPE_V:
+    return SyncOpType::TVEC;
+  case PIPE::PIPE_M:
+    return SyncOpType::TMATMUL;
+  default:
+    return failure();
+  }
+}

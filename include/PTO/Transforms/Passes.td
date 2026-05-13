@@ -78,6 +78,12 @@ def PTOGraphSyncSolver : Pass<"pto-graph-sync-solver", "func::FuncOp"> {
            /*default=*/"8",
            "Maximum EVENT_ID slots usable by coloring; this caps the hardware "
            "available event-id budget used by the graph solver.">,
+    Option<"syncStyle", "sync-style", "std::string",
+           /*default=*/"\"set-wait\"",
+           "Sync emission style: 'set-wait' (default) or 'buf-id' (A5 only). "
+           "Under 'buf-id' the solver emits pto.get_buf/pto.rls_buf brackets "
+           "instead of pto.set_flag/pto.wait_flag, and skips pto.barrier "
+           "since A5 preserves same-pipe order in hardware.">,
   ];
 
   let dependentDialects = [

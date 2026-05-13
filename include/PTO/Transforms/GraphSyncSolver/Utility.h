@@ -120,6 +120,14 @@ enum SyncMode {
   TEST_CROSS_CORE_MODE,
 };
 
+// Emission shape for the sync solver output. SET_WAIT is the legacy
+// pto.set_flag / pto.wait_flag pairing. BUF_ID is the A5-only buffer-id
+// bracketing model (pto.get_buf / pto.rls_buf around each anchor op).
+enum class SyncEmitStyle {
+  SET_WAIT,
+  BUF_ID,
+};
+
 struct SyncSolverOptions {
   // Synchronization mode.
   const SyncMode syncMode;
@@ -129,6 +137,9 @@ struct SyncSolverOptions {
 
   // Architecture is register based (A5).
   const bool isRegBasedArch;
+
+  // Sync emission style. BUF_ID requires A5 (isRegBasedArch).
+  SyncEmitStyle emitStyle{SyncEmitStyle::SET_WAIT};
 
   // Decompose MMAD L1 ops into simpler ops for better sync handling.
   bool decomposeMmadl1Op{false};
@@ -184,6 +195,8 @@ struct SyncSolverOptions {
     return syncMode == SyncMode::TEST_INTRA_CORE_MODE ||
            syncMode == SyncMode::TEST_CROSS_CORE_MODE;
   }
+
+  bool isBufIdEmit() const { return emitStyle == SyncEmitStyle::BUF_ID; }
 };
 
 struct Occurrence;

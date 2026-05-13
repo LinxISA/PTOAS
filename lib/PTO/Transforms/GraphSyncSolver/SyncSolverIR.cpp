@@ -51,6 +51,8 @@ std::string getOpTypeStr(OpType opType) {
       {OpType::BARRIER_OP, "BarrierOp"},
       {OpType::SET_FLAG_OP, "SetFlagOp"},
       {OpType::WAIT_FLAG_OP, "WaitFlagOp"},
+      {OpType::GET_BUF_OP, "GetBufOp"},
+      {OpType::RLS_BUF_OP, "RlsBufOp"},
       {OpType::RW_OPERATION, "RWOperation"},
       {OpType::MMAD_OPERATION, "MmadOp"},
       {OpType::MMAD_LOAD_L0A_OPERATION, "LoadMmadL0AOp"},
@@ -314,6 +316,27 @@ std::string BarrierOp::str(int indent, bool recursive) const {
   }
   ret += " [<" + stringifyPIPE(this->pipe).str() + ">]";
   return ret;
+}
+
+static std::string bufOpStr(const BufOp &op, int indent) {
+  std::string ret;
+  ret += std::string(indent, ' ') +
+         llvm::convertToCamelFromSnakeCase(getOpTypeStr(op.opType)) +
+         std::to_string(op.id);
+  if (op.debugId.has_value()) {
+    ret += " [" + std::to_string(op.debugId.value()) + "]";
+  }
+  ret += " [<" + stringifyPIPE(op.pipe).str() +
+         ">, BUF_ID" + llvm::itostr(op.bufId) + "]";
+  return ret;
+}
+
+std::string GetBufOp::str(int indent, bool /*recursive*/) const {
+  return bufOpStr(*this, indent);
+}
+
+std::string RlsBufOp::str(int indent, bool /*recursive*/) const {
+  return bufOpStr(*this, indent);
 }
 
 std::string ConflictPair::str() const {

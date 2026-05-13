@@ -72,10 +72,41 @@ struct PTOGraphSyncSolverPass
     // handleBarrierConflict() drop the PIPE_V barrier that A5 hardware
     // does not support.
     const bool isA5 = pto::isTargetArchA5(func.getOperation());
+
+    SyncEmitStyle emitStyle;
+    if (syncStyle == "set-wait") {
+      emitStyle = SyncEmitStyle::SET_WAIT;
+    } else if (syncStyle == "buf-id") {
+      emitStyle = SyncEmitStyle::BUF_ID;
+    } else {
+      func.emitError("--graph-sync-solver-sync-style: unknown value '")
+          << syncStyle << "', expected 'set-wait' or 'buf-id'";
+      return signalPassFailure();
+    }
+    if (emitStyle == SyncEmitStyle::BUF_ID && !isA5) {
+      func.emitError(
+          "--graph-sync-solver-sync-style=buf-id requires --pto-arch=a5; "
+          "get_buf/rls_buf are only available on A5");
+      return signalPassFailure();
+    }
+
     SyncSolverOptions opts(SyncMode::INTRA_CORE_SYNC,
                            /*isMemBasedArch=*/!isA5,
                            /*isRegBasedArch=*/isA5);
     opts.eventIdNumMax = eventIdNumMax;
+    opts.emitStyle = emitStyle;
+    if (emitStyle == SyncEmitStyle::BUF_ID) {
+      // Constraint 4 ("different pipe pairs should not share an id") — in
+      // buf-id mode we conservatively disable the cross-pipe-pair id reuse
+      // optimization that the set-wait flow runs by default for intra-core.
+      opts.reuseSyncPairToSaveEventIds = false;
+      // buf-id is a sequential programming model; the hw (get_cnt, rel_cnt)
+      // counters handle loop-carried sync natively, so the set/wait backward-
+      // sync hoisting / merging optimizations are unnecessary (and would
+      // break the in-loop bracket form).
+      opts.considerOuterBackwardSyncPairs = false;
+      opts.moveOutAndMergeBackwardSyncPairs = false;
+    }
     auto translator = std::make_unique<IRTranslator>(func, opts);
 
     // Trivial / empty function bodies have nothing to solve.

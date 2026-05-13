@@ -777,6 +777,30 @@ bool Solver::checkIntersect(ConflictPair *conflictPair1,
   if (options.isCrossCoreMode()) {
     return checkSyncOpsConflicts(conflictPair1, conflictPair2);
   }
+  if (options.isBufIdEmit()) {
+    // Two buf-id brackets must use different ids whenever they share any
+    // pipe — same-id same-pipe re-entry is illegal per the buf-id spec
+    // constraint 1 ("两次连续 get(P,#id) 非法"). Unlike set-wait, having
+    // different dst pipes (or different src pipes) is NOT enough to share
+    // an id: e.g. (MTE2 -> V, id 0) and (V -> MTE3, id 0) both bracket the
+    // common V anchor with id 0, producing back-to-back `get_buf(V, #0)`
+    // before the V op, which the spec forbids. The range-based set-wait
+    // overlap check doesn't apply because buf-id brackets extend strictly
+    // around the anchor RWOperation (a single index), not across the
+    // [setOp.endIndex, waitOp.startIndex] gap.
+    auto pipes1 = std::array{conflictPair1->setCorePipeInfo.pipe,
+                             conflictPair1->waitCorePipeInfo.pipe};
+    auto pipes2 = std::array{conflictPair2->setCorePipeInfo.pipe,
+                             conflictPair2->waitCorePipeInfo.pipe};
+    for (auto p1 : pipes1) {
+      for (auto p2 : pipes2) {
+        if (p1 == p2) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   if (conflictPair1->setCorePipeInfo != conflictPair2->setCorePipeInfo ||
       conflictPair1->waitCorePipeInfo != conflictPair2->waitCorePipeInfo) {
     return false;
@@ -1521,7 +1545,13 @@ bool Solver::reuseConflictPair(ConflictPair *conflictPair,
 
 std::unique_ptr<EventIdSolver> &
 Solver::getEventIdSolverRef(pto::PIPE pipeSrc, pto::PIPE pipeDst) {
-  if (options.isCrossCoreMode()) {
+  if (options.isCrossCoreMode() || options.isBufIdEmit()) {
+    // Cross-core mode shares one event-id pool across all pipe pairs.
+    // Buf-id mode does the same: get_buf/rls_buf don't carry the "other"
+    // pipe in the opcode, so the same numeric id on two different pipe-
+    // pairs would alias to the same hw scoreboard and the resulting
+    // bracketing pattern would violate constraint 1 of the buf-id spec
+    // (two consecutive get(pipe, #id) before a single op is illegal).
     pipeSrc = pto::PIPE::PIPE_UNASSIGNED;
     pipeDst = pto::PIPE::PIPE_UNASSIGNED;
   }
@@ -2224,6 +2254,48 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
     conflictPairs.push_back(conflictPair.get());
   }
 
+  // Buf-id mirror-image deduplication.
+  //
+  // The forward and backward memory hazards for the same (producer op,
+  // consumer op) pair across pipes generate two distinct ConflictPairs:
+  //   F: setOp=A@Pa, waitOp=B@Pb   (forward,  intra-iter)
+  //   B: setOp=B@Pb, waitOp=A@Pa   (backward, loop-carried)
+  // In set-wait this is necessary — F's pair fires within an iteration,
+  // B's pair fires across the loop boundary. In buf-id the two pairs would
+  // bracket the same (op, pipe) anchor set with two different ids,
+  // duplicating brackets needlessly: the scoreboard counter ordering
+  // produced by one bracket pair already enforces both deps (per doc
+  // §1.2's canonical "for { load; vector }" example). Drop one of the
+  // mirror images so we emit a single bracket pair per anchor set.
+  //
+  // We keep the lower-id ConflictPair (deterministic, and tends to keep
+  // the forward pair which was usually allocated first).
+  llvm::DenseSet<ConflictPair *> bufIdRedundantMirror;
+  if (options.isBufIdEmit()) {
+    using AnchorEnd = std::pair<OperationBase *, pto::PIPE>;
+    using AnchorKey = std::pair<AnchorEnd, AnchorEnd>;
+    llvm::DenseMap<AnchorKey, ConflictPair *> seen;
+    for (auto *cp : conflictPairs) {
+      if (cp->isUseless || cp->replacedWithUnitFlag || cp->isBarrier())
+        continue;
+      AnchorEnd a{cp->setOp, cp->setCorePipeInfo.pipe};
+      AnchorEnd b{cp->waitOp, cp->waitCorePipeInfo.pipe};
+      if (b < a)
+        std::swap(a, b);
+      AnchorKey key{a, b};
+      auto [it, inserted] = seen.try_emplace(key, cp);
+      if (!inserted) {
+        // Pick the smaller id as the keeper so output is stable.
+        if (cp->id < it->second->id) {
+          bufIdRedundantMirror.insert(it->second);
+          it->second = cp;
+        } else {
+          bufIdRedundantMirror.insert(cp);
+        }
+      }
+    }
+  }
+
   for (auto *conflictPair : conflictPairs) {
     if (conflictPair->isUseless) {
       continue;
@@ -2231,13 +2303,52 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
     if (conflictPair->replacedWithUnitFlag) {
       continue;
     }
+    if (bufIdRedundantMirror.contains(conflictPair)) {
+      continue;
+    }
     assert(conflictPair->setOp != nullptr && conflictPair->waitOp != nullptr);
     if (conflictPair->isBarrier()) {
+      // A5 hardware preserves same-pipe order, so buf-id mode drops barriers
+      // entirely. set-wait keeps the existing pto.barrier path.
+      if (options.isBufIdEmit()) {
+        continue;
+      }
       auto barrierOp = std::make_unique<BarrierOp>(
           conflictPair->waitOp->op, conflictPair->waitOp->parentOp,
           conflictPair->waitCorePipeInfo.pipe);
       LLVM_DEBUG(barrierOp->debugId = conflictPair->id);
       syncMapBefore[conflictPair->waitOp].push_back(std::move(barrierOp));
+    } else if (options.isBufIdEmit()) {
+      assert(conflictPair->eventIdNode != nullptr);
+      auto srcPipe = conflictPair->setCorePipeInfo.pipe;
+      auto dstPipe = conflictPair->waitCorePipeInfo.pipe;
+      // Producer-side bracket on src pipe, consumer-side bracket on dst pipe.
+      // The shared bufId between both brackets is what enforces ordering — the
+      // hw scoreboard serializes same-id get/rel across pipes.
+      for (int64_t bufId : conflictPair->eventIdNode->getEventIds()) {
+        auto getProd = std::make_unique<GetBufOp>(
+            conflictPair->setOp->op, conflictPair->setOp->parentOp, srcPipe,
+            bufId);
+        auto rlsProd = std::make_unique<RlsBufOp>(
+            conflictPair->setOp->op, conflictPair->setOp->parentOp, srcPipe,
+            bufId);
+        auto getCons = std::make_unique<GetBufOp>(
+            conflictPair->waitOp->op, conflictPair->waitOp->parentOp, dstPipe,
+            bufId);
+        auto rlsCons = std::make_unique<RlsBufOp>(
+            conflictPair->waitOp->op, conflictPair->waitOp->parentOp, dstPipe,
+            bufId);
+        LLVM_DEBUG({
+          getProd->debugId = conflictPair->id;
+          rlsProd->debugId = conflictPair->id;
+          getCons->debugId = conflictPair->id;
+          rlsCons->debugId = conflictPair->id;
+        });
+        syncMapBefore[conflictPair->setOp].push_back(std::move(getProd));
+        syncMapAfter[conflictPair->setOp].push_back(std::move(rlsProd));
+        syncMapBefore[conflictPair->waitOp].push_back(std::move(getCons));
+        syncMapAfter[conflictPair->waitOp].push_back(std::move(rlsCons));
+      }
     } else {
       assert(conflictPair->eventIdNode != nullptr);
       auto setOp = std::make_unique<SetFlagOp>(
@@ -2266,6 +2377,14 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
       syncMapAfter[conflictPair->setOp].push_back(std::move(setOp));
       syncMapBefore[conflictPair->waitOp].push_front(std::move(waitOp));
     }
+  }
+
+  // In buf-id mode the producer/consumer brackets sit at their natural
+  // anchors and the hw scoreboard counters handle loop-carried (backward)
+  // sync without any out-of-loop compensation. Skip the backward-sync hoist
+  // pipeline that exists to manage set/wait strict pairing.
+  if (options.isBufIdEmit()) {
+    return std::make_pair(std::move(syncMapBefore), std::move(syncMapAfter));
   }
 
   collectBackwardSyncEventIds();

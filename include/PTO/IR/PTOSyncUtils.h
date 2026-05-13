@@ -30,6 +30,14 @@ PIPE mapSyncOpTypeToPipe(SyncOpType opType);
 /// True if the pipe is a concrete endpoint pipe (not PIPE_ALL/UNASSIGNED).
 bool isConcreteSyncPipe(PIPE pipe);
 
+/// Pick a canonical SyncOpType endpoint for a concrete PIPE. This is the
+/// inverse of mapSyncOpTypeToPipe up to the fact that mapSyncOpTypeToPipe is
+/// many-to-one: e.g. both TVEC and TMOV_M2V map to PIPE_V. The canonical
+/// SyncOpType returned here is sufficient for the EmitC pattern matchers,
+/// which only care that the high-level attr maps back to the same concrete
+/// PIPE. Returns failure() for non-concrete pipes (PIPE_ALL/UNASSIGNED).
+FailureOr<SyncOpType> mapPipeToCanonicalSyncOpType(PIPE pipe);
+
 } // namespace pto
 } // namespace mlir
 

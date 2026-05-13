@@ -205,6 +205,14 @@ static llvm::cl::opt<int> graphSyncSolverEventIdMax(
         "Lower values exercise the PIPE_ALL coloring fallback sooner."),
     llvm::cl::init(8));
 
+static llvm::cl::opt<std::string> graphSyncSolverSyncStyle(
+    "graph-sync-solver-sync-style",
+    llvm::cl::desc(
+        "Sync emission style for the graph sync solver: 'set-wait' (default) "
+        "or 'buf-id' (A5 only). 'buf-id' emits pto.get_buf/pto.rls_buf "
+        "brackets and skips pto.barrier (A5 preserves same-pipe order)."),
+    llvm::cl::init("set-wait"));
+
 static llvm::cl::opt<bool> disableInferLayout(
     "disable-infer-layout",
     llvm::cl::desc("Disable PTO layout inference pass (static-only)"),
@@ -1173,6 +1181,7 @@ int main(int argc, char **argv) {
   else if (enableGraphSyncSolver) {
     PTOGraphSyncSolverOptions graphSyncOpts;
     graphSyncOpts.eventIdNumMax = graphSyncSolverEventIdMax;
+    graphSyncOpts.syncStyle = graphSyncSolverSyncStyle;
     pm.addNestedPass<mlir::func::FuncOp>(
         pto::createPTOGraphSyncSolverPass(graphSyncOpts));
   }

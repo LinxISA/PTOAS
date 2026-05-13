@@ -81,6 +81,10 @@ enum struct OpType {
   SET_FLAG_OP,
   WAIT_FLAG_OP,
   SW_FLAG_OP_END,
+  BUF_OP,
+  GET_BUF_OP,
+  RLS_BUF_OP,
+  BUF_OP_END,
   SYNC_OP_END,
   RW_OPERATION,
   MMAD_OPERATION,
@@ -498,6 +502,49 @@ public:
 
   static bool classof(const OperationBase *e) {
     return e->opType == OpType::BARRIER_OP;
+  }
+
+  std::string str(int indent, bool recursive) const override;
+};
+
+// A5-only buffer-id bracket op (get_buf / rls_buf). Unlike SetWaitOp which
+// names both src and dst pipes, a BufOp lives on a single concrete pipe — the
+// shared bufId on producer and consumer brackets is what enforces ordering.
+class BufOp : public SyncOp {
+public:
+  pto::PIPE pipe{pto::PIPE::PIPE_UNASSIGNED};
+  int64_t bufId{-1};
+
+  BufOp(OpType opType, Operation *op, OperationBase *parentOp, pto::PIPE pipe,
+        int64_t bufId)
+      : SyncOp(opType, op, parentOp), pipe(pipe), bufId(bufId) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType >= OpType::BUF_OP && e->opType < OpType::BUF_OP_END;
+  }
+};
+
+class GetBufOp : public BufOp {
+public:
+  GetBufOp(Operation *op, OperationBase *parentOp, pto::PIPE pipe,
+           int64_t bufId)
+      : BufOp(OpType::GET_BUF_OP, op, parentOp, pipe, bufId) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::GET_BUF_OP;
+  }
+
+  std::string str(int indent, bool recursive) const override;
+};
+
+class RlsBufOp : public BufOp {
+public:
+  RlsBufOp(Operation *op, OperationBase *parentOp, pto::PIPE pipe,
+           int64_t bufId)
+      : BufOp(OpType::RLS_BUF_OP, op, parentOp, pipe, bufId) {}
+
+  static bool classof(const OperationBase *e) {
+    return e->opType == OpType::RLS_BUF_OP;
   }
 
   std::string str(int indent, bool recursive) const override;

@@ -12,6 +12,7 @@
 #include "PTO/Transforms/GraphSyncSolver/SyncSolverCodeGen.h"
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOSyncUtils.h"
 #include "mlir/IR/Builders.h"
 #include "llvm/Support/Casting.h"
 
@@ -25,6 +26,18 @@ static PipeAttr makePipe(MLIRContext *ctx, PIPE pipe) {
 
 static EventAttr makeEvent(MLIRContext *ctx, int64_t eventId) {
   return EventAttr::get(ctx, static_cast<EVENT>(eventId));
+}
+
+// pto.get_buf / pto.rls_buf take a high-level PipeEventTypeAttr endpoint
+// rather than a concrete PipeAttr. The downstream EmitC pattern only cares
+// that the attribute maps back to the same concrete PIPE via
+// mapSyncOpTypeToPipe; the inverse mapping picks a canonical SyncOpType per
+// PIPE (see PTOSyncUtils.cpp).
+static PipeEventTypeAttr makePipeEventType(MLIRContext *ctx, PIPE pipe) {
+  auto opTypeOr = mapPipeToCanonicalSyncOpType(pipe);
+  assert(llvm::succeeded(opTypeOr) &&
+         "buf-id codegen: pipe has no canonical SyncOpType endpoint");
+  return PipeEventTypeAttr::get(ctx, *opTypeOr);
 }
 
 Operation *CodeGenerator::resolveSyncAnchor(OperationBase *opBase) {
@@ -99,6 +112,23 @@ void CodeGenerator::emitSyncOp(IRRewriter &rewriter, SyncOp *syncOp) {
     rewriter.create<pto::BarrierOp>(resolveSyncLoc(barrier),
                                     makePipe(rewriter.getContext(),
                                              barrier->pipe));
+    return;
+  }
+
+  if (auto *getBuf = dyn_cast<GetBufOp>(syncOp)) {
+    auto *ctx = rewriter.getContext();
+    rewriter.create<pto::GetBufOp>(
+        resolveSyncLoc(getBuf), makePipeEventType(ctx, getBuf->pipe),
+        rewriter.getI32IntegerAttr(static_cast<int32_t>(getBuf->bufId)),
+        rewriter.getI32IntegerAttr(0));
+    return;
+  }
+  if (auto *rlsBuf = dyn_cast<RlsBufOp>(syncOp)) {
+    auto *ctx = rewriter.getContext();
+    rewriter.create<pto::RlsBufOp>(
+        resolveSyncLoc(rlsBuf), makePipeEventType(ctx, rlsBuf->pipe),
+        rewriter.getI32IntegerAttr(static_cast<int32_t>(rlsBuf->bufId)),
+        rewriter.getI32IntegerAttr(0));
     return;
   }
 

@@ -12,12 +12,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 #include "PTO/Transforms/InsertSync/PTOIRTranslator.h"
+#include "PTO/Transforms/InsertSync/InsertSyncDebug.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "llvm/Support/Debug.h"
 #include "mlir/IR/AsmState.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Matchers.h"
 // [P0 新增] 引入副作用接口和 PTO 接口
@@ -27,65 +29,270 @@
  
 using namespace mlir;
 using namespace mlir::pto;
+
+static bool isInsertSyncTraceEnabled() {
+  return isInsertSyncDebugEnabled(InsertSyncDebugLevel::Trace);
+}
+
+static void dumpInt64List(llvm::raw_ostream &os, ArrayRef<int64_t> values) {
+  os << "[";
+  for (size_t i = 0; i < values.size(); ++i) {
+    os << values[i];
+    if (i + 1 != values.size())
+      os << ", ";
+  }
+  os << "]";
+}
+
+static void dumpValueSummary(llvm::raw_ostream &os, Value value) {
+  if (!value) {
+    os << "<null>";
+    return;
+  }
+  if (Operation *op = value.getDefiningOp())
+    os << op->getName();
+  else
+    os << "block_arg";
+  os << ":" << value.getType();
+}
+
+struct StaticAliasInfo {
+  bool hasStaticOffset{true};
+  bool preserveParentRegion{true};
+  int64_t offsetBytes{0};
+  int64_t sizeBytes{-1};
+  std::optional<StaticMemRegion> relativeRegion;
+};
+
+static int64_t getElementSizeBytes(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type))
+    type = shapedType.getElementType();
+  if (auto intType = dyn_cast<IntegerType>(type)) {
+    int64_t bitWidth = intType.getWidth();
+    return bitWidth > 0 ? std::max<int64_t>(1, bitWidth / 8) : 1;
+  }
+  if (auto floatType = dyn_cast<FloatType>(type)) {
+    int64_t bitWidth = floatType.getWidth();
+    return bitWidth > 0 ? std::max<int64_t>(1, bitWidth / 8) : 1;
+  }
+  return 1;
+}
+
+static bool hasOnlyStaticValues(ArrayRef<int64_t> values) {
+  for (int64_t value : values)
+    if (value == ShapedType::kDynamic)
+      return false;
+  return true;
+}
+
+static std::optional<int64_t> getStaticBoundingSpan(int64_t size,
+                                                    int64_t stride) {
+  if (size == ShapedType::kDynamic || stride == ShapedType::kDynamic ||
+      size < 0 || stride < 0)
+    return std::nullopt;
+  if (size == 0)
+    return 0;
+  return (size - 1) * stride + 1;
+}
+
+static bool shouldPreserveParentRegion(Operation *op) {
+  if (!op)
+    return true;
+  return isa<pto::BindTileOp, memref::CastOp>(op);
+}
+
+static std::optional<StaticMemRegion>
+makeRootRegionFromMemRefType(MemRefType type) {
+  if (!type || !type.hasStaticShape())
+    return std::nullopt;
+
+  int64_t baseOffset;
+  SmallVector<int64_t, 4> strides;
+  if (failed(mlir::getStridesAndOffset(type, strides, baseOffset)))
+    return std::nullopt;
+  if (strides.size() != static_cast<size_t>(type.getRank()) ||
+      !hasOnlyStaticValues(strides))
+    return std::nullopt;
+
+  StaticMemRegion region;
+  region.elemSizeBytes = getElementSizeBytes(type);
+  region.baseOffsetBytes = 0;
+  region.offsets.assign(type.getRank(), 0);
+  region.strides.assign(strides.begin(), strides.end());
+  region.sizes.reserve(type.getRank());
+  ArrayRef<int64_t> shape = type.getShape();
+  for (size_t i = 0; i < shape.size(); ++i) {
+    std::optional<int64_t> span = getStaticBoundingSpan(shape[i], strides[i]);
+    if (!span)
+      return std::nullopt;
+    region.sizes.push_back(*span);
+  }
+  return region;
+}
+
+static std::optional<StaticMemRegion>
+composeSubviewRegion(const StaticMemRegion &relativeRegion,
+                     const std::optional<StaticMemRegion> &parentRegion) {
+  if (!relativeRegion.isPrecise() || !parentRegion ||
+      !parentRegion->isPrecise())
+    return std::nullopt;
+  if (parentRegion->offsets.size() != relativeRegion.offsets.size())
+    return std::nullopt;
+  if (parentRegion->elemSizeBytes != relativeRegion.elemSizeBytes)
+    return std::nullopt;
+
+  StaticMemRegion region;
+  region.elemSizeBytes = relativeRegion.elemSizeBytes;
+  region.baseOffsetBytes =
+      parentRegion->baseOffsetBytes + relativeRegion.baseOffsetBytes;
+  region.offsets.reserve(relativeRegion.offsets.size());
+  region.sizes.reserve(relativeRegion.sizes.size());
+  region.strides.reserve(relativeRegion.strides.size());
+
+  for (size_t i = 0; i < relativeRegion.offsets.size(); ++i) {
+    int64_t parentStride = parentRegion->strides[i];
+    int64_t childStride = relativeRegion.strides[i];
+    if (parentStride == ShapedType::kDynamic ||
+        childStride == ShapedType::kDynamic || parentStride < 0 ||
+        childStride < 0)
+      return std::nullopt;
+
+    int64_t rootStride = parentStride * childStride;
+    std::optional<int64_t> span =
+        getStaticBoundingSpan(relativeRegion.sizes[i], rootStride);
+    if (!span)
+      return std::nullopt;
+
+    region.offsets.push_back(parentRegion->offsets[i] +
+                             relativeRegion.offsets[i] * parentStride);
+    region.sizes.push_back(*span);
+    region.strides.push_back(rootStride);
+  }
+  return region;
+}
  
 // [辅助函数] 尝试从 Operation 中计算相对于 Source 的字节偏移量和新大小
 // 返回值: pair<offsetInBytes, sizeInBytes>
 // 如果无法计算静态值，返回 {-1, -1} 表示这是动态的
-static std::pair<int64_t, int64_t> getStaticOffsetAndSize(Operation *op, Value src) {
+static StaticAliasInfo getStaticAliasInfo(Operation *op, Value src) {
+  StaticAliasInfo aliasInfo;
+  aliasInfo.preserveParentRegion = shouldPreserveParentRegion(op);
   auto srcType = dyn_cast<MemRefType>(src.getType());
-  if (!srcType) return {0, 0};
+  if (!srcType)
+    return aliasInfo;
   
-  int64_t elemSize = srcType.getElementType().getIntOrFloatBitWidth() / 8;
-  if (elemSize == 0) elemSize = 1;
+  int64_t elemSize = getElementSizeBytes(srcType);
  
   // === Case 1: memref.subview ===
   if (auto subView = dyn_cast<memref::SubViewOp>(op)) {
+    aliasInfo.preserveParentRegion = false;
     int64_t baseOffset;
     SmallVector<int64_t, 4> strides;
     if (failed(mlir::getStridesAndOffset(srcType, strides, baseOffset))) {
-        return {-1, -1}; 
+        aliasInfo.hasStaticOffset = false;
+        return aliasInfo;
     }
  
-    int64_t newSize = 1;
-    for (int64_t s : subView.getStaticSizes()) {
-      if (s == ShapedType::kDynamic) return {-1, -1};
-      newSize *= s;
+    auto staticSizes = subView.getStaticSizes();
+    auto staticOffsets = subView.getStaticOffsets();
+    auto staticSubStrides = subView.getStaticStrides();
+
+    if (staticOffsets.empty() || staticOffsets.size() > strides.size() ||
+        staticSizes.size() != staticOffsets.size() ||
+        staticSubStrides.size() != staticOffsets.size()) {
+      aliasInfo.hasStaticOffset = false;
+      return aliasInfo;
     }
-    newSize *= elemSize;
+
+    int64_t flatSpan = 0;
+    bool hasZeroSize = false;
+    for (size_t i = 0; i < staticSizes.size(); ++i) {
+      int64_t s = staticSizes[i];
+      if (s == ShapedType::kDynamic) {
+        aliasInfo.hasStaticOffset = false;
+        return aliasInfo;
+      }
+      if (s == 0)
+        hasZeroSize = true;
+    }
  
     int64_t totalOffset = 0;
-    auto staticOffsets = subView.getStaticOffsets();
-    
-    if (staticOffsets.empty()) return {-1, -1};
-    if (staticOffsets.size() > strides.size()) return {-1, -1}; 
- 
     for (size_t i = 0; i < staticOffsets.size(); ++i) {
       int64_t off = staticOffsets[i];
-      if (off == ShapedType::kDynamic) return {-1, -1};
+      int64_t subStride = staticSubStrides[i];
+      if (off == ShapedType::kDynamic ||
+          subStride == ShapedType::kDynamic || subStride < 0) {
+        aliasInfo.hasStaticOffset = false;
+        return aliasInfo;
+      }
       
       int64_t stride = 1; 
       if (i < strides.size() && strides[i] != ShapedType::kDynamic) {
           stride = strides[i];
       } else {
-          return {-1, -1};
+          aliasInfo.hasStaticOffset = false;
+          return aliasInfo;
       }
       
       totalOffset += off * stride;
+      if (!hasZeroSize)
+        flatSpan += (staticSizes[i] - 1) * stride * subStride;
     }
  
-    return {totalOffset * elemSize, newSize};
+    int64_t byteOffset = totalOffset * elemSize;
+    aliasInfo.offsetBytes = byteOffset;
+    aliasInfo.sizeBytes = hasZeroSize ? 0 : (flatSpan + 1) * elemSize;
+    StaticMemRegion region;
+    region.elemSizeBytes = elemSize;
+    region.baseOffsetBytes = byteOffset;
+    region.offsets.assign(staticOffsets.begin(), staticOffsets.end());
+    region.sizes.assign(staticSizes.begin(), staticSizes.end());
+    region.strides.assign(staticSubStrides.begin(), staticSubStrides.end());
+    aliasInfo.relativeRegion = region;
+    if (isInsertSyncTraceEnabled()) {
+      llvm::errs() << "  [AliasRange] memref.subview flat range\n";
+      llvm::errs() << "    src=";
+      dumpValueSummary(llvm::errs(), src);
+      llvm::errs() << "\n";
+      llvm::errs() << "    srcType=" << srcType << " elemBytes=" << elemSize
+                   << " baseOffset=" << baseOffset << "\n";
+      llvm::errs() << "    staticOffsets=";
+      dumpInt64List(llvm::errs(), staticOffsets);
+      llvm::errs() << " staticSizes=";
+      dumpInt64List(llvm::errs(), staticSizes);
+      llvm::errs() << " staticSubStrides=";
+      dumpInt64List(llvm::errs(), staticSubStrides);
+      llvm::errs() << " sourceStrides=";
+      dumpInt64List(llvm::errs(), strides);
+      llvm::errs() << "\n";
+      llvm::errs() << "    computedFlatOffsetBytes=" << byteOffset
+                   << " computedFlatSizeBytes=" << aliasInfo.sizeBytes
+                   << " (size = strided bounding span * elemBytes)\n";
+    }
+    return aliasInfo;
   }
  
   // === Case 2: memref.reinterpret_cast ===
   if (auto castOp = dyn_cast<memref::ReinterpretCastOp>(op)) {
+    aliasInfo.preserveParentRegion = false;
     auto staticOffsets = castOp.getStaticOffsets();
     if (staticOffsets.empty() || staticOffsets[0] == ShapedType::kDynamic) {
-        return {0, 0};
+        return aliasInfo;
     }
-    return {staticOffsets[0] * elemSize, 0}; 
+    int64_t byteOffset = staticOffsets[0] * elemSize;
+    aliasInfo.offsetBytes = byteOffset;
+    if (isInsertSyncTraceEnabled()) {
+      llvm::errs() << "  [AliasRange] memref.reinterpret_cast offset\n";
+      llvm::errs() << "    src=";
+      dumpValueSummary(llvm::errs(), src);
+      llvm::errs() << " staticOffsets=";
+      dumpInt64List(llvm::errs(), staticOffsets);
+      llvm::errs() << " computedOffsetBytes=" << byteOffset << "\n";
+    }
+    return aliasInfo;
   }
  
-  return {0, 0};
+  return aliasInfo;
 }
  
 // ============================================================================
@@ -300,6 +507,7 @@ LogicalResult PTOIRTranslator::UpdatePointerCastOpMemInfo(pto::PointerCastOp op)
       SmallVector<uint64_t>{0}, 
       sizeInBytes
   );
+  newMemInfo->preciseRegion = makeRootRegionFromMemRefType(memRefType);
  
   buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
   return success();
@@ -339,6 +547,7 @@ PTOIRTranslator::UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op) {
       space,
       SmallVector<uint64_t>{0},
       sizeInBytes);
+  newMemInfo->preciseRegion = makeRootRegionFromMemRefType(memRefType);
 
   buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
   return success();
@@ -552,21 +761,20 @@ void PTOIRTranslator::UpdateAliasBufferInfo(Value result, Value source) {
   if (!result || !source) return;
   if (!buffer2MemInfoMap_.contains(source)) return;
  
-  int64_t deltaOffset = 0;
-  int64_t newSize = -1; 
+  StaticAliasInfo aliasInfo;
  
   if (auto op = result.getDefiningOp()) {
-    auto info = getStaticOffsetAndSize(op, source);
-    if (info.first != -1) {
-        deltaOffset = info.first;
-        if (info.second > 0) newSize = info.second;
-    } 
+    aliasInfo = getStaticAliasInfo(op, source);
   }
+
+  int64_t deltaOffset = aliasInfo.hasStaticOffset ? aliasInfo.offsetBytes : 0;
+  int64_t newSize = aliasInfo.sizeBytes;
  
   auto &resultMemInfoVec = buffer2MemInfoMap_[result];
   
   for (auto &parentInfo : buffer2MemInfoMap_[source]) {
     auto newInfo = parentInfo->clone(result);
+    SmallVector<uint64_t> parentBases = parentInfo->baseAddresses;
  
     if (!newInfo->baseAddresses.empty()) {
         newInfo->baseAddresses[0] += deltaOffset;
@@ -576,6 +784,56 @@ void PTOIRTranslator::UpdateAliasBufferInfo(Value result, Value source) {
  
     if (newSize > 0) {
         newInfo->allocateSize = newSize;
+    }
+
+    if (aliasInfo.relativeRegion) {
+      newInfo->preciseRegion =
+          composeSubviewRegion(*aliasInfo.relativeRegion,
+                               parentInfo->preciseRegion);
+    } else if (!aliasInfo.preserveParentRegion) {
+      newInfo->preciseRegion.reset();
+    }
+
+    if (isInsertSyncTraceEnabled()) {
+      llvm::errs() << "  [AliasInfo] ";
+      if (Operation *op = result.getDefiningOp())
+        llvm::errs() << "op=" << op->getName() << " ";
+      llvm::errs() << "source=";
+      dumpValueSummary(llvm::errs(), source);
+      llvm::errs() << " result=";
+      dumpValueSummary(llvm::errs(), result);
+      llvm::errs() << "\n";
+      llvm::errs() << "    root=";
+      dumpValueSummary(llvm::errs(), newInfo->rootBuffer);
+      llvm::errs() << " scope=" << static_cast<int>(newInfo->scope)
+                   << " deltaOffsetBytes=" << deltaOffset
+                   << " newSizeBytes=" << newSize << "\n";
+      llvm::errs() << "    parentBases=[";
+      for (size_t i = 0; i < parentBases.size(); ++i) {
+        llvm::errs() << parentBases[i];
+        if (i + 1 != parentBases.size())
+          llvm::errs() << ", ";
+      }
+      llvm::errs() << "] parentSizeBytes=" << parentInfo->allocateSize
+                   << " resultBases=[";
+      for (size_t i = 0; i < newInfo->baseAddresses.size(); ++i) {
+        llvm::errs() << newInfo->baseAddresses[i];
+        if (i + 1 != newInfo->baseAddresses.size())
+          llvm::errs() << ", ";
+      }
+      llvm::errs() << "] resultSizeBytes=" << newInfo->allocateSize << "\n";
+      if (newInfo->preciseRegion && newInfo->preciseRegion->isPrecise()) {
+        llvm::errs() << "    preciseRegion offsets=";
+        dumpInt64List(llvm::errs(), newInfo->preciseRegion->offsets);
+        llvm::errs() << " sizes=";
+        dumpInt64List(llvm::errs(), newInfo->preciseRegion->sizes);
+        llvm::errs() << " strides=";
+        dumpInt64List(llvm::errs(), newInfo->preciseRegion->strides);
+        llvm::errs() << " elemBytes="
+                     << newInfo->preciseRegion->elemSizeBytes << "\n";
+      } else {
+        llvm::errs() << "    preciseRegion=<none>\n";
+      }
     }
  
     resultMemInfoVec.emplace_back(std::move(newInfo));
@@ -621,6 +879,7 @@ LogicalResult PTOIRTranslator::UpdateMemrefAllocOpMemInfo(memref::AllocOp op) {
       SmallVector<uint64_t>{0}, // Base Addresses (Offset 0)
       sizeInBytes
   );
+  newMemInfo->preciseRegion = makeRootRegionFromMemRefType(memRefType);
  
   buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
   return success();

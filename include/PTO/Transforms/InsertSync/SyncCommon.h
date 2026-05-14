@@ -83,6 +83,21 @@ enum class TCoreType {
  
 /// Meminfo of the target buffer
 /// 用于追踪 Buffer 的别名和根节点
+struct StaticMemRegion {
+  int64_t elemSizeBytes{1};
+  int64_t baseOffsetBytes{0};
+  // Per-dimension coordinates in the root layout. sizes are conservative
+  // bounding spans, so strided regions stay alias-safe.
+  SmallVector<int64_t> offsets;
+  SmallVector<int64_t> sizes;
+  SmallVector<int64_t> strides;
+
+  bool isPrecise() const {
+    return !offsets.empty() && offsets.size() == sizes.size() &&
+           offsets.size() == strides.size();
+  }
+};
+
 struct BaseMemInfo {
   BaseMemInfo(
       Value baseBuffer, Value rootBuffer, pto::AddressSpace scope,
@@ -98,6 +113,7 @@ struct BaseMemInfo {
   pto::AddressSpace scope;
   SmallVector<uint64_t> baseAddresses; // 用于 Offset 分析
   uint64_t allocateSize;
+  std::optional<StaticMemRegion> preciseRegion;
  
   bool areVectorEqual(const SmallVector<uint64_t>& vec1,
                       const SmallVector<uint64_t>& vec2) const {
@@ -120,13 +136,17 @@ struct BaseMemInfo {
   }
  
   std::unique_ptr<BaseMemInfo> clone() const {
-    return std::make_unique<BaseMemInfo>(
+    auto cloned = std::make_unique<BaseMemInfo>(
         baseBuffer, rootBuffer, scope, baseAddresses, allocateSize);
+    cloned->preciseRegion = preciseRegion;
+    return cloned;
   }
  
   std::unique_ptr<BaseMemInfo> clone(Value cloneBaseBuffer) const {
-    return std::make_unique<BaseMemInfo>(
+    auto cloned = std::make_unique<BaseMemInfo>(
         cloneBaseBuffer, rootBuffer, scope, baseAddresses, allocateSize);
+    cloned->preciseRegion = preciseRegion;
+    return cloned;
   }
 };
  

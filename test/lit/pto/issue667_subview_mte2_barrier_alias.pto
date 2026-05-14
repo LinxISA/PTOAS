@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --enable-insert-sync %s -o - | FileCheck %s --check-prefix=DISJOINT
+// RUN: ptoas --pto-arch=a5 --enable-insert-sync %s -o - | FileCheck %s --check-prefix=OVERLAP
+
+module {
+  func.func @issue667_disjoint_subview_tloads(
+      %src0: memref<16x128xf32, #pto.address_space<gm>>,
+      %src1: memref<16x128xf32, #pto.address_space<gm>>,
+      %src2: memref<16x128xf32, #pto.address_space<gm>>,
+      %src3: memref<16x128xf32, #pto.address_space<gm>>) {
+    %c0 = arith.constant 0 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %c384 = arith.constant 384 : index
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %s0 = pto.subview %tile[%c0, %c0] sizes [16, 128] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %s1 = pto.subview %tile[%c0, %c128] sizes [16, 128] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %s2 = pto.subview %tile[%c0, %c256] sizes [16, 128] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %s3 = pto.subview %tile[%c0, %c384] sizes [16, 128] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%s0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%s1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src2 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%s2 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src3 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%s3 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @issue667_overlapping_subview_tloads(
+      %src0: memref<16x128xf32, #pto.address_space<gm>>,
+      %src1: memref<16x128xf32, #pto.address_space<gm>>) {
+    %c0 = arith.constant 0 : index
+    %c64 = arith.constant 64 : index
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %s0 = pto.subview %tile[%c0, %c0] sizes [16, 128] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %s1 = pto.subview %tile[%c0, %c64] sizes [16, 128] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=512, v_row=16, v_col=512,
+                    blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%s0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%s1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+}
+
+// DISJOINT-LABEL: AICORE void issue667_disjoint_subview_tloads
+// DISJOINT-NOT: pipe_barrier(PIPE_MTE2)
+// DISJOINT: TLOAD(
+// DISJOINT-NOT: pipe_barrier(PIPE_MTE2)
+// DISJOINT: TLOAD(
+// DISJOINT-NOT: pipe_barrier(PIPE_MTE2)
+// DISJOINT: TLOAD(
+// DISJOINT-NOT: pipe_barrier(PIPE_MTE2)
+// DISJOINT: TLOAD(
+// DISJOINT-NOT: pipe_barrier(PIPE_MTE2)
+// DISJOINT-LABEL: AICORE void issue667_overlapping_subview_tloads
+
+// OVERLAP-LABEL: AICORE void issue667_overlapping_subview_tloads
+// OVERLAP: TLOAD(
+// OVERLAP: pipe_barrier(PIPE_MTE2)
+// OVERLAP: TLOAD(

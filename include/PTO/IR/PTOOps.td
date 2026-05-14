@@ -2660,7 +2660,7 @@ def MScatterOp : PTO_TOp<"mscatter", [
 
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "MSCATTER"; }
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE3; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getMemMutable(); }
   }];
 }

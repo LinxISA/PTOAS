@@ -98,7 +98,10 @@ module {
 // Producer and consumer are both PIPE_V. set-wait mode emits no barrier here
 // because A5 register-based arch drops PIPE_V barriers; buf-id mode similarly
 // emits nothing — A5 hw preserves same-pipe order. The tload->tmuls cross-pipe
-// dep is still bracketed.
+// dep is bracketed at the first tmuls; tmuls#2 inherits the tload sync via
+// the WAW chain on %tile (same destination buffer means the same buf-id
+// counter already ratcheted past tload through tmuls#1, so no separate
+// bracket on tmuls#2 is needed).
 // ----------------------------------------------------------------------------
 
   // CHECK-LABEL: func.func @same_pipe_no_emit

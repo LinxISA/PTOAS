@@ -686,6 +686,44 @@ bool Solver::checkGraphConflict(
       // transitively cover the candidate.
       return;
     }
+    if (mutexAware && conflictPair->op2 != candOp2 &&
+        conflictPair->setCorePipeInfo == corePipeSrc &&
+        conflictPair->waitCorePipeInfo == corePipeDst &&
+        conflictBuffer != nullptr) {
+      // Same producer pipe-pair but a *different* consumer that reads the
+      // same SSA buffer. In set/wait, a single wait_flag on the earlier
+      // consumer covers later consumers via same-pipe FIFO. Buf-id does
+      // not chain that way directly — each consumer's wait is gated by
+      // its own get_buf on the producer's counter. BUT: if the candidate
+      // consumer writes the SAME destination buffer as the existing
+      // consumer, the WAW chain through that shared destination
+      // (existing → its downstream RAW peer → candidate via shared id)
+      // transitively covers tload->candidate. In that case, let the
+      // existing pair participate in coverage and prune the candidate.
+      // When no shared write buffer exists (distinct destinations like
+      // v38 vs v40 sharing the same v30 source), the chain isn't there
+      // and the candidate must keep its own scoreboard bracket.
+      auto *candConsumer = llvm::dyn_cast_if_present<RWOperation>(candOp2);
+      auto *otherConsumer =
+          llvm::dyn_cast_if_present<RWOperation>(conflictPair->op2);
+      if (candConsumer != nullptr && otherConsumer != nullptr &&
+          llvm::is_contained(candConsumer->readMemVals, conflictBuffer)) {
+        bool hasSharedWriteBuffer = false;
+        for (auto v1 : candConsumer->writeMemVals) {
+          for (auto v2 : otherConsumer->writeMemVals) {
+            if (v1 == v2) {
+              hasSharedWriteBuffer = true;
+              break;
+            }
+          }
+          if (hasSharedWriteBuffer)
+            break;
+        }
+        if (!hasSharedWriteBuffer) {
+          return;
+        }
+      }
+    }
     auto [it, isInserted] = visited.insert(conflictPair);
     if (!isInserted) {
       return;
@@ -884,6 +922,21 @@ bool Solver::checkIntersect(ConflictPair *conflictPair1,
   if (options.isBufIdEmit()) {
     if (opsMutuallyExclusive(conflictPair1->op1, conflictPair1->op2,
                              conflictPair2->op1, conflictPair2->op2))
+      return false;
+
+    // Same SSA buffer => the pairs share the buf-id chain. Letting them
+    // share a color means each anchor along the chain gets a single
+    // get_buf/rls_buf bracket whose counter ratchets through all
+    // participants, covering both RAW (producer -> consumer) and WAR
+    // (reader -> overwriting writer) at the same time. The emit-side
+    // (anchor, id) dedup collapses the shared anchor (e.g. tmuls in a
+    // linear tload->tmuls->tstore chain or tmatmul straddling
+    // textract->matmul RAW and matmul->next-textract WAR) into one
+    // bracket per pipe, so spec-1 (no consecutive get(P,#id) on the same
+    // pipe) is preserved automatically.
+    if (conflictPair1->conflictBuffer != nullptr &&
+        conflictPair2->conflictBuffer != nullptr &&
+        conflictPair1->conflictBuffer == conflictPair2->conflictBuffer)
       return false;
 
     // Two buf-id brackets must use different ids whenever they share any

@@ -332,6 +332,14 @@ struct ConflictPair {
   EventIdInfo eventIdInfo;
   EventIdNode *eventIdNode{nullptr};
 
+  // The underlying memory buffer that this sync edge protects (the SSA Value
+  // of the shared tile / memref / pointer that op1 and op2 both touch).
+  // Currently used by buf-id mode to make checkGraphConflict's transitive
+  // pruning buffer-aware: a covering pair only counts if it operates on the
+  // same buffer. Null for barriers and for pairs synthesized without a
+  // specific buffer (e.g. merged backward-sync compensation).
+  mlir::Value conflictBuffer{nullptr};
+
   ConflictPair(RWOperation *op1, RWOperation *op2, OperationBase *setOp,
                OperationBase *waitOp, Occurrence *setOcc, Occurrence *waitOcc,
                CorePipeInfo setCorePipeInfo, CorePipeInfo waitCorePipeInfo,
@@ -376,6 +384,7 @@ struct ConflictPair {
     clonedConflictPair->backwardSyncLoopOcc = backwardSyncLoopOcc;
     clonedConflictPair->eventIdInfo = eventIdInfo;
     clonedConflictPair->eventIdNode = eventIdNode;
+    clonedConflictPair->conflictBuffer = conflictBuffer;
     return clonedConflictPair;
   }
 

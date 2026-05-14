@@ -121,7 +121,7 @@ protected:
   // pairs.
   llvm::DenseMap<
       std::pair<syncsolver::RWOperation *, syncsolver::RWOperation *>,
-      llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>>
+      llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo, mlir::Value>>>
       checkMemoryConflictsMem;
 
   // Set of pipe pairs that were forced to barrier-all (no event ids available).
@@ -221,9 +221,15 @@ protected:
                                                          RWOperation *rwOp2);
 
   // Graph-based conflict checking and memory conflict detection helpers.
+  // `conflictBuffer` identifies the underlying memory the new pair would
+  // synchronize on; in buf-id mode it is used to filter out existing pairs
+  // operating on a different buffer (same-pipe transitive coverage via
+  // those pairs does not hold for independent buf-id counters). nullptr
+  // disables the filter (preserves the legacy set/wait behavior).
   bool checkGraphConflict(
       Occurrence *occ1, Occurrence *occ2, CorePipeInfo corePipeSrc,
       CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
+      mlir::Value conflictBuffer = nullptr,
       std::optional<int> startIndex = {}, std::optional<int> endIndex = {},
       const llvm::SmallVector<ConflictPair *> &extraConflictPairs = {},
       const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs = {});
@@ -242,7 +248,13 @@ protected:
                             std::optional<int64_t> lcmLen = {},
                             std::optional<int64_t> eventIdNum = {});
 
-  llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>
+  // Returns one entry per (corePipeSrc, corePipeDst, conflictingBuffer)
+  // triple. The buffer Value identifies the SSA value of the underlying
+  // memory that triggered the conflict; multiple buffers conflicting at
+  // the same pipe-pair yield multiple entries (one ConflictPair per
+  // buffer downstream). Buffer may be null when the conflict comes from
+  // a MemInfo lacking a backing SSA value.
+  llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo, mlir::Value>>
   checkMemoryConflicts(RWOperation *rwOp1, RWOperation *rwOp2);
 
   bool checkMemoryConflictBetweenOccExclusive(
@@ -336,18 +348,24 @@ protected:
   bool checkReuseMultiBufferFlagId(ConflictPair *conflictPair);
 
   // Primary handler invoked to register/record a found conflict.
+  // `conflictBuffer` is the SSA Value of the underlying memory shared
+  // between op1 and op2 (used by buf-id mode to keep ConflictPairs
+  // distinguishable per buffer; null in legacy callers).
   void handleConflict(Occurrence *occ1, Occurrence *occ2, RWOperation *rwOp1,
                       RWOperation *rwOp2, CorePipeInfo corePipeSrc,
                       CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
-                      bool isUseless);
+                      bool isUseless,
+                      mlir::Value conflictBuffer = nullptr);
 
   void handleBarrierConflict(Occurrence *occ1, Occurrence *occ2,
                              CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-                             bool isUseless);
+                             bool isUseless,
+                             mlir::Value conflictBuffer = nullptr);
 
   void handleSetWaitConflict(Occurrence *occ1, Occurrence *occ2,
                              CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-                             EventIdInfo eventIdInfo, bool isUseless);
+                             EventIdInfo eventIdInfo, bool isUseless,
+                             mlir::Value conflictBuffer = nullptr);
 
   void handleUnitFlagConflict(Occurrence *occ1, Occurrence *occ2,
                               CorePipeInfo corePipeSrc,

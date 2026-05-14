@@ -253,8 +253,11 @@ bool Solver::checkMemInfoConflict(
 }
 
 // High-level wrapper computing pipe pairs that represent memory conflicts
-// between two RW ops.
-llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>
+// between two RW ops. Each returned tuple identifies the (src pipe, dst pipe,
+// underlying SSA buffer) triple for one conflict. Multiple buffers
+// conflicting at the same pipe-pair yield multiple entries so downstream
+// code (buf-id mode) can keep ConflictPairs distinguishable per buffer.
+llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo, mlir::Value>>
 Solver::checkMemoryConflicts(RWOperation *rwOp1, RWOperation *rwOp2) {
   assert(rwOp1 != nullptr && rwOp2 != nullptr);
   auto [it, isInserted] = checkMemoryConflictsMem.insert({{rwOp1, rwOp2}, {}});
@@ -273,23 +276,35 @@ Solver::checkMemoryConflicts(RWOperation *rwOp1, RWOperation *rwOp2) {
     assert(coreDst == pto::TCoreType::VECTOR ||
            coreDst == pto::TCoreType::CUBE);
   }
-  llvm::SetVector<std::tuple<CorePipeInfo, CorePipeInfo>> collectedConflictsSet;
-  if (checkMemInfoConflict(rwOp1, rwOp2, rwOp1->readMemInfo,
-                           rwOp2->writeMemInfo)) {
-    collectedConflictsSet.insert({CorePipeInfo(coreSrc, rwOp1->pipeRead),
-                                  CorePipeInfo(coreDst, rwOp2->pipeWrite)});
-  }
-  if (checkMemInfoConflict(rwOp1, rwOp2, rwOp1->writeMemInfo,
-                           rwOp2->readMemInfo)) {
-    collectedConflictsSet.insert({CorePipeInfo(coreSrc, rwOp1->pipeWrite),
-                                  CorePipeInfo(coreDst, rwOp2->pipeRead)});
-  }
-  if (checkMemInfoConflict(rwOp1, rwOp2, rwOp1->writeMemInfo,
-                           rwOp2->writeMemInfo)) {
-    collectedConflictsSet.insert({CorePipeInfo(coreSrc, rwOp1->pipeWrite),
-                                  CorePipeInfo(coreDst, rwOp2->pipeWrite)});
-  }
-  llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>> collectedConflicts(
+  // Walk each pair of MemInfo entries and record per-buffer conflicts.
+  // Conflicts found between an entry pair share the producer-side MemInfo's
+  // SSA Value as the "buffer id" — both ops see the same memory through
+  // this value (or its alias). When that value is null the entry is still
+  // recorded with a null buffer (buffer-aware filters degrade to permissive
+  // behavior, which preserves the legacy set/wait emission).
+  using BufferConflict = std::tuple<CorePipeInfo, CorePipeInfo, mlir::Value>;
+  llvm::SetVector<BufferConflict> collectedConflictsSet;
+  auto collect = [&](const llvm::SmallVector<MemInfo> &lhs,
+                     const llvm::SmallVector<MemInfo> &rhs,
+                     CorePipeInfo srcInfo, CorePipeInfo dstInfo) {
+    for (auto &m1 : lhs) {
+      for (auto &m2 : rhs) {
+        if (!checkMemInfoConflict(rwOp1, rwOp2, m1, m2)) continue;
+        mlir::Value buffer = m1.value ? m1.value : m2.value;
+        collectedConflictsSet.insert({srcInfo, dstInfo, buffer});
+      }
+    }
+  };
+  collect(rwOp1->readMemInfo, rwOp2->writeMemInfo,
+          CorePipeInfo(coreSrc, rwOp1->pipeRead),
+          CorePipeInfo(coreDst, rwOp2->pipeWrite));
+  collect(rwOp1->writeMemInfo, rwOp2->readMemInfo,
+          CorePipeInfo(coreSrc, rwOp1->pipeWrite),
+          CorePipeInfo(coreDst, rwOp2->pipeRead));
+  collect(rwOp1->writeMemInfo, rwOp2->writeMemInfo,
+          CorePipeInfo(coreSrc, rwOp1->pipeWrite),
+          CorePipeInfo(coreDst, rwOp2->pipeWrite));
+  llvm::SmallVector<BufferConflict> collectedConflicts(
       collectedConflictsSet.begin(), collectedConflictsSet.end());
   return it->second = collectedConflicts;
 }
@@ -614,6 +629,7 @@ EventIdInfo Solver::getEventIdInfo(Occurrence *occ1, Occurrence *occ2,
 bool Solver::checkGraphConflict(
     Occurrence *occ1, Occurrence *occ2, CorePipeInfo corePipeSrc,
     CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
+    mlir::Value conflictBuffer,
     std::optional<int> startIndex, std::optional<int> endIndex,
     const llvm::SmallVector<ConflictPair *> &extraConflictPairs,
     const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs) {
@@ -624,6 +640,13 @@ bool Solver::checkGraphConflict(
   if (!endIndex.has_value()) {
     endIndex = occ2->startIndex;
   }
+  // In buf-id mode, transitive coverage through existing pairs is only valid
+  // when those pairs operate on the SAME underlying buffer as the candidate
+  // (each buf-id is an independent scoreboard counter, so a same-pipe pair
+  // on a different buffer does not transitively sync the candidate's
+  // counter). Filter out cross-buffer existing pairs from the graph when
+  // both sides carry buffer info.
+  const bool bufferAware = options.isBufIdEmit() && conflictBuffer != nullptr;
   GraphSolver graphSolver(options);
   llvm::DenseSet<ConflictPair *> visited;
   auto handleConflictPair = [&](ConflictPair *conflictPair) {
@@ -643,6 +666,12 @@ bool Solver::checkGraphConflict(
     }
     if (llvm::find(ignoreConflictPairs, conflictPair) !=
         ignoreConflictPairs.end()) {
+      return;
+    }
+    if (bufferAware && conflictPair->conflictBuffer != nullptr &&
+        conflictPair->conflictBuffer != conflictBuffer) {
+      // Different-buffer existing pair: cannot transitively cover the
+      // candidate in buf-id semantics.
       return;
     }
     auto [it, isInserted] = visited.insert(conflictPair);
@@ -731,7 +760,8 @@ bool Solver::checkSyncOpsConflicts(ConflictPair *conflictPair1,
     assert(occ1 != nullptr && occ2 != nullptr);
     result = result ||
              checkGraphConflict(occ1, occ2, corePipeSrc, corePipeDst,
-                                conflictPair1->eventIdInfo, startIndex,
+                                conflictPair1->eventIdInfo,
+                                /*conflictBuffer=*/nullptr, startIndex,
                                 endIndex, {conflictPair1}, {conflictPair2});
     conflictPair1->startIndex -= 1;
   }
@@ -746,7 +776,8 @@ bool Solver::checkSyncOpsConflicts(ConflictPair *conflictPair1,
     assert(occ1 != nullptr && occ2 != nullptr);
     result = result ||
              checkGraphConflict(occ1, occ2, corePipeSrc, corePipeDst,
-                                conflictPair1->eventIdInfo, startIndex,
+                                conflictPair1->eventIdInfo,
+                                /*conflictBuffer=*/nullptr, startIndex,
                                 endIndex, {conflictPair1}, {conflictPair2});
     conflictPair2->endIndex += 1;
   }
@@ -1653,7 +1684,8 @@ bool Solver::checkReuseMultiBufferFlagId(ConflictPair *conflictPair) {
 void Solver::handleSetWaitConflict(Occurrence *occ1, Occurrence *occ2,
                                    CorePipeInfo corePipeSrc,
                                    CorePipeInfo corePipeDst,
-                                   EventIdInfo eventIdInfo, bool isUseless) {
+                                   EventIdInfo eventIdInfo, bool isUseless,
+                                   mlir::Value conflictBuffer) {
   assert(occ1 != nullptr && occ2 != nullptr);
   auto *rwOp1 = llvm::dyn_cast_if_present<RWOperation>(occ1->op);
   auto *rwOp2 = llvm::dyn_cast_if_present<RWOperation>(occ2->op);
@@ -1683,6 +1715,7 @@ void Solver::handleSetWaitConflict(Occurrence *occ1, Occurrence *occ2,
   conflictPair->isUseless = isUseless;
   conflictPair->isInnerBackward = isBackwardSync(setOcc, waitOcc);
   conflictPair->eventIdInfo = eventIdInfo;
+  conflictPair->conflictBuffer = conflictBuffer;
 
   if (conflictPair->isInnerBackward) {
     auto [parOcc1, parOcc2] = Occurrence::getLCAPair(occ1, occ2);
@@ -1881,7 +1914,8 @@ void Solver::handleSetWaitConflict(Occurrence *occ1, Occurrence *occ2,
 
 void Solver::handleBarrierConflict(Occurrence *occ1, Occurrence *occ2,
                                    CorePipeInfo corePipeSrc,
-                                   CorePipeInfo corePipeDst, bool isUseless) {
+                                   CorePipeInfo corePipeDst, bool isUseless,
+                                   mlir::Value conflictBuffer) {
   assert(occ1 != nullptr && occ2 != nullptr);
   auto *rwOp1 = llvm::dyn_cast_if_present<RWOperation>(occ1->op);
   auto *rwOp2 = llvm::dyn_cast_if_present<RWOperation>(occ2->op);
@@ -1903,6 +1937,7 @@ void Solver::handleBarrierConflict(Occurrence *occ1, Occurrence *occ2,
       rwOp1, rwOp2, waitOcc->op, waitOcc->op, waitOcc, waitOcc, corePipeSrc,
       corePipeDst, waitOcc->startIndex, waitOcc->startIndex);
   conflictPair->isUseless = isUseless;
+  conflictPair->conflictBuffer = conflictBuffer;
   assert(conflictPair->startIndex <= conflictPair->endIndex);
 
   LLVM_DEBUG({ llvm::dbgs() << conflictPair->str() << '\n'; });
@@ -1974,8 +2009,10 @@ void Solver::handleUnitFlagConflict(Occurrence *occ1, Occurrence *occ2,
 void Solver::handleConflict(Occurrence *occ1, Occurrence *occ2,
                             RWOperation *rwOp1, RWOperation *rwOp2,
                             CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-                            EventIdInfo eventIdInfo, bool isUseless) {
-  if (!checkGraphConflict(occ1, occ2, corePipeSrc, corePipeDst, eventIdInfo)) {
+                            EventIdInfo eventIdInfo, bool isUseless,
+                            mlir::Value conflictBuffer) {
+  if (!checkGraphConflict(occ1, occ2, corePipeSrc, corePipeDst, eventIdInfo,
+                          conflictBuffer)) {
     return;
   }
   LLVM_DEBUG({
@@ -1987,13 +2024,14 @@ void Solver::handleConflict(Occurrence *occ1, Occurrence *occ2,
                  << occ2->endIndex << ' ' << rwOp2->str(0, false) << '\n';
   });
   if (corePipeSrc == corePipeDst) {
-    handleBarrierConflict(occ1, occ2, corePipeSrc, corePipeDst, isUseless);
+    handleBarrierConflict(occ1, occ2, corePipeSrc, corePipeDst, isUseless,
+                          conflictBuffer);
   } else if (auto unitFlagInfo = checkUnitFlagPatterns(occ1, occ2)) {
     handleUnitFlagConflict(occ1, occ2, corePipeSrc, corePipeDst,
                            unitFlagInfo.value(), isUseless);
   } else {
     handleSetWaitConflict(occ1, occ2, corePipeSrc, corePipeDst, eventIdInfo,
-                          isUseless);
+                          isUseless, conflictBuffer);
   }
 }
 
@@ -2611,14 +2649,15 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
 void Solver::processConflict(Occurrence *occ1, Occurrence *occ2,
                              RWOperation *rwOp1, RWOperation *rwOp2,
                              bool isUseless) {
-  for (auto [corePipeSrc, corePipeDst] : checkMemoryConflicts(rwOp1, rwOp2)) {
+  for (auto [corePipeSrc, corePipeDst, conflictBuffer] :
+       checkMemoryConflicts(rwOp1, rwOp2)) {
     if (options.alwaysUsePipeSAsWaitingPipe) {
       corePipeDst.pipe = pto::PIPE::PIPE_S;
     }
     auto eventIdInfo =
         getEventIdInfo(occ1, occ2, rwOp1, rwOp2, corePipeSrc, corePipeDst);
     handleConflict(occ1, occ2, rwOp1, rwOp2, corePipeSrc, corePipeDst,
-                   eventIdInfo, isUseless);
+                   eventIdInfo, isUseless, conflictBuffer);
   }
 }
 

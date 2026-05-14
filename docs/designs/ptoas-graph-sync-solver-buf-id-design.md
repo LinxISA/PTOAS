@@ -175,16 +175,6 @@ for i = 0:N
 
 如果两条 forward 用不同 id（像 case 1 那样），iter i+1 的 load（在 id_A 上）只会等 iter i 的 vadd（也在 id_A 上），不会等 iter i 的 store（在 id_B 上）——结果 store 读 ub0 时被 load 覆写，data race。
 
-**判别准则**：两条 forward F1、F2 是否在同一 buffer chain 上？
-
-理论上需要 plumbing buffer 信息到 ConflictPair。但有个等价代理：
-
-> F1 和 F2 共享一个 anchor `(op, pipe)`，且存在 backward ConflictPair B 把 F1 的"非共享"端点和 F2 的"非共享"端点连起来 → F1、F2 必在同 buffer chain 上。
-
-理由：solver 的 backward 边正是 iter i 的某端读 / iter i+1 的某端写在同一 buffer 上产生的。如果两条 forward 链穿过同一 buffer，就一定有这种 backward 桥；如果是两条独立 buffer 的链，桥就找不到。
-
-所以：**backward 分析依旧需要做**，但产物不是 bracket，而是 id 合并提示。
-
 #### 落实
 
 1. `tryMovingOutBackwardSyncPairsToOuterLoops`、`considerOuterBackwardSyncPairs`、

@@ -724,6 +724,30 @@ bool Solver::checkGraphConflict(
         }
       }
     }
+    if (mutexAware && conflictPair->op1 != candOp1 &&
+        conflictPair->op2 == candOp2 &&
+        conflictPair->setCorePipeInfo == corePipeSrc &&
+        conflictPair->waitCorePipeInfo == corePipeDst &&
+        conflictBuffer != nullptr) {
+      // Symmetric to the "different op2" rule above. Different producers
+      // feeding the same consumer cross-pipe on the same SSA buffer.
+      // In set/wait, FIFO at the producer pipe (within an iteration)
+      // covers later producers via one set_flag at the latest producer.
+      // Buf-id can't chain producers transitively — each producer's
+      // bracket lives on its own anchor (op1) and the ratchet only
+      // sequences anchors that have brackets. Without this exclusion,
+      // checkGraphConflict transitively prunes the candidate via the
+      // existing pair's bracket-on-different-anchor coverage, leaving
+      // the candidate's producer outside the chain. The visible bug:
+      // in a loop, iter k+1's first producer (= candidate, the
+      // earliest writer of conflictBuffer) re-uses the same OperationBase
+      // across iterations; if its pair is pruned, it never enters the
+      // chain, and iter k+1's first producer can race iter k's
+      // consumer (e.g. outer-loop store reading the accumulator vs.
+      // iter k+1's first tmatmul writing it). Force the candidate's
+      // producer to keep its own bracket so the ratchet picks it up.
+      return;
+    }
     auto [it, isInserted] = visited.insert(conflictPair);
     if (!isInserted) {
       return;

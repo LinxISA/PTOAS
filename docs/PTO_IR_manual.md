@@ -485,7 +485,12 @@ result = alloc_tile(base_addr, valid_row, valid_col)   // operands are optional
 - The operation has a custom verifier that checks:
   - If result `v_row`/`v_col` are dynamic (`?`), the corresponding operands must be present
   - If result `v_row`/`v_col` are static, the corresponding operands must be absent
+  - If tile-buffer multi-buffering is requested, `multi_buffer` must be in `[2, 16]`
+    and the allocation must not use an explicit `addr`
 - If `base_addr` is omitted, the address is assigned by the compiler
+- Tile-buffer multi-buffering can be expressed on the result type as
+  `multi_buffer=N`, or on the op as `{pto.multi_buffer = N : i64}` for
+  compatibility with the lowered memref form
 
 **Hardware Mapping:**
 
@@ -497,6 +502,8 @@ result = alloc_tile(base_addr, valid_row, valid_col)   // operands are optional
 %tb = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 %tb2 = pto.alloc_tile valid_row = %vr valid_col = %vc : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 %tb3 = pto.alloc_tile addr = %ad : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+%tb4 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16, multi_buffer=2>
+%tb5 = pto.alloc_tile {pto.multi_buffer = 3 : i64} : !pto.tile_buf<vec, 16x16xf16>
 ```
 
 ##### `pto.subview` - Tile SubView

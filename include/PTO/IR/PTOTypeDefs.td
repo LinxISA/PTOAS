@@ -139,7 +139,8 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
     "mlir::Type":$elementType,
     "mlir::Attribute":$memorySpace,
     ArrayRefParameter<"int64_t">:$validShape,
-    "mlir::pto::TileBufConfigAttr":$config // TileBufConfigAttr (or null -> default)
+    "mlir::pto::TileBufConfigAttr":$config, // TileBufConfigAttr (or null -> default)
+    "uint32_t":$multiBufferNum
   );
 
   let hasCustomAssemblyFormat = 1;
@@ -160,7 +161,7 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
         if (dim < 0)
           dim = mlir::ShapedType::kDynamic;
 
-      return Base::get($_ctxt, shape, elementType, memorySpace, vs, cfg);
+      return Base::get($_ctxt, shape, elementType, memorySpace, vs, cfg, 1);
     }]>,
 
     // (2) 兼容接口：shape/elem/memorySpace/config
@@ -175,7 +176,7 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
       for (int64_t &dim : vs)
         if (dim < 0)
           dim = mlir::ShapedType::kDynamic;
-      return Base::get($_ctxt, shape, elementType, memorySpace, vs, config);
+      return Base::get($_ctxt, shape, elementType, memorySpace, vs, config, 1);
     }]>,
 
     // (3) 便利接口：shape/elem/memorySpace/validShape（config 默认）
@@ -190,7 +191,19 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
       for (int64_t &dim : vs)
         if (dim < 0)
           dim = mlir::ShapedType::kDynamic;
-      return Base::get($_ctxt, shape, elementType, memorySpace, vs, cfg);
+      return Base::get($_ctxt, shape, elementType, memorySpace, vs, cfg, 1);
+    }]>,
+
+    // (4) compatibility: shape/elem/memorySpace/validShape/config
+    TypeBuilder<(ins
+      "ArrayRef<int64_t>":$shape,
+      "Type":$elementType,
+      "Attribute":$memorySpace,
+      "ArrayRef<int64_t>":$validShape,
+      "mlir::pto::TileBufConfigAttr":$config
+    ), [{
+      return Base::get($_ctxt, shape, elementType, memorySpace, validShape,
+                       config, 1);
     }]>
   ];
 
@@ -218,6 +231,7 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
     int32_t getSLayoutValueI32() const;   // 0 none_box, 1 row_major, 2 col_major
     int32_t getPadValueI32() const;       // 0 null, 1 zero, 2 max, 3 min
     int32_t getCompactModeI32() const;    // 0 null, 1 normal, 2 row_plus_one
+    bool isMultiBuffer() const { return getMultiBufferNum() > 1; }
   }];
 }
 

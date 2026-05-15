@@ -13,6 +13,7 @@
 // metadata through binding ops and SSA backtracking.
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOMultiBuffer.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
 
@@ -415,6 +416,24 @@ static void materializeStaticValidDims(IRRewriter &rewriter, Location loc,
     vCol = makeIndexConstant(rewriter, loc, validShape[1]);
 }
 
+static uint32_t getAllocTileMultiBufferNum(mlir::pto::AllocTileOp op,
+                                           mlir::pto::TileBufType tbTy) {
+  uint32_t n = tbTy.getMultiBufferNum();
+  if (auto attr = op->getAttrOfType<IntegerAttr>(kPtoMultiBufferAttrName))
+    n = static_cast<uint32_t>(attr.getValue().getZExtValue());
+  return n;
+}
+
+static void propagateAllocTileMultiBufferAttr(mlir::pto::AllocTileOp src,
+                                              mlir::pto::TileBufType tbTy,
+                                              memref::AllocOp dst) {
+  uint32_t n = getAllocTileMultiBufferNum(src, tbTy);
+  if (n <= 1)
+    return;
+  auto i32Ty = IntegerType::get(dst.getContext(), 32);
+  dst->setAttr(kPtoMultiBufferAttrName, IntegerAttr::get(i32Ty, n));
+}
+
 static bool checkMultipleOf(Operation *op, int64_t value, int64_t divisor,
                             StringRef label) {
   if (divisor <= 0) {
@@ -720,7 +739,9 @@ static void markForceDynamicValidShape(Operation *op, bool force,
     auto allocLayout = StridedLayoutAttr::get(ctx, 0, strides);
     auto allocType =
         MemRefType::get(shape, elemTy, allocLayout, tbTy.getMemorySpace());
-    Value alloc = rewriter.create<memref::AllocOp>(loc, allocType);
+    auto allocOp = rewriter.create<memref::AllocOp>(loc, allocType);
+    propagateAllocTileMultiBufferAttr(op, tbTy, allocOp);
+    Value alloc = allocOp.getResult();
     auto bindOp = rewriter.create<pto::BindTileOp>(
         loc, targetType, alloc, vRow ? vRow : Value(), vCol ? vCol : Value(),
         configAttr);
@@ -1293,7 +1314,9 @@ struct PTOViewToMemrefPass
         // memref.alloc 要求明确的 layout，不能是动态 offset。
         auto allocLayout = StridedLayoutAttr::get(ctx, 0, strides); // offset = 0
         auto allocType = MemRefType::get(shape, elemTy, allocLayout, tbTy.getMemorySpace());
-        Value alloc = rewriter.create<memref::AllocOp>(loc, allocType);
+        auto allocOp = rewriter.create<memref::AllocOp>(loc, allocType);
+        propagateAllocTileMultiBufferAttr(op, tbTy, allocOp);
+        Value alloc = allocOp.getResult();
 
         // BindTileOp 的 Builder 会自动处理空的 Value，将其视为静态维度
         auto bindOp = rewriter.create<pto::BindTileOp>(

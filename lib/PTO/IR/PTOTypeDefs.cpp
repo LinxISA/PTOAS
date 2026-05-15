@@ -8,6 +8,7 @@
 
 //===- PTOTypeDefs.cpp --------------------------------------------*- C++ -*-===//
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOMultiBuffer.h"
 #include "mlir/IR/DialectImplementation.h"
 #include <limits>
 #include <mutex>
@@ -245,6 +246,7 @@ struct ParsedTileBufFields {
   int64_t fractal = 0;
   uint32_t padInt = 0;
   uint32_t compactInt = 0;
+  uint32_t multiBufferNum = 1;
 };
 
 static LogicalResult parseTileBufUInt32Value(AsmParser &parser, StringRef key,
@@ -259,6 +261,16 @@ static LogicalResult parseTileBufUInt32Value(AsmParser &parser, StringRef key,
     return failure();
   }
   value = static_cast<uint32_t>(parsedValue);
+  return success();
+}
+
+static LogicalResult validateTileBufMultiBufferNum(AsmParser &parser,
+                                                   uint32_t value) {
+  if (value <= 1 || value > kPtoMultiBufferMaxNum) {
+    parser.emitError(parser.getCurrentLocation())
+        << "multi_buffer must be in [2, " << kPtoMultiBufferMaxNum << "]";
+    return failure();
+  }
   return success();
 }
 
@@ -332,6 +344,7 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
   bool seenFractal = false;
   bool seenPad = false;
   bool seenCompact = false;
+  bool seenMultiBuffer = false;
 
   while (succeeded(parser.parseOptionalComma())) {
     StringRef key;
@@ -421,6 +434,22 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
       continue;
     }
 
+    if (key == "multi_buffer") {
+      if (seenMultiBuffer) {
+        parser.emitError(parser.getCurrentLocation(),
+                         "duplicate multi_buffer in tile_buf compact syntax");
+        return failure();
+      }
+      seenMultiBuffer = true;
+      if (failed(parseTileBufUInt32Value(parser, key,
+                                         fields.multiBufferNum)) ||
+          failed(validateTileBufMultiBufferNum(parser,
+                                               fields.multiBufferNum))) {
+        return failure();
+      }
+      continue;
+    }
+
     parser.emitError(parser.getCurrentLocation(),
                      "unknown key in tile_buf compact syntax: ")
         << key;
@@ -488,7 +517,8 @@ static Type buildTileBufType(AsmParser &parser,
   auto canonicalValidShape = canonicalizeTileBufValidShape(validShape);
 
   return TileBufType::get(ctx, shape, fields.dtype, memorySpaceAttr,
-                          llvm::ArrayRef<int64_t>(canonicalValidShape), cfg);
+                          llvm::ArrayRef<int64_t>(canonicalValidShape), cfg,
+                          fields.multiBufferNum);
 }
 
 } // namespace
@@ -514,9 +544,45 @@ Type TileBufType::parse(AsmParser &parser) {
       return Type();
   }
 
-  if (isLegacySyntax && succeeded(parser.parseOptionalComma())) {
-    if (failed(parseTileBufKeyEq(parser, "compact")) ||
-        failed(parseTileBufUInt32Value(parser, "compact", fields.compactInt))) {
+  if (isLegacySyntax) {
+    bool seenCompact = false;
+    bool seenMultiBuffer = false;
+    while (succeeded(parser.parseOptionalComma())) {
+      StringRef key;
+      if (failed(parser.parseKeyword(&key)) || failed(parser.parseEqual()))
+        return Type();
+
+      if (key == "compact") {
+        if (seenCompact) {
+          parser.emitError(parser.getCurrentLocation(),
+                           "duplicate compact in tile_buf legacy syntax");
+          return Type();
+        }
+        seenCompact = true;
+        if (failed(parseTileBufUInt32Value(parser, key, fields.compactInt)))
+          return Type();
+        continue;
+      }
+
+      if (key == "multi_buffer") {
+        if (seenMultiBuffer) {
+          parser.emitError(parser.getCurrentLocation(),
+                           "duplicate multi_buffer in tile_buf legacy syntax");
+          return Type();
+        }
+        seenMultiBuffer = true;
+        if (failed(parseTileBufUInt32Value(parser, key,
+                                           fields.multiBufferNum)) ||
+            failed(validateTileBufMultiBufferNum(parser,
+                                                 fields.multiBufferNum))) {
+          return Type();
+        }
+        continue;
+      }
+
+      parser.emitError(parser.getCurrentLocation(),
+                       "unknown key in tile_buf legacy syntax: ")
+          << key;
       return Type();
     }
   }
@@ -620,6 +686,7 @@ void mlir::pto::TileBufType::print(mlir::AsmPrinter &printer) const {
   const bool printCompact =
       compact && defaultCompact &&
       compact.getValue() != defaultCompact.getValue();
+  const bool printMultiBuffer = getMultiBufferNum() > 1;
 
   printer << "<" << locStr << ", ";
   printTileBufDim(printer, rows);
@@ -644,6 +711,8 @@ void mlir::pto::TileBufType::print(mlir::AsmPrinter &printer) const {
     printer << ", pad=" << stringifyLocFromPad(cfg.getPad());
   if (printCompact)
     printer << ", compact=" << stringifyCompactModeInt(cfg.getCompactMode());
+  if (printMultiBuffer)
+    printer << ", multi_buffer=" << getMultiBufferNum();
 
   printer << ">";
 }

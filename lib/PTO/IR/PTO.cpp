@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOMultiBuffer.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/IR/PTOSyncUtils.h"
 
@@ -1715,6 +1716,32 @@ LogicalResult AllocTileOp::verify() {
                          << " is not supported by pto.alloc_tile yet";
 
   // op 上有没有传 operands
+  uint32_t multiBufferNum = ty.getMultiBufferNum();
+  if (multiBufferNum == 0 || multiBufferNum > kPtoMultiBufferMaxNum) {
+    return emitOpError() << "result tile_buf multi_buffer must be 1 or in [2, "
+                         << kPtoMultiBufferMaxNum << "]";
+  }
+
+  if (auto attr = (*this)->getAttrOfType<IntegerAttr>(kPtoMultiBufferAttrName)) {
+    uint64_t attrMultiBufferNum = attr.getValue().getZExtValue();
+    if (attrMultiBufferNum <= 1 ||
+        attrMultiBufferNum > kPtoMultiBufferMaxNum) {
+      return emitOpError() << kPtoMultiBufferAttrName << " must be in [2, "
+                           << kPtoMultiBufferMaxNum << "]";
+    }
+    if (multiBufferNum > 1 && attrMultiBufferNum != multiBufferNum) {
+      return emitOpError()
+             << kPtoMultiBufferAttrName
+             << " attribute must match result tile_buf multi_buffer";
+    }
+    multiBufferNum = static_cast<uint32_t>(attrMultiBufferNum);
+  }
+
+  if (multiBufferNum > 1 && getAddr()) {
+    return emitOpError()
+           << "multi-buffer alloc_tile cannot use an explicit addr operand";
+  }
+
   bool hasVR = getValidRow() != nullptr;
   bool hasVC = getValidCol() != nullptr;
 
@@ -9341,7 +9368,8 @@ LogicalResult SubViewOp::inferReturnTypes(
   auto canonicalValidShape = canonicalizeTileBufValidShape(validShape);
   auto resultType = TileBufType::get(
       context, subviewShape, sourceType.getElementType(),
-      sourceType.getMemorySpace(), canonicalValidShape, cfg);
+      sourceType.getMemorySpace(), canonicalValidShape, cfg,
+      sourceType.getMultiBufferNum());
 
   inferredReturnTypes.push_back(resultType);
   return success();

@@ -6,9 +6,23 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-#ifndef PTO_TRANSFORMS_MULTIBUFFER_H
-#define PTO_TRANSFORMS_MULTIBUFFER_H
+#ifndef PTO_IR_PTOMULTIBUFFER_H
+#define PTO_IR_PTOMULTIBUFFER_H
 
-#include "PTO/IR/PTOMultiBuffer.h"
+#include "llvm/ADT/StringRef.h"
 
-#endif // PTO_TRANSFORMS_MULTIBUFFER_H
+namespace mlir {
+namespace pto {
+
+/// Attribute name for multi-buffer depth (integer slot count N>=2).
+inline constexpr llvm::StringLiteral kPtoMultiBufferAttrName =
+    "pto.multi_buffer";
+
+/// Upper bound for N; must stay consistent with `MAX_MULTI_BUFFER_NUM` in
+/// insert-sync.
+inline constexpr unsigned kPtoMultiBufferMaxNum = 16;
+
+} // namespace pto
+} // namespace mlir
+
+#endif // PTO_IR_PTOMULTIBUFFER_H

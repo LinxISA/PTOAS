@@ -2590,6 +2590,70 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
                 cp->waitCorePipeInfo.pipe}}};
     };
 
+    // Middle-producer prune for the "multi-producer, one consumer, same
+    // buffer, same pipe-pair" pattern (e.g. several matmuls all writing
+    // v46 then a single tstore on PIPE_FIX). checkGraphConflict keeps
+    // every such producer's pair so each producer enters the buf-id
+    // ratchet chain (needed for cross-iter sync — see rule 4 in the
+    // design doc). At emit time, however, only the first and last
+    // producers along each non-mutex runtime path actually need a
+    // scoreboard bracket:
+    //   * first producer in the path: chain entry, so iter k+1's same
+    //     OperationBase (the next-iter first producer) sees the
+    //     ratcheted counter and waits for iter k's consumer rls;
+    //   * last producer in the path: chain exit, so the consumer's
+    //     get_buf snap lands after the last producer's rls;
+    //   * middle producers: bracketed by same-pipe FIFO on either side
+    //     (the chain entry's rls is before them, the chain exit's get
+    //     gates the consumer after them), so an explicit bracket on
+    //     them is functionally a no-op.
+    // For each pair P, mark it middle iff it has BOTH an earlier and a
+    // later non-mutex peer in the same (op2, conflictBuffer, pipe-pair)
+    // group. Mutex peers don't count (different runtime path).
+    // Compare positions by the op1 RWOperation's own syncIrIndex (via
+    // opAllOccurrences), NOT cp->startIndex — the latter is the setOp's
+    // index after LCA hoisting and may collapse multiple distinct op1s
+    // onto a single placeholder boundary.
+    auto op1SyncIrIndex = [&](ConflictPair *cp) -> int {
+      auto it = opAllOccurrences.find(cp->op1);
+      if (it == opAllOccurrences.end() || it->second.empty())
+        return cp->startIndex;
+      return it->second.front()->syncIrIndex;
+    };
+    llvm::DenseSet<ConflictPair *> bufIdMiddleProducer;
+    for (auto *cp : forwardPairs) {
+      if (cp->conflictBuffer == nullptr)
+        continue;
+      bool hasEarlierPeer = false;
+      bool hasLaterPeer = false;
+      int cpIdx = op1SyncIrIndex(cp);
+      for (auto *other : forwardPairs) {
+        if (other == cp)
+          continue;
+        if (other->op1 == cp->op1)
+          continue;
+        if (other->op2 != cp->op2)
+          continue;
+        if (other->conflictBuffer != cp->conflictBuffer)
+          continue;
+        if (other->setCorePipeInfo != cp->setCorePipeInfo)
+          continue;
+        if (other->waitCorePipeInfo != cp->waitCorePipeInfo)
+          continue;
+        if (opsMutuallyExclusive(cp->op1, cp->op2, other->op1, other->op2))
+          continue;
+        int otherIdx = op1SyncIrIndex(other);
+        if (otherIdx < cpIdx)
+          hasEarlierPeer = true;
+        if (otherIdx > cpIdx)
+          hasLaterPeer = true;
+        if (hasEarlierPeer && hasLaterPeer)
+          break;
+      }
+      if (hasEarlierPeer && hasLaterPeer)
+        bufIdMiddleProducer.insert(cp);
+    }
+
     for (size_t i = 0; i < forwardPairs.size(); ++i) {
       for (size_t j = i + 1; j < forwardPairs.size(); ++j) {
         auto *f1 = forwardPairs[i];
@@ -2666,6 +2730,13 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
         continue;
       if (!cp->eventIdNode || cp->eventIdNode->getEventIds().empty())
         continue;
+      if (bufIdMiddleProducer.contains(cp)) {
+        // A producer sandwiched between an earlier and a later non-mutex
+        // peer on the same (op2, conflictBuffer, pipe-pair) chain.
+        // Same-pipe FIFO orders it implicitly; an explicit bracket would
+        // just no-op against the FIFO. Skip emit to keep the IR clean.
+        continue;
+      }
       auto gIt = groupId.find(ufFind(cp));
       int64_t bufId = (gIt != groupId.end())
                           ? gIt->second

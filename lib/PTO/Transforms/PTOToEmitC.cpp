@@ -5457,10 +5457,18 @@ struct PTOGetScaleAddrToEmitC
 
   LogicalResult matchAndRewrite(pto::TGetScaleAddrOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    (void)adaptor;
-    (void)rewriter;
-    return op.emitOpError(
-        "is an IR/view operation with no LinxISA v0.57 EmitC instruction lowering");
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TGET_SCALE_ADDR",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src});
+
+    rewriter.eraseOp(op);
+    return success();
   }
 };
 
@@ -7105,7 +7113,7 @@ struct PTOConcatidxToEmitC : public OpConversionPattern<pto::TConcatidxOp> {
     Value dst  = peelUnrealized(adaptor.getDst());
 
     rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TCONCATIDX",
+        op.getLoc(), TypeRange{}, "TCONCAT",
         ArrayAttr{}, ArrayAttr{},
         ValueRange{dst, src0, src1, src0Idx, src1Idx});
 

@@ -74,7 +74,9 @@ add_mlir_dialect_library(PTOTransforms
   MLIRTransforms
   MLIRTensorDialect
   MLIRSCFToEmitC
+  MLIRSCFToControlFlow
   MLIRSCFDialect
+  MLIRSCFTransforms
 )
 
 install(TARGETS PTOTransforms

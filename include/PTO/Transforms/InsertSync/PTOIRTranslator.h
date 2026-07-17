@@ -58,8 +58,8 @@ private:
   // 核心数据结构 (定义在 SyncCommon.h 中)
   SyncIRs &syncIR_;
   Buffer2MemInfoMap &buffer2MemInfoMap_;
-  MemoryDependentAnalyzer &memAnalyzer_;
-  SyncAnalysisMode mode_;
+  [[maybe_unused]] MemoryDependentAnalyzer &memAnalyzer_;
+  [[maybe_unused]] SyncAnalysisMode mode_;
  
   // --- 递归遍历逻辑 ---
   void RecursionIR(Region *region);

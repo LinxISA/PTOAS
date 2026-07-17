@@ -357,8 +357,8 @@ getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
 
   SmallVector<int64_t> inheritedStrides;
   int64_t inheritedOffset = ShapedType::kDynamic;
-  if (failed(getStridesAndOffset(sourceMrTy, inheritedStrides,
-                                 inheritedOffset)) ||
+  if (failed(sourceMrTy.getStridesAndOffset(inheritedStrides,
+                                            inheritedOffset)) ||
       inheritedStrides.size() < 2)
     return shape;
 
@@ -431,7 +431,7 @@ static Value materializeOffset(OpFoldResult ofr, OpBuilder &builder,
       return makeI64Constant(builder, loc, intAttr.getInt());
     return Value();
   }
-  return ensureI64(ofr.get<Value>(), builder, loc);
+  return ensureI64(llvm::cast<Value>(ofr), builder, loc);
 }
 
 static Value addI64(Value lhs, Value rhs, OpBuilder &builder, Location loc) {
@@ -471,7 +471,7 @@ static Value computeSubviewAddress(memref::SubViewOp subview,
 
   SmallVector<int64_t> sourceStrides;
   int64_t sourceOffset = ShapedType::kDynamic;
-  if (failed(getStridesAndOffset(sourceTy, sourceStrides, sourceOffset)))
+  if (failed(sourceTy.getStridesAndOffset(sourceStrides, sourceOffset)))
     return Value();
 
   auto mixedOffsets = subview.getMixedOffsets();

@@ -37,9 +37,6 @@ target_link_libraries(pto-opt PRIVATE
   PTOTransforms    # 替代 MLIRPTOTransforms
   ptobc_lib
 
-  # === MLIR 基础设施 ===
-  MLIRMlirOptMain  # [重要] 包含了 main 函数入口逻辑，通常必须链接
-  
   # === MLIR 标准库 ===
   MLIRBufferizationTransforms
   MLIRArithTransforms
@@ -59,6 +56,7 @@ target_link_libraries(pto-opt PRIVATE
   MLIRControlFlowDialect
   MLIRBufferizationDialect
   MLIRFuncDialect
+  MLIRLLVMDialect
   MLIRSupport
   MLIRTransformUtils
 )

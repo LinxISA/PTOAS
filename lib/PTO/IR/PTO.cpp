@@ -2733,7 +2733,7 @@ static LogicalResult verifyAsyncFlatContiguous1DGMMemRef(Operation *op,
 
   SmallVector<int64_t> strides;
   int64_t offset = 0;
-  if (failed(getStridesAndOffset(memTy, strides, offset)))
+  if (failed(memTy.getStridesAndOffset(strides, offset)))
     return op->emitOpError() << "expects " << name
                              << " to be a strided memref with a known layout";
 
@@ -2954,8 +2954,7 @@ static bool isSupportedMGatherMScatterPayloadElemType(Operation *op, Type ty) {
     return true;
   if (!isTargetArchA5(op))
     return false;
-  return ty.isFloat8E4M3() || ty.isFloat8E4M3FN() || ty.isFloat8E4M3FNUZ() ||
-         ty.isFloat8E4M3B11FNUZ() || ty.isFloat8E5M2() || ty.isFloat8E5M2FNUZ();
+  return isPTOFloat8Type(ty);
 }
 
 static bool isSupportedMScatterAtomicPayloadElemType(Type ty,
@@ -10412,6 +10411,14 @@ void TGatherOp::getEffects(
 }
 
 PTO_DEFINE_BINARY_EFFECTS(TGatherBOp, getSrcMutable(), getOffsetsMutable(), getDstMutable())
+PTO_DEFINE_UNARY_EFFECTS(TImg2ColOp, getSrcMutable(), getDstMutable())
+void TDeinterleaveOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  PTO_ADD_READ(getSrcMutable());
+  PTO_ADD_WRITE(getDst0Mutable());
+  PTO_ADD_WRITE(getDst1Mutable());
+}
+PTO_DEFINE_BINARY_EFFECTS(TInterleaveOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TLogOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TLReluOp, getSrcMutable(), getDstMutable())
 

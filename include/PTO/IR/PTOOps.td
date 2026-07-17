@@ -4178,6 +4178,88 @@ def TGatherBOp : PTO_TOp<"tgatherb", [
   }];
 }
 
+def TImg2ColOp : PTO_TOp<"timg2col", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TIMG2COL(src, dst) image-to-column tile transform";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TDeinterleaveOp : PTO_TOp<"tdeinterleave", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TDEINTERLEAVE(src, dst0, dst1) split interleaved tile data";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst0,
+    PTODpsType:$dst1
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst0 `,` $dst1 `:` qualified(type($dst0) ) `,` qualified(type($dst1) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return ::mlir::MutableOperandRange(getOperation(), 1, 2);
+    }
+  }];
+}
+
+def TInterleaveOp : PTO_TOp<"tinterleave", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TINTERLEAVE(src0, src1, dst) combine two tiles into interleaved tile data";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TLogOp : PTO_TOp<"tlog", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,

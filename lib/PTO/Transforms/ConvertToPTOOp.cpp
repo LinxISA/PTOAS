@@ -54,7 +54,7 @@ std::optional<Value> getLeftPadNum(PatternRewriter &rewriter,
       auto offsets = subviewOp.getMixedOffsets();
       auto offset = offsets[offsets.size() - 1];
       Value offsetValue =
-          offset.is<Value>()
+          llvm::isa<Value>(offset)
               ? dyn_cast<Value>(offset)
               : rewriter.create<arith::ConstantIndexOp>(
                     subviewOp->getLoc(), getConstantIntValue(offset).value());
@@ -199,7 +199,7 @@ void ConvertToPTOOpPass::runOnOperation() {
   moduleOp->walk([&](func::FuncOp funcOp) {
     RewritePatternSet patterns(ctx);
     populatePTOOpRewritingRule(patterns);
-    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+    (void)applyPatternsGreedily(funcOp, std::move(patterns));
   });
 }
 

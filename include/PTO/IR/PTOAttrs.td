@@ -602,16 +602,6 @@ def TileBufConfigAttr : AttrDef<PTO_Dialect, "TileBufConfig"> {
 
   let hasCustomAssemblyFormat = 1;
 
-  let builders = [
-    AttrBuilder<(ins
-      "BLayoutAttr":$bLayout,
-      "SLayoutAttr":$sLayout,
-      "mlir::IntegerAttr":$sFractalSize,
-      "PadValueAttr":$pad,
-      "CompactModeAttr":$compactMode
-    )>
-  ];
-
   let extraClassDeclaration = [{
     static TileBufConfigAttr getDefault(MLIRContext *ctx);
     bool isDefault() const;

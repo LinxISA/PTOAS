@@ -17,9 +17,17 @@ namespace {
 constexpr unsigned kBitsPerByte = 8;
 } // namespace
 
+bool mlir::pto::isPTOFloat8E4M3FamilyType(Type t) {
+  return isa<Float8E4M3Type, Float8E4M3FNType, Float8E4M3FNUZType,
+             Float8E4M3B11FNUZType>(t);
+}
+
+bool mlir::pto::isPTOFloat8E5M2FamilyType(Type t) {
+  return isa<Float8E5M2Type, Float8E5M2FNUZType>(t);
+}
+
 bool mlir::pto::isPTOFloat8Type(Type t) {
-  return t.isFloat8E4M3() || t.isFloat8E4M3FN() || t.isFloat8E4M3FNUZ() ||
-         t.isFloat8E4M3B11FNUZ() || t.isFloat8E5M2() || t.isFloat8E5M2FNUZ();
+  return isPTOFloat8E4M3FamilyType(t) || isPTOFloat8E5M2FamilyType(t);
 }
 
 bool mlir::pto::isPTOHiFloat8Type(Type t) { return isa<HiF8Type>(t); }

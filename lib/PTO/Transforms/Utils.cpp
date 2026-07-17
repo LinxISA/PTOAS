@@ -106,12 +106,10 @@ std::optional<std::pair<Value, Value>> getOperationAliasInfo(Operation *op) {
                  dyn_cast<memref::ExtractStridedMetadataOp>(op)) {
     return std::make_pair(extractStridedMetadataOp.getBaseBuffer(),
                           extractStridedMetadataOp.getViewSource());
-  } else if (auto toMemrefOp = dyn_cast<bufferization::ToMemrefOp>(op)) {
-    return std::make_pair(toMemrefOp.getResult(), toMemrefOp.getOperand());
+  } else if (auto toBufferOp = dyn_cast<bufferization::ToBufferOp>(op)) {
+    return std::make_pair(toBufferOp.getBuffer(), toBufferOp.getTensor());
   } else if (auto toTensorOp = dyn_cast<bufferization::ToTensorOp>(op)) {
-    return std::make_pair(toTensorOp.getResult(), toTensorOp.getOperand());
-  } else if (auto toMemrefOp = dyn_cast<bufferization::ToMemrefOp>(op)) {
-    return std::make_pair(toMemrefOp.getResult(), toMemrefOp.getOperand());
+    return std::make_pair(toTensorOp.getResult(), toTensorOp.getBuffer());
   }
   return std::nullopt;
 }

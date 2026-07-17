@@ -44,9 +44,8 @@ PIPE mlir::pto::mapSyncOpTypeToPipe(SyncOpType opType) {
   case SyncOpType::TVEC:
   case SyncOpType::TVECWAIT_EVENT:
     return PIPE::PIPE_V;
-  default:
-    return PIPE::PIPE_UNASSIGNED;
   }
+  return PIPE::PIPE_UNASSIGNED;
 }
 
 bool mlir::pto::isConcreteSyncPipe(PIPE pipe) {

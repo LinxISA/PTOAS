@@ -12,7 +12,6 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/InitAllDialects.h"
-#include "mlir/InitAllPasses.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -22,8 +21,12 @@
 #include <cstring>
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Target/Cpp/CppEmitter.h"
+#include "mlir/Transforms/Passes.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/FileSystem.h" // [Fix] Required for OF_None
@@ -946,9 +949,10 @@ int main(int argc, char **argv) {
     }
   }
 
-  // Register all passes so that --mlir-print-ir-after/before can resolve
-  // pass names like 'cse' at option-parse time.
-  mlir::registerAllPasses();
+  // Register the generic transform passes used by the PTO pipeline (for
+  // example cse/canonicalize) without pulling every optional MLIR backend into
+  // this standalone tool.
+  mlir::registerTransformsPasses();
   registerPTOPasses();
 
   // Parse command line options

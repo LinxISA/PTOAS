@@ -25,7 +25,7 @@ namespace {
 
 static LogicalResult bufferizeDestinationStyleOpInterface(
     RewriterBase &rewriter, DestinationStyleOpInterface op,
-    const BufferizationOptions &options,
+    const BufferizationOptions &options, BufferizationState &state,
     bool supportMixedTensorBufferMode = true);
 
 template <typename Derived, typename OpTy,
@@ -33,9 +33,10 @@ template <typename Derived, typename OpTy,
 struct PTODpsOpInterfaceBase
     : public DstBufferizableOpInterfaceExternalModel<Derived, OpTy> {
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
-                          const BufferizationOptions &options) const {
+                          const BufferizationOptions &options,
+                          BufferizationState &state) const {
     return bufferizeDestinationStyleOpInterface(
-        rewriter, cast<DestinationStyleOpInterface>(op), options,
+        rewriter, cast<DestinationStyleOpInterface>(op), options, state,
         supportMixedTensorBufferMode);
   }
 };
@@ -59,7 +60,8 @@ struct PTOReadWriteDpsOpInterfaceBase
 /// Generic conversion for any DestinationStyleOpInterface on tensors.
 static LogicalResult bufferizeDestinationStyleOpInterface(
     RewriterBase &rewriter, DestinationStyleOpInterface op,
-    const BufferizationOptions &options, bool supportMixedTensorBufferMode) {
+    const BufferizationOptions &options, BufferizationState &state,
+    bool supportMixedTensorBufferMode) {
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(rewriter);
   rewriter.setInsertionPoint(op);
@@ -83,7 +85,8 @@ static LogicalResult bufferizeDestinationStyleOpInterface(
       newOperands.push_back(opOperand.get());
       continue;
     }
-    FailureOr<Value> buffer = getBuffer(rewriter, opOperand.get(), options);
+    FailureOr<Value> buffer =
+        getBuffer(rewriter, opOperand.get(), options, state);
     if (failed(buffer)) {
       return failure();
     }
@@ -95,7 +98,7 @@ static LogicalResult bufferizeDestinationStyleOpInterface(
   for (OpResult opResult : op->getOpResults()) {
     OpOperand *opOperand = op.getDpsInitOperand(opResult.getResultNumber());
     FailureOr<Value> resultBuffer =
-        getBuffer(rewriter, opOperand->get(), options);
+        getBuffer(rewriter, opOperand->get(), options, state);
     if (failed(resultBuffer)) {
       return failure();
     }
@@ -120,13 +123,15 @@ struct PTOStoreOpInterface
     : public DstBufferizableOpInterfaceExternalModel<PTOStoreOpInterface,
                                                      pto::TStoreOp> {
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
-                          const BufferizationOptions &options) const {
+                          const BufferizationOptions &options,
+                          BufferizationState &state) const {
     auto dpsOp = cast<DestinationStyleOpInterface>(op);
     if (dpsOp.hasPureBufferSemantics()) {
       return success();
     }
     if (dpsOp.hasPureTensorSemantics()) {
-      return bufferizeDestinationStyleOpInterface(rewriter, dpsOp, options);
+      return bufferizeDestinationStyleOpInterface(rewriter, dpsOp, options,
+                                                 state);
     }
     // We only handle the case where fixpipe op's input is a tensor from
     // mmad and fixpipe op's output is a memref type.
@@ -141,7 +146,8 @@ struct PTOStoreOpInterface
     OpBuilder::InsertionGuard g(rewriter);
     rewriter.setInsertionPoint(op);
 
-    FailureOr<Value> buffer = getBuffer(rewriter, srcOp->get(), options);
+    FailureOr<Value> buffer =
+        getBuffer(rewriter, srcOp->get(), options, state);
     if (failed(buffer)) {
       return failure();
     }

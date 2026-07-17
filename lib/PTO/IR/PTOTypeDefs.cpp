@@ -550,9 +550,8 @@ static llvm::StringRef stringifyLocFromPad(mlir::Attribute pad) {
     case PadValue::Zero: return "1";
     case PadValue::Max: return "2";
     case PadValue::Min: return "3";
-    default:
-      return "9999";
   }
+  return "9999";
 }
 
 static llvm::StringRef stringifyCompactModeInt(mlir::Attribute compactMode) {
@@ -567,9 +566,8 @@ static llvm::StringRef stringifyCompactModeInt(mlir::Attribute compactMode) {
     return "1";
   case CompactMode::RowPlusOne:
     return "2";
-  default:
-    return "9999";
   }
+  return "9999";
 }
 
 static void printTileBufDim(AsmPrinter &printer, int64_t dim) {

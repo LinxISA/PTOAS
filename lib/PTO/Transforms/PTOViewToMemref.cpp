@@ -1036,7 +1036,7 @@ static LogicalResult lowerSubViewOps(func::FuncOp func, MLIRContext *ctx) {
 
     SmallVector<int64_t> srcStrides;
     int64_t srcOffset = ShapedType::kDynamic;
-    if (failed(getStridesAndOffset(srcMrTy, srcStrides, srcOffset)))
+    if (failed(srcMrTy.getStridesAndOffset(srcStrides, srcOffset)))
       srcStrides = computeCompactStrides(srcMrTy.getShape());
 
     // Keep parent physical shape + strides for bound tile semantics.

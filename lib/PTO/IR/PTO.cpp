@@ -110,7 +110,8 @@ static bool isTileLikeType(Type ty);
 static SmallVector<int64_t, 4> getShapeVec(Type ty);
 static SmallVector<int64_t, 4> getValidShapeVec(Type ty);
 static SmallVector<int64_t, 4> getValidShapeVec(Value value);
-static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name);
+static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name,
+                                         bool allowLowPrecision = false);
 static LogicalResult verifyTileBufSameElemType(Operation *op, Type lhs, Type rhs,
                                                StringRef lhsName,
                                                StringRef rhsName);
@@ -132,17 +133,23 @@ static LogicalResult verifyAccTileCommonA2A3(Operation *op, Type ty,
 static LogicalResult verifyAccTileCommonA5(Operation *op, Type ty,
                                            StringRef name);
 static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                           Type dstTy);
+                                           Type dstTy,
+                                           bool allowLowPrecisionInputs = false);
 static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
-                                               Type rhsTy, Type dstTy);
+                                               Type rhsTy, Type dstTy,
+                                               bool allowLowPrecisionInputs);
 static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
-                                             Type rhsTy, Type dstTy);
+                                             Type rhsTy, Type dstTy,
+                                             bool allowLowPrecisionInputs);
 static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                            Type dstTy);
+                                            Type dstTy,
+                                            bool allowLowPrecisionInputs = false);
 static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
-                                                Type rhsTy, Type dstTy);
+                                                Type rhsTy, Type dstTy,
+                                                bool allowLowPrecisionInputs);
 static LogicalResult verifyGemvTileOperandsA5(Operation *op, Type lhsTy,
-                                              Type rhsTy, Type dstTy);
+                                              Type rhsTy, Type dstTy,
+                                              bool allowLowPrecisionInputs);
 static LogicalResult verifyMatBiasTile(Operation *op, Type biasTy, Type dstTy,
                                        bool requireFloatBias = false);
 static LogicalResult verifyMatBiasTileA2A3(Operation *op, Type biasTy, Type dstTy,
@@ -3035,19 +3042,20 @@ static LogicalResult verifyMGatherMScatterIdxTile(Operation *op, Type ty,
   return success();
 }
 
-static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name) {
+static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name,
+                                         bool allowLowPrecision) {
   auto tb = dyn_cast<pto::TileBufType>(ty);
   if (tb) {
     if (tb.getRank() != 2)
       return op->emitOpError() << "expects " << name << " to be a rank-2 tile_buf";
     Type elemTy = tb.getElementType();
-    if (isPTOLowPrecisionType(elemTy))
+    if (!allowLowPrecision && isPTOLowPrecisionType(elemTy))
       return op->emitOpError() << name << ": dtype " << elemTy
                                << " is not supported by this op yet";
   } else if (auto mr = dyn_cast<MemRefType>(ty)) {
     if (mr.getRank() != 2)
       return op->emitOpError() << "expects " << name << " to be a rank-2 memref";
-    if (isPTOLowPrecisionType(mr.getElementType()))
+    if (!allowLowPrecision && isPTOLowPrecisionType(mr.getElementType()))
       return op->emitOpError() << name << ": dtype " << mr.getElementType()
                                << " is not supported by this op yet";
   } else {
@@ -3510,9 +3518,10 @@ static LogicalResult verifyAccTileCommon(Operation *op, Type ty, StringRef name)
 }
 
 static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
-                                               Type rhsTy, Type dstTy) {
-  if (failed(verifyTileBufCommon(op, lhsTy, "lhs")) ||
-      failed(verifyTileBufCommon(op, rhsTy, "rhs")) ||
+                                               Type rhsTy, Type dstTy,
+                                               bool allowLowPrecisionInputs) {
+  if (failed(verifyTileBufCommon(op, lhsTy, "lhs", allowLowPrecisionInputs)) ||
+      failed(verifyTileBufCommon(op, rhsTy, "rhs", allowLowPrecisionInputs)) ||
       failed(verifyAccTileCommon(op, dstTy, "dst")))
     return failure();
   auto lhsSpace = getPTOMemorySpaceEnum(lhsTy);
@@ -3545,8 +3554,10 @@ static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
 }
 
 static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
-                                             Type rhsTy, Type dstTy) {
-  if (failed(verifyMatTileOperandsA2A3(op, lhsTy, rhsTy, dstTy)))
+                                             Type rhsTy, Type dstTy,
+                                             bool allowLowPrecisionInputs) {
+  if (failed(verifyMatTileOperandsA2A3(op, lhsTy, rhsTy, dstTy,
+                                      allowLowPrecisionInputs)))
     return failure();
 
   auto lhsTb = mlir::dyn_cast<pto::TileBufType>(lhsTy);
@@ -3572,20 +3583,24 @@ static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
 }
 
 static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                           Type dstTy) {
+                                           Type dstTy,
+                                           bool allowLowPrecisionInputs) {
   switch (getVerifierTargetArch(op)) {
   case VerifierTargetArch::A2A3:
-    return verifyMatTileOperandsA2A3(op, lhsTy, rhsTy, dstTy);
+    return verifyMatTileOperandsA2A3(op, lhsTy, rhsTy, dstTy,
+                                     allowLowPrecisionInputs);
   case VerifierTargetArch::A5:
-    return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy);
+    return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy,
+                                   allowLowPrecisionInputs);
   }
   return failure();
 }
 
 static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
-                                                Type rhsTy, Type dstTy) {
-  if (failed(verifyTileBufCommon(op, lhsTy, "lhs")) ||
-      failed(verifyTileBufCommon(op, rhsTy, "rhs")) ||
+                                                Type rhsTy, Type dstTy,
+                                                bool allowLowPrecisionInputs) {
+  if (failed(verifyTileBufCommon(op, lhsTy, "lhs", allowLowPrecisionInputs)) ||
+      failed(verifyTileBufCommon(op, rhsTy, "rhs", allowLowPrecisionInputs)) ||
       failed(verifyAccTileCommon(op, dstTy, "dst")))
     return failure();
 
@@ -3619,19 +3634,25 @@ static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
 }
 
 static LogicalResult verifyGemvTileOperandsA5(Operation *op, Type lhsTy,
-                                              Type rhsTy, Type dstTy) {
-  if (failed(verifyGemvTileOperandsA2A3(op, lhsTy, rhsTy, dstTy)))
+                                              Type rhsTy, Type dstTy,
+                                              bool allowLowPrecisionInputs) {
+  if (failed(verifyGemvTileOperandsA2A3(op, lhsTy, rhsTy, dstTy,
+                                       allowLowPrecisionInputs)))
     return failure();
-  return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy);
+  return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy,
+                                 allowLowPrecisionInputs);
 }
 
 static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                            Type dstTy) {
+                                            Type dstTy,
+                                            bool allowLowPrecisionInputs) {
   switch (getVerifierTargetArch(op)) {
   case VerifierTargetArch::A2A3:
-    return verifyGemvTileOperandsA2A3(op, lhsTy, rhsTy, dstTy);
+    return verifyGemvTileOperandsA2A3(op, lhsTy, rhsTy, dstTy,
+                                      allowLowPrecisionInputs);
   case VerifierTargetArch::A5:
-    return verifyGemvTileOperandsA5(op, lhsTy, rhsTy, dstTy);
+    return verifyGemvTileOperandsA5(op, lhsTy, rhsTy, dstTy,
+                                    allowLowPrecisionInputs);
   }
   return failure();
 }
@@ -6013,7 +6034,8 @@ LogicalResult TGemvMxOp::verify() {
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
                                              getB().getType(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())))
+                                      getDst().getType(),
+                                      /*allowLowPrecisionInputs=*/true)))
       return failure();
     if (failed(verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
                                     getDst().getType(), "a", "b", "dst")))
@@ -6035,7 +6057,8 @@ LogicalResult TGemvMxAccOp::verify() {
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
                                              getB().getType(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())))
+                                      getDst().getType(),
+                                      /*allowLowPrecisionInputs=*/true)))
       return failure();
     if (failed(verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
                                     getDst().getType(), "a", "b", "dst")))
@@ -6061,7 +6084,8 @@ LogicalResult TGemvMxBiasOp::verify() {
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
                                              getB().getType(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())) ||
+                                      getDst().getType(),
+                                      /*allowLowPrecisionInputs=*/true)) ||
         failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType(),
                                  /*requireFloatBias=*/true)))
       return failure();

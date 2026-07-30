@@ -462,7 +462,8 @@ readKnownOperandIds(BuildCtx &bc, Reader &r, uint16_t opcode, uint8_t variant,
                                size_t(imms.n2));
   case 0x04:
     return readValueIds(r, ((imms.optMask & 0x1) ? 1 : 0) +
-                               ((imms.optMask & 0x2) ? 1 : 0));
+                               ((imms.optMask & 0x2) ? 1 : 0) +
+                               ((imms.optMask & 0x4) ? 1 : 0));
   default:
     (void)bc;
     throw std::runtime_error("unknown operand_mode");
@@ -475,7 +476,9 @@ materializeOperands(BuildCtx &bc, llvm::ArrayRef<uint64_t> operandIds) {
   operands.reserve(operandIds.size());
   for (uint64_t valueId : operandIds) {
     if (valueId >= bc.values.size())
-      throw std::runtime_error("operand value_id out of range");
+      throw std::runtime_error("operand value_id " + std::to_string(valueId) +
+                               " out of range for " +
+                               std::to_string(bc.values.size()) + " values");
     operands.push_back(bc.values[valueId]);
   }
   return operands;
@@ -489,6 +492,8 @@ static mlir::Operation *buildGenericOpFromReader(BuildCtx &bc, Reader &r,
   if (nameSid >= bc.strings->size())
     throw std::runtime_error("bad op_name sid");
   std::string opName = (*bc.strings)[nameSid];
+  if (debugEnabled())
+    llvm::errs() << "[ptobc]      generic " << opName << "\n";
 
   uint64_t nres = r.readULEB();
   llvm::SmallVector<mlir::Type, 4> resultTypes;
@@ -553,6 +558,8 @@ static mlir::Operation *buildKnownOpFromReader(BuildCtx &bc, Reader &r,
   const auto *info = ptobc::v0::lookupByOpcode(opcode);
   if (!info)
     throw std::runtime_error("missing opcode schema");
+  if (debugEnabled())
+    llvm::errs() << "[ptobc]      known " << info->name << "\n";
 
   uint8_t variant = info->has_variant_u8 ? r.readU8() : 0;
   KnownOpImmediates imms = readKnownOpImmediates(r, *info);

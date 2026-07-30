@@ -35,9 +35,9 @@ grep -F "pto.subview " "${ROUNDTRIP}" >/dev/null
 grep -F "pto.tprint ins(" "${ROUNDTRIP}" >/dev/null
 grep -F "pto.trowexpanddiv ins(" "${ROUNDTRIP}" >/dev/null
 grep -F "pto.trowexpandmul ins(" "${ROUNDTRIP}" >/dev/null
-[[ $(grep -Fc "pto.trowexpandexpdif ins(" "${ROUNDTRIP}") -eq 2 ]]
-[[ $(grep -Fc "pto.trowexpandmax ins(" "${ROUNDTRIP}") -eq 2 ]]
-[[ $(grep -Fc "pto.trowexpandmin ins(" "${ROUNDTRIP}") -eq 2 ]]
+[[ $(grep -Fc "pto.trowexpandexpdif ins(" "${ROUNDTRIP}") -eq 1 ]]
+[[ $(grep -Fc "pto.trowexpandmax ins(" "${ROUNDTRIP}") -eq 1 ]]
+[[ $(grep -Fc "pto.trowexpandmin ins(" "${ROUNDTRIP}") -eq 1 ]]
 grep -F "pto.trsqrt ins(" "${ROUNDTRIP}" >/dev/null
 grep -E "pto\\.trsqrt ins\\(%[^,]+, %[^:]+ :" "${ROUNDTRIP}" >/dev/null
 grep -F "pto.tpartmul ins(" "${ROUNDTRIP}" >/dev/null

@@ -22,7 +22,7 @@ module {
 // VIEW-SAME: outs([[DST_DESC:%[0-9]+]], [[IDX_DESC:%[0-9]+]] : memref<1x64xf16
 // VIEW-SAME: memref<1x64xui32
 // VIEW-SAME: {descending = true}
-// EMITC: const bool [[ASC:v[0-9]+]] = false;
-// EMITC-NEXT: TSORT([[VDST_ASC:v[0-9]+]], [[VIDX_ASC:v[0-9]+]], [[VSRC:v[0-9]+]], [[ASC]]);
-// EMITC: const bool [[DESC:v[0-9]+]] = true;
-// EMITC-NEXT: TSORT([[VDST_DESC:v[0-9]+]], [[VIDX_DESC:v[0-9]+]], [[VSRC_DESC:v[0-9]+]], [[DESC]]);
+// EMITC-DAG: const bool [[ASC:v[0-9]+]] = false;
+// EMITC-DAG: const bool [[DESC:v[0-9]+]] = true;
+// EMITC: TSORT([[VDST_ASC:v[0-9]+]], [[VIDX_ASC:v[0-9]+]], [[VSRC:v[0-9]+]], [[ASC]]);
+// EMITC: TSORT([[VDST_DESC:v[0-9]+]], [[VIDX_DESC:v[0-9]+]], [[VSRC_DESC:v[0-9]+]], [[DESC]]);

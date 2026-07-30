@@ -13,4 +13,6 @@ module {
   }
 }
 
-// CHECK: error: 'pto.tgemv.mx' op lhs: dtype 'f8E4M3' is not supported by this op yet
+// MX operand verification accepts FP8 function arguments. EmitC lowering still
+// stops when function-argument materialization tries to allocate an FP8 tile.
+// CHECK: error: 'pto.alloc_tile' op result dtype 'f8E4M3' is not supported by pto.alloc_tile yet

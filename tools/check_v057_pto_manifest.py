@@ -18,8 +18,10 @@ dialect-only boundary.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -27,10 +29,22 @@ EXPECTED_LOCK = {
     "release": "0.57.1",
     "encoding_abi": "pto-isa-0.57.1-mode-function-v1",
     "encoding_projection_sha256": "34f6602cf29ea6363d41d896111dad4de0f70ec36517138aa89e292857909da4",
-    "content_sha256": "45575361fa5b180c454500360a3e4e75d34fba663e60f3741ef38dc9a514bc13",
-    "release_manifest_sha256": "6b72e6242bb971ddc14335884f560e2e97b3c6f8acd7ab0ee2e8b189ca8e243d",
-    "source_commit": "b30ed3df4f1a7fd0c2d19b02a90b049cb452fd87",
+    "content_sha256": "5d75f42d191478aef9fa1ef1d73fb18dc48cf83468dc79c9054cb4ae21387354",
+    "release_manifest_sha256": "d0aa98754622d7949e55cccd576dd3da74bceb8c060e853cccf1f84c13b4438a",
+    "source_commit": "0141ec89ff1e222adfe1df55610f414ca0c8c086",
+    "hardware_profile_path": "spec/hardware-conformance-profile.json",
+    "hardware_profile_id": "pto-hardware-numeric-0.57.1-ieee-v1",
+    "hardware_profile_sha256": "becfbefcc7a31408e5e5293802493f833f68a2fccebb3f9e8008d8b9f4e7658c",
+    "numeric_vectors_path": "spec/evidence/pto-isa-0571-hardware-numeric-vectors.json",
+    "numeric_vectors_sha256": "b9f908deb9cfec412388e95f4532563cf4e462032b43d15996f0f7b4b93b4ec9",
+    "command_forms_path": "spec/catalog/command-forms.json",
+    "command_forms_sha256": "c53db18b30fbf53676f1d733e215122f65ad681a778ae0728cc6c4a3674df61e",
+    "command_forms_count": 99,
+    "tile_operations_path": "spec/catalog/tile-operations.json",
+    "tile_operations_sha256": "2a49616fbbd34ee4ff00b971d56de6dd7b8c1698fa7312db0b20b6119965bc26",
     "tile_operation_count": 120,
+    "release_manifest_path": "spec/release-manifest.json",
+    "source_repository": "https://github.com/PTO-ISA/pto-spec.git",
 }
 
 DELETED_ACTIVE_NAMES = {
@@ -50,21 +64,135 @@ def normalize(name: str) -> str:
     return name.replace(".", "").replace("_", "").upper()
 
 
-def load_lock(ptoas_root: Path) -> None:
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_lock(ptoas_root: Path) -> dict:
     lock_path = ptoas_root / "tools/pto_isa_v0_57_1_lock.json"
     lock = json.loads(lock_path.read_text())
     errors = []
     for key in ("release", "encoding_abi", "encoding_projection_sha256", "content_sha256"):
         if lock.get(key) != EXPECTED_LOCK[key]:
             errors.append(f"{key}: expected {EXPECTED_LOCK[key]}, got {lock.get(key)}")
-    if lock.get("release_manifest", {}).get("sha256") != EXPECTED_LOCK["release_manifest_sha256"]:
-        errors.append("release_manifest.sha256 mismatch")
-    if lock.get("source", {}).get("commit") != EXPECTED_LOCK["source_commit"]:
-        errors.append("source.commit mismatch")
-    if lock.get("catalogs", {}).get("tile_operations", {}).get("count") != EXPECTED_LOCK["tile_operation_count"]:
-        errors.append("catalogs.tile_operations.count mismatch")
+    release_manifest = lock.get("release_manifest", {})
+    for key, expected_key in (
+        ("path", "release_manifest_path"),
+        ("sha256", "release_manifest_sha256"),
+    ):
+        if release_manifest.get(key) != EXPECTED_LOCK[expected_key]:
+            errors.append(f"release_manifest.{key} mismatch")
+    source = lock.get("source", {})
+    for key, expected_key in (
+        ("commit", "source_commit"),
+        ("repository", "source_repository"),
+    ):
+        if source.get(key) != EXPECTED_LOCK[expected_key]:
+            errors.append(f"source.{key} mismatch")
+    hardware_profile = lock.get("hardware_conformance_profile", {})
+    for key, expected_key in (
+        ("path", "hardware_profile_path"),
+        ("profile_id", "hardware_profile_id"),
+        ("sha256", "hardware_profile_sha256"),
+    ):
+        if hardware_profile.get(key) != EXPECTED_LOCK[expected_key]:
+            errors.append(f"hardware_conformance_profile.{key} mismatch")
+    numeric_vectors = lock.get("numeric_conformance_vectors", {})
+    for key, expected_key in (
+        ("path", "numeric_vectors_path"),
+        ("sha256", "numeric_vectors_sha256"),
+    ):
+        if numeric_vectors.get(key) != EXPECTED_LOCK[expected_key]:
+            errors.append(f"numeric_conformance_vectors.{key} mismatch")
+    catalogs = lock.get("catalogs", {})
+    for catalog, expected_keys in (
+        (
+            "command_forms",
+            ("command_forms_path", "command_forms_sha256", "command_forms_count"),
+        ),
+        (
+            "tile_operations",
+            ("tile_operations_path", "tile_operations_sha256", "tile_operation_count"),
+        ),
+    ):
+        entry = catalogs.get(catalog, {})
+        for key, expected_key in zip(("path", "sha256", "count"), expected_keys):
+            if entry.get(key) != EXPECTED_LOCK[expected_key]:
+                errors.append(f"catalogs.{catalog}.{key} mismatch")
     if errors:
         raise SystemExit("unexpected PTO ISA 0.57.1 lock:\n  " + "\n  ".join(errors))
+    return lock
+
+
+def validate_source_tree(source_root: Path, lock: dict) -> None:
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(source_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"cannot resolve PTO ISA source commit in {source_root}: {error}")
+    if head != lock["source"]["commit"]:
+        raise SystemExit(
+            f"PTO ISA source commit mismatch: expected {lock['source']['commit']}, got {head}"
+        )
+
+    pinned_files = (
+        lock["catalogs"]["command_forms"],
+        lock["catalogs"]["tile_operations"],
+        lock["release_manifest"],
+        lock["hardware_conformance_profile"],
+        lock["numeric_conformance_vectors"],
+    )
+    for entry in pinned_files:
+        path = source_root / entry["path"]
+        if not path.is_file():
+            raise SystemExit(f"missing pinned PTO ISA source file: {path}")
+        actual = sha256(path)
+        if actual != entry["sha256"]:
+            raise SystemExit(
+                f"PTO ISA source hash mismatch for {entry['path']}: "
+                f"expected {entry['sha256']}, got {actual}"
+            )
+
+    manifest = json.loads((source_root / lock["release_manifest"]["path"]).read_text())
+    expected_manifest_fields = {
+        "release": lock["release"],
+        "encoding_abi": lock["encoding_abi"],
+        "encoding_projection_sha256": lock["encoding_projection_sha256"],
+        "content_sha256": lock["content_sha256"],
+    }
+    for key, expected in expected_manifest_fields.items():
+        if manifest.get(key) != expected:
+            raise SystemExit(
+                f"PTO ISA release manifest {key} mismatch: "
+                f"expected {expected}, got {manifest.get(key)}"
+            )
+    hardware = manifest.get("hardware_conformance_profile", {})
+    for key in ("path", "profile_id", "sha256"):
+        if hardware.get(key) != lock["hardware_conformance_profile"][key]:
+            raise SystemExit(f"PTO ISA release manifest hardware profile {key} mismatch")
+    if hardware.get("evidence") != lock["numeric_conformance_vectors"]["path"]:
+        raise SystemExit("PTO ISA release manifest hardware numeric evidence path mismatch")
+    owned_hashes = {
+        entry.get("path"): entry.get("sha256")
+        for entry in manifest.get("owned_artifacts", [])
+    }
+    numeric_vectors = lock["numeric_conformance_vectors"]
+    if owned_hashes.get(numeric_vectors["path"]) != numeric_vectors["sha256"]:
+        raise SystemExit("PTO ISA release manifest hardware numeric evidence hash mismatch")
+    if (
+        manifest.get("catalog_counts", {}).get("tile_operations_total")
+        != lock["catalogs"]["tile_operations"]["count"]
+    ):
+        raise SystemExit("PTO ISA release manifest tile operation count mismatch")
+    if (
+        manifest.get("catalog_counts", {}).get("command_forms")
+        != lock["catalogs"]["command_forms"]["count"]
+    ):
+        raise SystemExit("PTO ISA release manifest command form count mismatch")
 
 
 def load_manifest(linx_root: Path) -> dict[str, dict]:
@@ -140,10 +268,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ptoas-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--linx-root", type=Path)
+    parser.add_argument(
+        "--pto-spec-root",
+        type=Path,
+        help="optionally verify every pinned identity against a PTO-ISA/pto-spec checkout",
+    )
     args = parser.parse_args()
 
     ptoas_root = args.ptoas_root.resolve()
-    load_lock(ptoas_root)
+    lock = load_lock(ptoas_root)
+    if args.pto_spec_root is not None:
+        validate_source_tree(args.pto_spec_root.resolve(), lock)
     expected_public, expected_dialect_only = load_expected_contracts(ptoas_root)
     ptoas_ops = load_ptoas_ops(ptoas_root)
 
@@ -192,7 +327,8 @@ def main() -> int:
         print(
             "PTOAS v0.57.1 PTO lock/dialect check OK: all 120 public "
             f"operation argument contracts and {len(expected_dialect_only)} explicit "
-            "dialect-only contracts match"
+            "dialect-only contracts match; hardware numeric profile/vectors are "
+            "identity metadata only (execution conformance not evaluated)"
         )
         return 0
 
@@ -232,7 +368,9 @@ def main() -> int:
     print(
         "PTOAS v0.57.1 PTO manifest contract check OK: "
         f"all {len(manifest)} public operations match exact Linx roles/arity; "
-        f"{len(expected_dialect_only)} dialect-only operations are explicitly bounded"
+        f"{len(expected_dialect_only)} dialect-only operations are explicitly bounded; "
+        "hardware numeric profile/vectors are identity metadata only "
+        "(execution conformance not evaluated)"
     )
     return 0
 

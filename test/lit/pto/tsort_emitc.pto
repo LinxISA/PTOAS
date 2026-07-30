@@ -1,0 +1,28 @@
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-view-to-memref %s 2>&1 | FileCheck %s --check-prefix=VIEW
+// RUN: ptoas --pto-arch=a3 %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func @tsort_forms() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_asc = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %idx_asc = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tsort ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst_asc, %idx_asc : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    %dst_desc = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %idx_desc = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tsort ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst_desc, %idx_desc : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {descending = true}
+    return
+  }
+}
+
+// VIEW: pto.tsort ins([[SRC:%[0-9]+]] : memref<1x64xf16
+// VIEW-SAME: outs([[DST_ASC:%[0-9]+]], [[IDX_ASC:%[0-9]+]] : memref<1x64xf16
+// VIEW-SAME: memref<1x64xui32
+// VIEW: pto.tsort ins([[SRC]] : memref<1x64xf16
+// VIEW-SAME: outs([[DST_DESC:%[0-9]+]], [[IDX_DESC:%[0-9]+]] : memref<1x64xf16
+// VIEW-SAME: memref<1x64xui32
+// VIEW-SAME: {descending = true}
+// EMITC: const bool [[ASC:v[0-9]+]] = false;
+// EMITC-NEXT: TSORT([[VDST_ASC:v[0-9]+]], [[VIDX_ASC:v[0-9]+]], [[VSRC:v[0-9]+]], [[ASC]]);
+// EMITC: const bool [[DESC:v[0-9]+]] = true;
+// EMITC-NEXT: TSORT([[VDST_DESC:v[0-9]+]], [[VIDX_DESC:v[0-9]+]], [[VSRC_DESC:v[0-9]+]], [[DESC]]);

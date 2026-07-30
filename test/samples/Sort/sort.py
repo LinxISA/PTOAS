@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint
+from mlir.ir import BoolAttr, Context, Location, Module, InsertionPoint
 from mlir.dialects import func, arith, pto
 from mlir.ir import F32Type, IntegerType, IndexType
 
@@ -41,7 +41,7 @@ def build():
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_u32], [])
             with InsertionPoint(m.body):
-                fn = func.FuncOp("sort32_kernel", fn_ty)
+                fn = func.FuncOp("sort_kernel", fn_ty)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
@@ -60,18 +60,16 @@ def build():
                 sv2 = pto.PartitionViewOp(tile_view_u32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb_src = pto.AllocTileOp(tile_buf_f32).result
-                tb_stage0 = pto.AllocTileOp(tile_buf_f32).result
                 tb_dst = pto.AllocTileOp(tile_buf_f32).result
                 tb_idx = pto.AllocTileOp(tile_buf_u32).result
-                tb_tmp = pto.AllocTileOp(tile_buf_f32).result
 
                 pto.TLoadOp(None, sv0, tb_src)
-                pto.TLoadOp(None, sv2, tb_idx)
-
-                # Exercise the no-tmp form first.
-                pto.TSort32Op(src=tb_src, idx=tb_idx, dst=tb_stage0)
-                # Then exercise the tmp-taking form using the first result as input.
-                pto.TSort32Op(src=tb_stage0, idx=tb_idx, dst=tb_dst, tmp=tb_tmp)
+                pto.TSortOp(
+                    src=tb_src,
+                    dst=tb_dst,
+                    dst_indices=tb_idx,
+                    descending=BoolAttr.get(True),
+                )
 
                 pto.TStoreOp(None, tb_dst, sv1)
                 pto.TStoreOp(None, tb_idx, sv2)

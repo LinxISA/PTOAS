@@ -1,0 +1,12 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @tprefetch_rejects_negative_byte_count() {
+    %addr = arith.constant 4096 : i64
+    %bytes = arith.constant -1 : index
+    pto.tprefetch ins(%addr, %bytes : i64, index)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tprefetch' op expects a static byte_count in the inclusive range 0..262144

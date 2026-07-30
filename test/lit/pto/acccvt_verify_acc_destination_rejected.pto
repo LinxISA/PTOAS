@@ -1,0 +1,11 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @acccvt_rejects_explicit_acc_destination() {
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.acccvt outs(%dst : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.acccvt' op expects explicit dst to be a publishable tile/memref, not loc=acc; ACCCVT reads ACC implicitly

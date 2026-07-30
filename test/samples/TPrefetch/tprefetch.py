@@ -6,8 +6,8 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, InsertionPoint, Location, Module, IndexType, F16Type
-from mlir.dialects import arith, func, pto
+from mlir.ir import Context, InsertionPoint, IntegerType, Location, Module, IndexType
+from mlir.dialects import func, pto
 
 
 def build():
@@ -16,41 +16,15 @@ def build():
 
         with Location.unknown(ctx):
             module = Module.create()
-            f16 = F16Type.get(ctx)
+            i64 = IntegerType.get_signless(64, ctx)
             idx = IndexType.get(ctx)
-            ptr_f16 = pto.PtrType.get(f16, ctx)
-            tv2_f16 = pto.TensorViewType.get(2, f16, ctx)
-            ptv_16x16 = pto.PartitionTensorViewType.get([16, 16], f16, ctx)
-
-            vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
-            bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
-            sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
-            pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
-            tb_16x16 = pto.TileBufType.get([16, 16], f16, vec, [16, 16], cfg, ctx)
-
-            fn_ty = func.FunctionType.get([ptr_f16, ptr_f16], [])
+            fn_ty = func.FunctionType.get([i64, idx], [])
             with InsertionPoint(module.body):
                 fn = func.FuncOp("tprefetch_kernel", fn_ty)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                c0 = arith.ConstantOp(idx, 0).result
-                c1 = arith.ConstantOp(idx, 1).result
-                c16 = arith.ConstantOp(idx, 16).result
-
-                src_view = pto.MakeTensorViewOp(tv2_f16, entry.arguments[0], [c16, c16], [c16, c1]).result
-                dst_view = pto.MakeTensorViewOp(tv2_f16, entry.arguments[1], [c16, c16], [c16, c1]).result
-                src_part = pto.PartitionViewOp(
-                    ptv_16x16, src_view, offsets=[c0, c0], sizes=[c16, c16]
-                ).result
-                dst_part = pto.PartitionViewOp(
-                    ptv_16x16, dst_view, offsets=[c0, c0], sizes=[c16, c16]
-                ).result
-
-                tile = pto.AllocTileOp(tb_16x16).result
-                pto.TPrefetchOp(src_part, tile)
-                pto.TStoreOp(None, tile, dst_part)
+                pto.TPrefetchOp(entry.arguments[0], entry.arguments[1])
                 func.ReturnOp([])
 
             module.operation.verify()

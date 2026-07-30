@@ -27,6 +27,26 @@ inline constexpr uint8_t kSectionCubeVariant = 0;
 inline constexpr uint8_t kSectionVectorVariant = 1;
 inline constexpr uint8_t kHasVariant = 1;
 
+// Opcode values assigned to operations removed from PTO ISA 0.57.1 remain
+// permanently reserved. They must decode as unknown and must never be reused.
+inline constexpr uint16_t kReservedPtoOpcodes[] = {
+  0x1008, // pto.taddc
+  0x100A, // pto.taddsc
+  0x1026, // pto.tfmod
+  0x1027, // pto.tfmods
+  0x1031, // pto.tlrelu
+  0x1063, // pto.tsort32
+  0x1068, // pto.tsubc
+  0x106A, // pto.tsubsc
+};
+
+inline constexpr bool isReservedPtoOpcode(uint16_t opcode) {
+  for (uint16_t reserved : kReservedPtoOpcodes)
+    if (opcode == reserved)
+      return true;
+  return false;
+}
+
 inline constexpr int kTgemvOperandCount = 3;
 inline constexpr int kTgemvAccOperandCount = 4;
 inline constexpr int kTgemvBiasOperandCount = 4;
@@ -68,9 +88,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1005, "pto.record_event", 0, 0x00, 0x00, 0, 0, 0, 0x02},
   {0x1006, "pto.tabs", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1007, "pto.tadd", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x1008, "pto.taddc", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x1009, "pto.tadds", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x100A, "pto.taddsc", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x100B, "pto.tand", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x100C, "pto.tands", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x100D, "pto.tci", 0, 0x00, 0x00, 2, 0, 0, 0x00},
@@ -98,8 +116,6 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1023, "pto.tfillpad", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1024, "pto.tfillpad_expand", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1025, "pto.tfillpad_inplace", 0, 0x00, 0x00, 2, 0, 0, 0x00},
-  {0x1026, "pto.tfmod", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x1027, "pto.tfmods", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1028, "pto.tgather", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1029, "pto.tgatherb", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x102A, "pto.tgemv", 1, 0x00, 0x01, 0, 0, 0, 0x00},
@@ -109,7 +125,6 @@ inline constexpr OpInfo kOpTable[] = {
   {0x102E, "pto.tinsert_fp", 0, 0x00, 0x00, 5, 0, 0, 0x00},
   {0x102F, "pto.tload", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1030, "pto.tlog", 0, 0x00, 0x00, 2, 0, 0, 0x00},
-  {0x1031, "pto.tlrelu", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1032, "pto.tmatmul", 1, 0x00, 0x01, 0, 0, 0, 0x00},
   {0x1033, "pto.tmatmul.mx", 1, 0x00, 0x01, 0, 0, 0, 0x00},
   {0x1034, "pto.tmax", 0, 0x00, 0x00, 3, 0, 0, 0x00},
@@ -159,14 +174,11 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1060, "pto.tshls", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1061, "pto.tshr", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1062, "pto.tshrs", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x1063, "pto.tsort32", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1064, "pto.tsqrt", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1065, "pto.tstore", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1066, "pto.tstore_fp", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1067, "pto.tsub", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x1068, "pto.tsubc", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x1069, "pto.tsubs", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x106A, "pto.tsubsc", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x106B, "pto.trowexpandsub", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x106C, "pto.ttrans", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x106D, "pto.ttri", 0, 0x00, 0x00, 2, 0, 0, 0x00},
@@ -216,6 +228,11 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1099, "pto.comm.treduce", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x109A, "pto.tpartargmax", 0, 0x00, 0x00, 6, 0, 0, 0x00},
   {0x109B, "pto.tpartargmin", 0, 0x00, 0x00, 6, 0, 0, 0x00},
+  {0x109C, "pto.acccvt", 0, 0x00, 0x00, 1, 0, 0, 0x00},
+  {0x109D, "pto.mgather_mask", 0, 0x00, 0x00, 4, 0, 0, 0x00},
+  {0x109E, "pto.mgather_cas", 0, 0x00, 0x00, 5, 0, 0, 0x00},
+  {0x109F, "pto.mscatter_mask", 0, 0x00, 0x00, 4, 0, 0, 0x00},
+  {0x10A0, "pto.tsort", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x2000, "arith.addi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2001, "arith.ceildivsi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2002, "arith.cmpi", 0, 0x01, 0x00, 2, 1, 0, 0x01},
@@ -234,6 +251,7 @@ inline constexpr OpInfo kOpTable[] = {
 };
 
 inline const OpInfo *lookupByOpcode(uint16_t opcode) {
+  if (isReservedPtoOpcode(opcode)) return nullptr;
   // Binary search on kOpTable (sorted by opcode).
   size_t lo = 0, hi = sizeof(kOpTable) / sizeof(kOpTable[0]);
   while (lo < hi) {
@@ -274,9 +292,9 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.section", 0x0006)
     .Case("pto.tabs", 0x1006)
     .Case("pto.tadd", 0x1007)
-    .Case("pto.taddc", 0x1008)
+    .Case("pto.acccvt", 0x109C)
     .Case("pto.tadds", 0x1009)
-    .Case("pto.taddsc", 0x100A)
+    .Case("pto.mgather_mask", 0x109D)
     .Case("pto.tand", 0x100B)
     .Case("pto.tands", 0x100C)
     .Case("pto.tci", 0x100D)
@@ -304,8 +322,8 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.tfillpad", 0x1023)
     .Case("pto.tfillpad_expand", 0x1024)
     .Case("pto.tfillpad_inplace", 0x1025)
-    .Case("pto.tfmod", 0x1026)
-    .Case("pto.tfmods", 0x1027)
+    .Case("pto.mscatter_mask", 0x109F)
+    .Case("pto.mgather_cas", 0x109E)
     .Case("pto.tgather", 0x1028)
     .Case("pto.tgatherb", 0x1029)
     .Case("pto.tgemv", 0x102A)
@@ -315,7 +333,6 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.tinsert_fp", 0x102E)
     .Case("pto.tload", 0x102F)
     .Case("pto.tlog", 0x1030)
-    .Case("pto.tlrelu", 0x1031)
     .Case("pto.tmatmul", 0x1032)
     .Case("pto.tmatmul.mx", 0x1033)
     .Case("pto.tmax", 0x1034)
@@ -365,14 +382,12 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.tshls", 0x1060)
     .Case("pto.tshr", 0x1061)
     .Case("pto.tshrs", 0x1062)
-    .Case("pto.tsort32", 0x1063)
+    .Case("pto.tsort", 0x10A0)
     .Case("pto.tsqrt", 0x1064)
     .Case("pto.tstore", 0x1065)
     .Case("pto.tstore_fp", 0x1066)
     .Case("pto.tsub", 0x1067)
-    .Case("pto.tsubc", 0x1068)
     .Case("pto.tsubs", 0x1069)
-    .Case("pto.tsubsc", 0x106A)
     .Case("pto.trowexpandsub", 0x106B)
     .Case("pto.ttrans", 0x106C)
     .Case("pto.ttri", 0x106D)
@@ -468,9 +483,9 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.record_event", OpcodeAndVariant{0x1005, 0, 0})
     .Case("pto.tabs", OpcodeAndVariant{0x1006, 0, 0})
     .Case("pto.tadd", OpcodeAndVariant{0x1007, 0, 0})
-    .Case("pto.taddc", OpcodeAndVariant{0x1008, 0, 0})
+    .Case("pto.acccvt", OpcodeAndVariant{0x109C, 0, 0})
     .Case("pto.tadds", OpcodeAndVariant{0x1009, 0, 0})
-    .Case("pto.taddsc", OpcodeAndVariant{0x100A, 0, 0})
+    .Case("pto.mgather_mask", OpcodeAndVariant{0x109D, 0, 0})
     .Case("pto.tand", OpcodeAndVariant{0x100B, 0, 0})
     .Case("pto.tands", OpcodeAndVariant{0x100C, 0, 0})
     .Case("pto.tci", OpcodeAndVariant{0x100D, 0, 0})
@@ -498,8 +513,8 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.tfillpad", OpcodeAndVariant{0x1023, 0, 0})
     .Case("pto.tfillpad_expand", OpcodeAndVariant{0x1024, 0, 0})
     .Case("pto.tfillpad_inplace", OpcodeAndVariant{0x1025, 0, 0})
-    .Case("pto.tfmod", OpcodeAndVariant{0x1026, 0, 0})
-    .Case("pto.tfmods", OpcodeAndVariant{0x1027, 0, 0})
+    .Case("pto.mscatter_mask", OpcodeAndVariant{0x109F, 0, 0})
+    .Case("pto.mgather_cas", OpcodeAndVariant{0x109E, 0, 0})
     .Case("pto.tgather", OpcodeAndVariant{0x1028, 0, 0})
     .Case("pto.tgatherb", OpcodeAndVariant{0x1029, 0, 0})
     .Case("pto.tgetval", OpcodeAndVariant{0x102B, 0, 0})
@@ -508,7 +523,6 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.tinsert_fp", OpcodeAndVariant{0x102E, 0, 0})
     .Case("pto.tload", OpcodeAndVariant{0x102F, 0, 0})
     .Case("pto.tlog", OpcodeAndVariant{0x1030, 0, 0})
-    .Case("pto.tlrelu", OpcodeAndVariant{0x1031, 0, 0})
     .Case("pto.tmax", OpcodeAndVariant{0x1034, 0, 0})
     .Case("pto.tmaxs", OpcodeAndVariant{0x1035, 0, 0})
     .Case("pto.tmin", OpcodeAndVariant{0x1036, 0, 0})
@@ -556,14 +570,12 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.tshls", OpcodeAndVariant{0x1060, 0, 0})
     .Case("pto.tshr", OpcodeAndVariant{0x1061, 0, 0})
     .Case("pto.tshrs", OpcodeAndVariant{0x1062, 0, 0})
-    .Case("pto.tsort32", OpcodeAndVariant{0x1063, 0, 0})
+    .Case("pto.tsort", OpcodeAndVariant{0x10A0, 0, 0})
     .Case("pto.tsqrt", OpcodeAndVariant{0x1064, 0, 0})
     .Case("pto.tstore", OpcodeAndVariant{0x1065, 0, 0})
     .Case("pto.tstore_fp", OpcodeAndVariant{0x1066, 0, 0})
     .Case("pto.tsub", OpcodeAndVariant{0x1067, 0, 0})
-    .Case("pto.tsubc", OpcodeAndVariant{0x1068, 0, 0})
     .Case("pto.tsubs", OpcodeAndVariant{0x1069, 0, 0})
-    .Case("pto.tsubsc", OpcodeAndVariant{0x106A, 0, 0})
     .Case("pto.trowexpandsub", OpcodeAndVariant{0x106B, 0, 0})
     .Case("pto.ttrans", OpcodeAndVariant{0x106C, 0, 0})
     .Case("pto.ttri", OpcodeAndVariant{0x106D, 0, 0})

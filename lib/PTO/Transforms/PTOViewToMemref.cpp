@@ -1911,37 +1911,6 @@ struct PTOViewToMemrefPass
             dst);
       }
 
-      SmallVector<mlir::pto::TAddCOp, 8> addcops;
-      func.walk([&](mlir::pto::TAddCOp op) { addcops.push_back(op); });
-
-      for (auto op : addcops) {
-        IRRewriter rewriter(ctx);
-        rewriter.setInsertionPoint(op);
-
-        Value src0 = op.getSrc0();
-        Value src1 = op.getSrc1();
-        Value src2 = op.getSrc2();
-        Value dst = op.getDst();
-
-        auto src0Ty = dyn_cast<MemRefType>(src0.getType());
-        auto src1Ty = dyn_cast<MemRefType>(src1.getType());
-        auto src2Ty = dyn_cast<MemRefType>(src2.getType());
-        auto dstTy = dyn_cast<MemRefType>(dst.getType());
-        if (!src0Ty || !src1Ty || !src2Ty ||!dstTy) {
-          op.emitError("ins/outs are not memref yet");
-          signalPassFailure();
-          return;
-        }
-
-        rewriter.replaceOpWithNewOp<pto::TAddCOp>(
-            op,
-            TypeRange{},
-            src0,
-            src1,
-            src2,
-            dst);
-      }
-
       SmallVector<mlir::pto::TAddSOp, 8> addsops;
       func.walk([&](mlir::pto::TAddSOp op) { addsops.push_back(op); });
 
@@ -1966,36 +1935,6 @@ struct PTOViewToMemrefPass
             TypeRange{},
             src,
             scalar,
-            dst);
-      }
-
-      SmallVector<mlir::pto::TAddSCOp, 8> addscops;
-      func.walk([&](mlir::pto::TAddSCOp op) { addscops.push_back(op); });
-
-      for (auto op : addscops) {
-        IRRewriter rewriter(ctx);
-        rewriter.setInsertionPoint(op);
-
-        Value src0 = op.getSrc0();
-        Value scalar = op.getScalar();
-        Value src1 = op.getSrc1();
-        Value dst = op.getDst();
-
-        auto src0Ty = dyn_cast<MemRefType>(src0.getType());
-        auto src1Ty = dyn_cast<MemRefType>(src1.getType());
-        auto dstTy = dyn_cast<MemRefType>(dst.getType());
-        if (!src0Ty || !src1Ty || !dstTy) {
-          op.emitError("ins/outs are not memref yet");
-          signalPassFailure();
-          return;
-        }
-
-        rewriter.replaceOpWithNewOp<pto::TAddSCOp>(
-            op,
-            TypeRange{},
-            src0,
-            scalar,
-            src1,
             dst);
       }
 
@@ -2865,34 +2804,6 @@ struct PTOViewToMemrefPass
             dst);
       }
 
-      SmallVector<mlir::pto::TLReluOp, 8> lreluops;
-      func.walk([&](mlir::pto::TLReluOp op) { lreluops.push_back(op); });
-
-      for (auto op : lreluops) {
-        IRRewriter rewriter(ctx);
-        rewriter.setInsertionPoint(op);
-
-        Value src = op.getSrc();
-        Value slope = op.getSlope();
-        Value dst = op.getDst();
-
-        auto srcTy = dyn_cast<MemRefType>(src.getType());
-        auto slopeTy = dyn_cast<FloatType>(slope.getType());
-        auto dstTy = dyn_cast<MemRefType>(dst.getType());
-        if (!srcTy || !slopeTy || !dstTy) {
-          op.emitError("ins/outs are not correct type yet");
-          signalPassFailure();
-          return;
-        }
-
-        rewriter.replaceOpWithNewOp<pto::TLReluOp>(
-            op,
-            TypeRange{},
-            src,
-            slope,
-            dst);
-      }
-
       SmallVector<mlir::pto::TMaxOp, 8> maxops;
       func.walk([&](mlir::pto::TMaxOp op) { maxops.push_back(op); });
 
@@ -3331,6 +3242,60 @@ struct PTOViewToMemrefPass
             op.getGatherOobAttr());
       }
 
+      SmallVector<mlir::pto::MGatherMaskOp, 8> mgatherMaskOps;
+      func.walk([&](mlir::pto::MGatherMaskOp op) {
+        mgatherMaskOps.push_back(op);
+      });
+
+      for (auto op : mgatherMaskOps) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+
+        Value mem = op.getMem();
+        Value idx = op.getIdx();
+        Value mask = op.getMask();
+        Value dst = op.getDst();
+        if (!isa<MemRefType>(mem.getType()) ||
+            !isa<MemRefType>(idx.getType()) ||
+            !isa<MemRefType>(mask.getType()) ||
+            !isa<MemRefType>(dst.getType())) {
+          op.emitError("ins/outs are not memref yet");
+          signalPassFailure();
+          return;
+        }
+
+        rewriter.replaceOpWithNewOp<pto::MGatherMaskOp>(
+            op, TypeRange{}, mem, idx, mask, dst);
+      }
+
+      SmallVector<mlir::pto::MGatherCasOp, 8> mgatherCasOps;
+      func.walk([&](mlir::pto::MGatherCasOp op) {
+        mgatherCasOps.push_back(op);
+      });
+
+      for (auto op : mgatherCasOps) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+
+        Value mem = op.getMem();
+        Value idx = op.getIdx();
+        Value expected = op.getExpected();
+        Value replacement = op.getReplacement();
+        Value dst = op.getDst();
+        if (!isa<MemRefType>(mem.getType()) ||
+            !isa<MemRefType>(idx.getType()) ||
+            !isa<MemRefType>(expected.getType()) ||
+            !isa<MemRefType>(replacement.getType()) ||
+            !isa<MemRefType>(dst.getType())) {
+          op.emitError("ins/outs are not memref yet");
+          signalPassFailure();
+          return;
+        }
+
+        rewriter.replaceOpWithNewOp<pto::MGatherCasOp>(
+            op, TypeRange{}, mem, idx, expected, replacement, dst);
+      }
+
       SmallVector<mlir::pto::MScatterOp, 8> mascatterops;
       func.walk([&](mlir::pto::MScatterOp op) { mascatterops.push_back(op); });
 
@@ -3359,6 +3324,32 @@ struct PTOViewToMemrefPass
             mem,
             op.getScatterAtomicOpAttr(),
             op.getScatterOobAttr());
+      }
+
+      SmallVector<mlir::pto::MScatterMaskOp, 8> mscatterMaskOps;
+      func.walk([&](mlir::pto::MScatterMaskOp op) {
+        mscatterMaskOps.push_back(op);
+      });
+
+      for (auto op : mscatterMaskOps) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+
+        Value src = op.getSrc();
+        Value idx = op.getIdx();
+        Value mask = op.getMask();
+        Value mem = op.getMem();
+        if (!isa<MemRefType>(src.getType()) ||
+            !isa<MemRefType>(idx.getType()) ||
+            !isa<MemRefType>(mask.getType()) ||
+            !isa<MemRefType>(mem.getType())) {
+          op.emitError("ins/outs are not memref yet");
+          signalPassFailure();
+          return;
+        }
+
+        rewriter.replaceOpWithNewOp<pto::MScatterMaskOp>(
+            op, TypeRange{}, src, idx, mask, mem);
       }
       SmallVector<mlir::pto::TPrintOp, 8> printops;
       func.walk([&](mlir::pto::TPrintOp op) { printops.push_back(op); });

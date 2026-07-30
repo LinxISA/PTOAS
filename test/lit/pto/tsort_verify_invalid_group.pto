@@ -1,0 +1,13 @@
+// RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @partial_group_is_illegal() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=33, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=33, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %idx = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=33, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tsort ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=33, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst, %idx : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=33, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=33, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tsort' op expects the valid element count to contain complete 32-element groups

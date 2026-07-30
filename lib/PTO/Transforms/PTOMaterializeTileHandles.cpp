@@ -358,7 +358,7 @@ getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
   SmallVector<int64_t> inheritedStrides;
   int64_t inheritedOffset = ShapedType::kDynamic;
   if (failed(sourceMrTy.getStridesAndOffset(inheritedStrides,
-                                            inheritedOffset)) ||
+                                           inheritedOffset)) ||
       inheritedStrides.size() < 2)
     return shape;
 

@@ -64,7 +64,7 @@ PY
   bc2="${OUT_DIR}/${base}.roundtrip.ptobc"
 
     "${PTOBC_BIN}" encode "$f" -o "$bc1" || { echo "encode failed: $f"; failed=1; continue; }
-    "${PTOBC_BIN}" decode "$bc1" -o "$pto2" || { echo "decode failed: $f"; failed=1; continue; }
+    PTOBC_PRINT_GENERIC=1 "${PTOBC_BIN}" decode "$bc1" -o "$pto2" || { echo "decode failed: $f"; failed=1; continue; }
     "${PTOBC_BIN}" encode "$pto2" -o "$bc2" || { echo "re-encode failed: $f"; failed=1; continue; }
 
     if command -v cmp >/dev/null 2>&1; then

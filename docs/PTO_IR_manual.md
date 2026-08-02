@@ -793,47 +793,54 @@ pto.tload ins(%pv : !pto.partition_tensor_view<16x16xf16>)
 
 ---
 
-##### `pto.tprefetch` - Prefetch Partition View into Tile
+##### `pto.tprefetch` - Prefetch a Global Byte Range
 
-**Summary:** Prefetches a GM-backed partition view into a temporary local tile buffer. This maps to PTO-ISA `TPREFETCH(dst, src)` and, unlike most PTO intrinsics, does not add implicit wait-event synchronization in the C++ wrapper.
+**Summary:** Probes and prefetches a global byte range with TLOAD-equivalent
+translation, permission, fault, restart, coherence, and ordering behavior. PTO
+ISA 0.57.1 deliberately makes this operation destination-free: it changes
+target cache or data-movement state without publishing a tile result.
 
 **Semantics:**
 
 ```
-TPREFETCH(dst, src)
+TPREFETCH(address, byte_count)
 ```
 
-The detailed caching / hint behavior is target-defined by PTO-ISA. In PTOAS the
-op is modeled as writing the prefetched data into `dst`.
+The detailed cache placement is target-defined, but access faults are
+architectural rather than optional hint behavior. Unlike most generated PTO
+intrinsic wrappers, `TPREFETCH` does not add implicit wait-event synchronization.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` | `pto.partition_tensor_view` or lowered GM memref | Source global view |
-| `dst` | `pto.tile_buf` or lowered local memref | Destination local tile |
+| `address` | `i64` | Base address of the global byte range |
+| `byte_count` | `index` | Number of bytes to prefetch |
 
-**Results:** None. Writes into `dst` via DPS pattern.
+**Results:** None. The operation has no destination tile and publishes no result
+queue value.
 
 **Constraints & Verification:**
 
-- `src` must be a partition view before lowering, or the corresponding lowered ranked memref form after `PTOViewToMemref`.
-- `dst` must be a tile buffer before lowering, or the corresponding lowered ranked memref form after `PTOViewToMemref`.
-- `dst` must use `loc=vec` or `loc=mat`.
-- Static source extents and static destination valid extents must be positive when known.
-- `src` and `dst` element types must have the same element size in bytes.
+- `address` must have exactly type `i64`.
+- `byte_count` is an `index` operand and denotes bytes, not elements.
+- `byte_count` must be in the inclusive range `0..262144`. PTOAS rejects an
+  out-of-range compile-time constant; a dynamic value remains legal in the IR
+  and must satisfy the same range when executed.
+- A partition view or tile destination is not a compatibility spelling and is
+  rejected by the PTOAS parser/verifier.
 
 **Hardware Mapping:**
 
-- Executes on the **DMA pipeline** (`PIPE_MTE2`, GM -> local tile)
+- Executes on the **DMA pipeline** (`PIPE_MTE2`).
+- EmitC lowers exactly to `TPREFETCH(address, byte_count)`.
 
 **Basic Example:**
 
 ```mlir
-pto.tprefetch ins(%pv : !pto.partition_tensor_view<16x16xf16>)
-              outs(%tb : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-                    v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-                    fractal=512, pad=0>)
+%address = arith.constant 4096 : i64
+%bytes = arith.constant 512 : index
+pto.tprefetch ins(%address, %bytes : i64, index)
 ```
 
 ---
@@ -3163,239 +3170,6 @@ pto.trems ins(%a, %s, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32,
 
 ---
 
-#### Ternary Operations
-
-| Op | Semantics |
-|----|----------|
-| `pto.taddc` | `dst = src0 + src1 + src2` |
-| `pto.tsubc` | `dst = src0 - src1 + src2` |
-| `pto.taddsc` | `dst = src0 + scalar + src1` |
-| `pto.tsubsc` | `dst = src0 - scalar + src1` |
-
----
-
-##### `pto.taddc` - Elementwise Ternary Add of Tiles
-
-**Summary:** Adds three tiles element-by-element.
-
-**Semantics:**
-
-```
-For each element (i, j):
-    dst[i, j] = src0[i, j] + src1[i, j] + src2[i, j]
-```
-
-**Arguments:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `src0` | `pto.tile_buf` | First source tile buffer |
-| `src1` | `pto.tile_buf` | Second source tile buffer |
-| `src2` | `pto.tile_buf` | Third source tile buffer |
-| `dst` | `pto.tile_buf` | Destination tile buffer |
-
-**Results:** None. Writes into `dst` via DPS pattern.
-
-**Assembly Format:**
-
-```
-pto.taddc ins(<src0>, <src1>, <src2> : <type0>, <type1>, <type2>)
-          outs(<dst> : <dst_type>)
-```
-
-**Constraints & Verification:**
-
-- The implementation uses `dst valid row` / `dst valid column` as the iteration domain.
-
-**Hardware Mapping:**
-
-- Executes on the **Vector pipeline** (`PIPE_V`)
-- Operates on data in the **VEC (UB)** memory space
-
-**Basic Example:**
-
-```mlir
-pto.taddc ins(%a, %b, %c : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>,
-              !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>,
-              !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>)
-          outs(%d : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>)
-```
-
----
-
-##### `pto.tsubc` - Elementwise Ternary Subtract-Add
-
-**Summary:** Computes `src0 - src1 + src2` element-by-element.
-
-**Semantics:**
-
-```
-For each element (i, j):
-    dst[i, j] = src0[i, j] - src1[i, j] + src2[i, j]
-```
-
-**Arguments:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `src0` | `pto.tile_buf` | First source tile buffer |
-| `src1` | `pto.tile_buf` | Subtrahend tile buffer |
-| `src2` | `pto.tile_buf` | Addend tile buffer |
-| `dst` | `pto.tile_buf` | Destination tile buffer |
-
-**Results:** None. Writes into `dst` via DPS pattern.
-
-**Assembly Format:**
-
-```
-pto.tsubc ins(<src0>, <src1>, <src2> : <type0>, <type1>, <type2>)
-          outs(<dst> : <dst_type>)
-```
-
-**Constraints & Verification:**
-
-- The implementation uses `dst valid row` / `dst valid column` as the iteration domain.
-
-**Hardware Mapping:**
-
-- Executes on the **Vector pipeline** (`PIPE_V`)
-- Operates on data in the **VEC (UB)** memory space
-
-**Basic Example:**
-
-```mlir
-pto.tsubc ins(%a, %b, %c : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-             v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-             fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-             v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-             fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-             v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-             fractal=512, pad=0>)
-          outs(%d : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-             v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-             fractal=512, pad=0>)
-```
-
----
-
-##### `pto.taddsc` - Fused Add-Scalar-Add
-
-**Summary:** Computes `src0 + scalar + src1` element-by-element.
-
-**Semantics:**
-
-```
-For each element (i, j):
-    dst[i, j] = src0[i, j] + scalar + src1[i, j]
-```
-
-**Arguments:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `src0` | `pto.tile_buf` | First source tile buffer |
-| `scalar` | `ScalarType` (signless integer / float) | Scalar value |
-| `src1` | `pto.tile_buf` | Second source tile buffer |
-| `dst` | `pto.tile_buf` | Destination tile buffer |
-
-**Results:** None. Writes into `dst` via DPS pattern.
-
-**Assembly Format:**
-
-```
-pto.taddsc ins(<src0>, <scalar>, <src1> : <type0>, <scalar_type>, <type1>)
-           outs(<dst> : <dst_type>)
-```
-
-**Constraints & Verification:**
-
-- The implementation uses `dst valid row` / `dst valid column` as the iteration domain.
-
-**Hardware Mapping:**
-
-- Executes on the **Vector pipeline** (`PIPE_V`)
-- Operates on data in the **VEC (UB)** memory space
-
-**Basic Example:**
-
-```mlir
-pto.taddsc ins(%a, %s, %b : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>, f32,
-              !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>)
-           outs(%c : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>)
-```
-
----
-
-##### `pto.tsubsc` - Fused Subtract-Scalar-Add
-
-**Summary:** Computes `src0 - scalar + src1` element-by-element.
-
-**Semantics:**
-
-```
-For each element (i, j):
-    dst[i, j] = src0[i, j] - scalar + src1[i, j]
-```
-
-**Arguments:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `src0` | `pto.tile_buf` | First source tile buffer |
-| `scalar` | `ScalarType` (signless integer / float) | Scalar value |
-| `src1` | `pto.tile_buf` | Second source tile buffer |
-| `dst` | `pto.tile_buf` | Destination tile buffer |
-
-**Results:** None. Writes into `dst` via DPS pattern.
-
-**Assembly Format:**
-
-```
-pto.tsubsc ins(<src0>, <scalar>, <src1> : <type0>, <scalar_type>, <type1>)
-           outs(<dst> : <dst_type>)
-```
-
-**Constraints & Verification:**
-
-- The implementation uses `dst valid row` / `dst valid column` as the iteration domain.
-
-**Hardware Mapping:**
-
-- Executes on the **Vector pipeline** (`PIPE_V`)
-- Operates on data in the **VEC (UB)** memory space
-
-**Basic Example:**
-
-```mlir
-pto.tsubsc ins(%a, %s, %b : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>, f32,
-              !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>)
-           outs(%c : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-              fractal=512, pad=0>)
-```
-
----
-
 #### Unary Operations
 
 | Op | Semantics |
@@ -3408,7 +3182,6 @@ pto.tsubsc ins(%a, %s, %b : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
 | `pto.trsqrt` | `dst[i,j] = 1/sqrt(src[i,j])` |
 | `pto.trecip` | `dst[i,j] = 1/src[i,j]` |
 | `pto.trelu` | `dst[i,j] = max(0, src[i,j])` |
-| `pto.tlrelu` | `dst[i,j] = src[i,j] > 0 ? src[i,j] : slope * src[i,j]` |
 
 ---
 
@@ -3920,65 +3693,6 @@ pto.trelu ins(%a : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
           outs(%c : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
               fractal=512, pad=0>)
-```
-
----
-
-##### `pto.tlrelu` - Leaky ReLU with Scalar Slope
-
-**Summary:** Applies the Leaky ReLU activation function with a scalar slope parameter.
-
-**Semantics:**
-
-```
-For each element (i, j):
-    dst[i, j] = src[i, j] > 0 ? src[i, j] : slope * src[i, j]
-```
-
-**Arguments:**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `src` | `pto.tile_buf` | Source tile buffer |
-| `slope` | `F32` | Negative slope coefficient |
-| `dst` | `pto.tile_buf` | Destination tile buffer |
-
-**Results:** None. Writes into `dst` via DPS pattern.
-
-**Assembly Format:**
-
-```
-pto.tlrelu ins(<src>, <slope> : <src_type>, <slope_type>)
-           outs(<dst> : <dst_type>)
-```
-
-**Constraints & Verification:**
-
-- **Implementation checks (A2A3)**
-  - Tile element type must be one of: `f16`, `f32`.
-  - Tile must use `loc=vec`.
-  - Valid bounds: `0 < valid row <= rows` and `0 < valid column <= cols`.
-  - Runtime: `src` and `dst` tiles should have the same `validRow/validCol`.
-- **Implementation checks (A5)**
-  - Tile element type must be one of: `f16`, `f32`.
-  - Tile must use `loc=vec`.
-  - Valid bounds: `valid row <= rows` and `valid column <= cols`.
-  - Runtime: `src` and `dst` tiles should have the same `validRow/validCol`.
-
-**Hardware Mapping:**
-
-- Executes on the **Vector pipeline** (`PIPE_V`)
-- Operates on data in the **VEC (UB)** memory space
-
-**Basic Example:**
-
-```mlir
-pto.tlrelu ins(%a, %slope : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-               fractal=512, pad=0>, f32)
-           outs(%c : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
-               fractal=512, pad=0>)
 ```
 
 ---
@@ -6900,6 +6614,95 @@ pto.mgather ins(%mem, %idx : memref<...>, !pto.tile_buf<...>)
 
 ---
 
+##### `pto.mgather_mask` - Masked Gather-Load from Global Memory
+
+**Summary:** Loads active lanes selected by `mask` from indexed global-memory
+addresses into `dst`. Inactive lanes do not read their index or access memory.
+
+**Semantics:**
+
+```
+if mask[i] != 0:
+    dst[i] = mem[idx[i]]
+else:
+    dst[i] = the destination tile's configured pad value
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `mem` | partition view or lowered memref | Global-memory base |
+| `idx` | VEC tile of signless `i32` | Per-lane element indices |
+| `mask` | VEC tile | Nonzero lanes are active |
+| `dst` | VEC tile | Gathered values |
+
+**Results:** None. `dst` is the DPS destination.
+
+**Assembly Format:**
+
+```
+pto.mgather_mask ins(<mem>, <idx>, <mask> : <mem_type>, <idx_type>, <mask_type>)
+                  outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- Supported only for A5 targets.
+- `idx`, `mask`, and `dst` must have matching valid shapes.
+- `mem` element type must match `dst`; `idx` must use signless `i32`.
+
+**Hardware Mapping:** Executes on `PIPE_MTE2` and lowers exactly to
+`MGATHER_MASK(dst, mem, idx, mask)`.
+
+---
+
+##### `pto.mgather_cas` - Indexed Gather Compare-and-Swap
+
+**Summary:** Atomically compares indexed memory lanes with `expected`, writes
+`replacement` on equality, and returns each lane's old memory value in `dst`.
+
+**Semantics:**
+
+```
+old = atomic_load(mem[idx[i]])
+dst[i] = old
+if old == expected[i]:
+    atomic_store(mem[idx[i]], replacement[i])
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `mem` | partition view or lowered memref | Global-memory base, read and conditionally written |
+| `idx` | VEC tile of signless `i32` | Per-lane element indices |
+| `expected` | VEC tile | Comparison values |
+| `replacement` | VEC tile | Values stored on equality |
+| `dst` | VEC tile | Old memory values |
+
+**Results:** None. `dst` is the DPS destination.
+
+**Assembly Format:**
+
+```
+pto.mgather_cas ins(<mem>, <idx>, <expected>, <replacement> :
+                    <mem_type>, <idx_type>, <expected_type>, <replacement_type>)
+                outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- Supported only for A5 targets.
+- `idx`, `expected`, `replacement`, and `dst` must have matching valid shapes.
+- `mem`, `expected`, `replacement`, and `dst` must have compatible element
+  types; `idx` must use signless `i32`.
+
+**Hardware Mapping:** Executes on `PIPE_MTE2` and lowers exactly to
+`MGATHER_CAS(dst, mem, idx, expected, replacement)`.
+
+---
+
 ##### `pto.mscatter` - Scatter-Store to Global Memory
 
 **Summary:** Stores elements from a VEC tile into a global table using per-element indices. Supports optional A5-only atomic and out-of-bounds modes that lower to the corresponding `MSCATTER<...>` template overload family.
@@ -6970,6 +6773,48 @@ pto.mscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
             {scatterAtomicOp = #pto<scatter_atomic_op add>,
              scatterOob = #pto<scatter_oob skip>}
 ```
+
+---
+
+##### `pto.mscatter_mask` - Masked Scatter-Store to Global Memory
+
+**Summary:** Stores active lanes selected by `mask` from `src` to indexed
+global-memory addresses. Inactive lanes read neither `src` nor `idx` and issue
+no memory access.
+
+**Semantics:**
+
+```
+if mask[i] != 0:
+    mem[idx[i]] = src[i]
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src` | VEC tile | Values to store |
+| `idx` | VEC tile of signless `i32` | Per-lane element indices |
+| `mask` | VEC tile | Nonzero lanes are active |
+| `mem` | partition view or lowered memref | Global-memory destination |
+
+**Results:** None. `mem` is the DPS destination.
+
+**Assembly Format:**
+
+```
+pto.mscatter_mask ins(<src>, <idx>, <mask> : <src_type>, <idx_type>, <mask_type>)
+                   outs(<mem> : <mem_type>)
+```
+
+**Constraints & Verification:**
+
+- Supported only for A5 targets.
+- `src`, `idx`, and `mask` must have matching valid shapes.
+- `mem` element type must match `src`; `idx` must use signless `i32`.
+
+**Hardware Mapping:** Executes on `PIPE_MTE3` and lowers exactly to
+`MSCATTER_MASK(mem, src, idx, mask)`.
 
 ---
 
@@ -7234,42 +7079,54 @@ pto.tfillpad_inplace ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols
 
 ### 4.11 Sorting Operations
 
-##### `pto.tsort32` - Sort Fixed 32-Element Blocks
+##### `pto.tsort` - Stable Sort of 32-Element Groups
 
-**Summary:** Sorts fixed-size 32-element blocks using an explicit input index tile.
+**Summary:** Stably sorts each consecutive 32-element group and produces both
+the sorted values and their U32 original indices. The indices are outputs, not
+an input permutation or scratch buffer.
 
 **Semantics:**
 
 ```
-dst = sort(src, idx)
-idx = permutation indices for the sort
+for each consecutive group of 32 source elements:
+    (dst, dst_indices) = stable_sort(src, descending)
 ```
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` | `pto.tile_buf` | Input value tile |
-| `idx` | `pto.tile_buf` | Input index tile permuted together with `src` |
-| `tmp` | `Optional<pto.tile_buf>` | Optional scratch tile for the tmp-taking DPS overload |
-| `dst` | `pto.tile_buf` | Output tile storing sorted value-index pairs |
+| `src` | `pto.tile_buf` | Source values |
+| `dst` | `pto.tile_buf` | Sorted values |
+| `dst_indices` | `pto.tile_buf<..., dtype=ui32, ...>` | Original index within each 32-element group |
+| `descending` | `BoolAttr` (default: `false`) | Select descending order |
 
-**Results:** None. Writes into `dst` via DPS pattern.
+**Results:** None. `dst` and `dst_indices` are the two DPS destinations.
 
 **Assembly Format:**
 
 ```
-pto.tsort32 ins(<src>, <idx>[, <tmp>] : <src_type>, <idx_type>[, <tmp_type>])
-           outs(<dst> : <dst_type>)
+pto.tsort ins(<src> : <src_type>)
+          outs(<dst>, <dst_indices> : <dst_type>, <index_type>)
+          {descending = true}
 ```
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2/A3/A5)**
-  - `dst` element type must be `f16` or `f32`.
-  - `src` element type must match `dst` element type.
-  - `idx` element type must be `u32`.
-  - `src`, `dst`, and `idx` must all use `loc=vec` and `blayout=row_major`.
+- `src` and `dst` must have the same element type and the same valid element
+  count.
+- `dst_indices` must have element type `ui32` and the same valid element count
+  as `src`.
+- `dst` and `dst_indices` must be distinct destinations.
+- The valid element count must be a non-zero multiple of 32; partial trailing
+  groups are illegal in PTOAS.
+- `src`, `dst`, and `dst_indices` must satisfy the vector-tile layout rules.
+- Equal values and signed zeros retain source order. NaNs follow all numeric
+  values and retain source order for both ascending and descending sorts.
+- Each group writes original indices `0..31`; indices restart at zero for the
+  next group.
+- The old `pto.tsort32` name and the old `idx`/`tmp` input forms are not aliases
+  and are rejected.
 
 **Hardware Mapping:**
 
@@ -7278,12 +7135,11 @@ pto.tsort32 ins(<src>, <idx>[, <tmp>] : <src_type>, <idx_type>[, <tmp_type>])
 **Basic Example:**
 
 ```mlir
-pto.tsort32 ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
-           outs(%dst : !pto.tile_buf<...>)
-
-# Optional scratch form:
-pto.tsort32 ins(%src, %idx, %tmp : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
-           outs(%dst : !pto.tile_buf<...>)
+pto.tsort ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, ...>)
+          outs(%dst, %indices :
+            !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, ...>,
+            !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, ...>)
+          {descending = true}
 ```
 
 ---
@@ -7428,6 +7284,47 @@ dst[i, j] = saturate(cast(src[i, j], rmode), satmode)
 pto.tcvt ins(%src {rmode = #pto<round_mode FLOOR>, satmode = #pto<saturation_mode ON>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
 ```
+
+---
+
+##### `pto.acccvt` - Convert and Release the Accumulator
+
+**Summary:** Converts the current live accumulator into the destination tile,
+publishes the converted values, and then releases the accumulator.
+
+**Semantics:**
+
+```
+dst = convert(current_accumulator, dst.element_type)
+current_accumulator.live = false
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `dst` | rank-2 `pto.tile_buf` or `memref` | Ordinary destination that receives the converted accumulator values |
+
+**Results:** None. The implicit accumulator is read and `dst` is written
+through the DPS interface.
+
+**Assembly Format:**
+
+```
+pto.acccvt outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- `dst` must be an ordinary publishable tile/memref. `loc=acc` is illegal here:
+  ACC is the implicit source architectural state, not the explicit destination.
+- The architectural operation requires a live accumulator whose valid shape
+  matches `dst`; conversion is selected by the operation and destination type,
+  not by a separately encoded ACC operand.
+- Commit order is destination publication followed by ACC release. A failed or
+  retried operation therefore retains the live accumulator.
+
+**Hardware Mapping:** Executes on `PIPE_M` and lowers exactly to `ACCCVT(dst)`.
 
 ---
 

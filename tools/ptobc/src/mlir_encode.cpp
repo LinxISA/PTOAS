@@ -404,10 +404,12 @@ void Encoder::encodeKnownOpImmediates(
       throw std::runtime_error(
           "imm_kind=alloc_tile but op is not pto.alloc_tile");
     uint8_t mask = 0;
-    if (at.getValidRow())
+    if (at.getAddr())
       mask |= 0x1;
-    if (at.getValidCol())
+    if (at.getValidRow())
       mask |= 0x2;
+    if (at.getValidCol())
+      mask |= 0x4;
     out.appendU8(mask);
     imms.push_back(mask);
     return;
@@ -461,7 +463,8 @@ void Encoder::encodeKnownOpOperands(
     if (imms.empty())
       throw std::runtime_error("optmask operands missing immediate");
     uint8_t mask = uint8_t(imms.front());
-    emitOperands(((mask & 0x1) ? 1 : 0) + ((mask & 0x2) ? 1 : 0));
+    emitOperands(((mask & 0x1) ? 1 : 0) + ((mask & 0x2) ? 1 : 0) +
+                 ((mask & 0x4) ? 1 : 0));
     return;
   }
   default:

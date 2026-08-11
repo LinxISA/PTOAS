@@ -103,14 +103,15 @@ ninja -C llvm/build-shared
 ```bash
 export LLVM_DIR=$PWD/llvm-project/llvm/build-shared
 export PTO_INSTALL_DIR=$PWD/install
-export PYBIND11_CMAKE_DIR="$(python3 -m pybind11 --cmakedir)"
+export NANOBIND_CMAKE_DIR="$(python3 -m nanobind --cmake_dir)"
 
 cmake -G Ninja -S . -B build \
   -DLLVM_DIR="$LLVM_DIR/lib/cmake/llvm" \
   -DMLIR_DIR="$LLVM_DIR/lib/cmake/mlir" \
   -DPython3_EXECUTABLE=python3 \
+  -DPython_EXECUTABLE=python3 \
   -DPython3_FIND_STRATEGY=LOCATION \
-  -Dpybind11_DIR="$PYBIND11_CMAKE_DIR" \
+  -Dnanobind_DIR="$NANOBIND_CMAKE_DIR" \
   -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
   -DMLIR_PYTHON_PACKAGE_DIR="$LLVM_DIR/tools/mlir/python_packages/mlir_core" \
   -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \

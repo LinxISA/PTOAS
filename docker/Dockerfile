@@ -19,7 +19,7 @@ ENV PATH="${PY_PATH}/bin:${PATH}"
 
 # dependency
 RUN dnf install -y ninja-build cmake git ccache gcc-c++ lld zip binutils patchelf chrpath && dnf clean all
-RUN pip install --no-cache-dir numpy pybind11 nanobind setuptools wheel auditwheel
+RUN pip install --no-cache-dir numpy nanobind setuptools wheel auditwheel
 
 COPY cmake/LinuxHardeningCache.cmake /tmp/LinuxHardeningCache.cmake
 
@@ -59,8 +59,9 @@ RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja \
     -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
     -DPython3_ROOT_DIR=${PY_PATH} \
     -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
+    -DPython_EXECUTABLE=${PY_PATH}/bin/python \
     -DPython3_FIND_STRATEGY=LOCATION \
-    -Dpybind11_DIR=$(python -m pybind11 --cmakedir) \
+    -Dnanobind_DIR=$(python -m nanobind --cmake_dir) \
     -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
     -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR}
 

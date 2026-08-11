@@ -109,7 +109,10 @@ option(PTO_ENABLE_PYTHON_BINDING "Enable Python bindings" ON)
 
 if(PTO_ENABLE_PYTHON_BINDING)
   find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
-  find_package(pybind11 CONFIG REQUIRED)
+  set(Python_EXECUTABLE "${Python3_EXECUTABLE}" CACHE FILEPATH
+      "Python interpreter used by nanobind")
+  find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+  find_package(nanobind CONFIG REQUIRED)
 
   # 设置 Python 扩展的输出目录，方便调试
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/python/pto)

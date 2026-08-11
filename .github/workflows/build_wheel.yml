@@ -25,7 +25,7 @@ permissions:
 
 env:
   LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-  LLVM_COMMIT: 05fe79770059617f6edbeac7ded144f5873224e0
+  LLVM_COMMIT: 9fb4f7aa89ee22541bfae288e2085ada266ffd75
 
 jobs:
   build_wheel:
@@ -84,9 +84,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
-          # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x
-          # (see pybind11 static_assert on def_property + keep_alive).
-          pip install --no-cache-dir numpy 'pybind11<3' nanobind typing_extensions setuptools wheel auditwheel
+          pip install --no-cache-dir numpy nanobind typing_extensions setuptools wheel auditwheel
 
       - name: Set build directories
         run: |
@@ -162,8 +160,9 @@ jobs:
             -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
             -DPython3_ROOT_DIR=${PY_PATH} \
             -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
+            -DPython_EXECUTABLE=${PY_PATH}/bin/python \
             -DPython3_FIND_STRATEGY=LOCATION \
-            -Dpybind11_DIR=$(${PY_PATH}/bin/python -m pybind11 --cmakedir) \
+            -Dnanobind_DIR=$(${PY_PATH}/bin/python -m nanobind --cmake_dir) \
             -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
             -DPTOAS_RELEASE_VERSION_OVERRIDE=${PTOAS_VERSION} \
             -DPTOAS_ENABLE_WERROR=OFF \

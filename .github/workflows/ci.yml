@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-      LLVM_COMMIT: 05fe79770059617f6edbeac7ded144f5873224e0
+      LLVM_COMMIT: 9fb4f7aa89ee22541bfae288e2085ada266ffd75
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-shared
       PTO_INSTALL_DIR: ${{ github.workspace }}/install
       MLIR_PYTHONPATH: ${{ github.workspace }}/llvm-project/llvm/build-shared/tools/mlir/python_packages/mlir_core
@@ -116,8 +116,7 @@ jobs:
             clang lld \
             libedit-dev zlib1g-dev libxml2-dev libzstd-dev
           python3 -m pip install --upgrade pip
-          # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x.
-          python3 -m pip install 'pybind11<3' nanobind typing_extensions numpy
+          python3 -m pip install nanobind typing_extensions numpy
 
       - name: Define payload paths
         shell: bash
@@ -193,13 +192,14 @@ jobs:
 
       - name: Build PTOAS
         run: |
-          export PYBIND11_CMAKE_DIR="$(python3 -m pybind11 --cmakedir)"
+          export NANOBIND_CMAKE_DIR="$(python3 -m nanobind --cmake_dir)"
           cmake -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" -G Ninja -S . -B build \
             -DLLVM_DIR="${LLVM_DIR}/lib/cmake/llvm" \
             -DMLIR_DIR="${LLVM_DIR}/lib/cmake/mlir" \
             -DPython3_EXECUTABLE=python3 \
+            -DPython_EXECUTABLE=python3 \
             -DPython3_FIND_STRATEGY=LOCATION \
-            -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+            -Dnanobind_DIR="${NANOBIND_CMAKE_DIR}" \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DMLIR_PYTHON_PACKAGE_DIR="${LLVM_DIR}/tools/mlir/python_packages/mlir_core" \
             -DPTOAS_ENABLE_WERROR=OFF \

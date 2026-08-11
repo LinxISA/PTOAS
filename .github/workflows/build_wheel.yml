@@ -25,7 +25,7 @@ permissions:
 
 env:
   LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-  LLVM_COMMIT: be1fc2451936a713e2a15620d5e7f8fe0a73688e
+  LLVM_COMMIT: efd3cc5754e24ffe5d7ee4b77762c7f45c8b0196
 
 jobs:
   build_wheel:

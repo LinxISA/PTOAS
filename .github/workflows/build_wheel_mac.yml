@@ -105,7 +105,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-v2
+          key: llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v1
 
       - name: Prepare LLVM source
         run: |
@@ -126,7 +126,7 @@ jobs:
           echo "LLVM cache miss while running on PR/release."
           echo "PR/release runs are cache-consumers only and should reuse cache generated on the default branch."
           echo "Please run this workflow on the default branch first to populate cache key:"
-          echo "llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-v2"
+          echo "llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v1"
 
       - name: Build LLVM/MLIR
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -134,6 +134,7 @@ jobs:
           cd $LLVM_SOURCE_DIR
           cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
             -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+            -DMLIR_ENABLE_LINXISA_PTO=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DPython3_EXECUTABLE=$(which python) \
@@ -148,7 +149,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-v2
+          key: llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v1
 
       - name: Build PTOAS
         run: |

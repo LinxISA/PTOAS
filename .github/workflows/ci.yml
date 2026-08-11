@@ -145,7 +145,7 @@ jobs:
         with:
           path: |
             llvm-project/llvm/build-shared
-          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-hardening-v2
+          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-pto-off-v1
 
       - name: Prepare LLVM source (no rebuild)
         run: |
@@ -169,6 +169,7 @@ jobs:
           cd llvm-project
           cmake -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" -G Ninja -S llvm -B llvm/build-shared \
             -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+            -DMLIR_ENABLE_LINXISA_PTO=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DPython3_EXECUTABLE=python3 \
@@ -185,7 +186,7 @@ jobs:
         with:
           path: |
             llvm-project/llvm/build-shared
-          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-hardening-v2
+          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-pto-off-v1
 
       - name: Build PTOAS
         run: |

@@ -93,6 +93,7 @@ enum class VerifierTargetArch {
 };
 static VerifierTargetArch getVerifierTargetArch(Operation *op);
 static std::optional<StringRef> getVerifierArchName(Operation *op);
+static bool isVerifierTargetLinx(Operation *op);
 static bool isSupportedVecElemType(Type ty, bool allowBf16 = true,
                                    bool allowInt8 = true);
 static bool isSupportedLoadStoreElemTypeA2A3(Type ty);
@@ -247,6 +248,8 @@ PTOArch mlir::pto::getTargetArch(ModuleOp module) {
     return PTOArch::A3;
 
   auto arch = module->getAttrOfType<StringAttr>(kPTOTargetArchAttrName);
+  if (arch && arch.getValue().equals_insensitive("linx"))
+    return PTOArch::Linx;
   if (arch && arch.getValue().equals_insensitive("a5"))
     return PTOArch::A5;
   return PTOArch::A3;
@@ -266,12 +269,20 @@ bool mlir::pto::isTargetArchA5(ModuleOp module) {
   return getTargetArch(module) == PTOArch::A5;
 }
 
+bool mlir::pto::isTargetArchLinx(ModuleOp module) {
+  return getTargetArch(module) == PTOArch::Linx;
+}
+
 bool mlir::pto::isTargetArchA3(Operation *op) {
   return getTargetArch(op) == PTOArch::A3;
 }
 
 bool mlir::pto::isTargetArchA5(Operation *op) {
   return getTargetArch(op) == PTOArch::A5;
+}
+
+bool mlir::pto::isTargetArchLinx(Operation *op) {
+  return getTargetArch(op) == PTOArch::Linx;
 }
 
 static llvm::TypeSize getOneByteTypeSize() {
@@ -325,12 +336,15 @@ uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
 
 static VerifierTargetArch getVerifierTargetArch(Operation *op) {
   if (auto archName = getVerifierArchName(op)) {
-    return archName->equals_insensitive("a5") ? VerifierTargetArch::A5
-                            : VerifierTargetArch::A2A3;
+    return (archName->equals_insensitive("a5") ||
+            archName->equals_insensitive("linx"))
+               ? VerifierTargetArch::A5
+               : VerifierTargetArch::A2A3;
   }
 
   switch (getPTOParserTargetArch(op ? op->getContext() : nullptr)) {
   case PTOParserTargetArch::A5:
+  case PTOParserTargetArch::Linx:
     return VerifierTargetArch::A5;
   case PTOParserTargetArch::A3:
   case PTOParserTargetArch::Unspecified:
@@ -347,6 +361,13 @@ static std::optional<StringRef> getVerifierArchName(Operation *op) {
   if (auto arch = module->getAttrOfType<StringAttr>(kPTOTargetArchAttrName))
     return arch.getValue();
   return std::nullopt;
+}
+
+static bool isVerifierTargetLinx(Operation *op) {
+  if (auto archName = getVerifierArchName(op))
+    return archName->equals_insensitive("linx");
+  return getPTOParserTargetArch(op ? op->getContext() : nullptr) ==
+         PTOParserTargetArch::Linx;
 }
 
 static bool shouldBypassDecodedMemrefVerifier(Operation *op) {
@@ -3733,6 +3754,44 @@ LogicalResult pto::TAddOp::verify() {
       /*allowInt8OnA5=*/true, /*allowBf16OnA5=*/true,
       "expects A2/A3 tadd element type to be i32/i16/f16/f32",
       "expects A5 tadd element type to be i32/i16/i8/f16/bf16/f32");
+}
+
+LogicalResult pto::TFmaOp::verify() {
+  if (!isVerifierTargetLinx(getOperation()))
+    return emitOpError("is only available for --pto-arch=linx");
+  Type src0Ty = getSrc0().getType();
+  Type src1Ty = getSrc1().getType();
+  Type src2Ty = getSrc2().getType();
+  Type dstTy = getDst().getType();
+  if (failed(verifyVecTileCommon(*this, src0Ty, "src0")) ||
+      failed(verifyVecTileCommon(*this, src1Ty, "src1")) ||
+      failed(verifyVecTileCommon(*this, src2Ty, "src2")) ||
+      failed(verifyVecTileCommon(*this, dstTy, "dst")))
+    return failure();
+  if (getShapeVec(src0Ty) != getShapeVec(src1Ty) ||
+      getShapeVec(src0Ty) != getShapeVec(src2Ty) ||
+      getShapeVec(src0Ty) != getShapeVec(dstTy))
+    return emitOpError("expects src0, src1, src2, and dst to have the same shape");
+  if (getElemTy(src0Ty) != getElemTy(src1Ty) ||
+      getElemTy(src0Ty) != getElemTy(src2Ty) ||
+      getElemTy(src0Ty) != getElemTy(dstTy))
+    return emitOpError("expects src0, src1, src2, and dst element types to match");
+  return success();
+}
+
+LogicalResult pto::GMovOp::verify() {
+  if (!isVerifierTargetLinx(getOperation()))
+    return emitOpError("is only available for --pto-arch=linx");
+  Type srcTy = getSrc().getType();
+  Type dstTy = getDst().getType();
+  if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
+      failed(verifyTileBufCommon(*this, dstTy, "dst")))
+    return failure();
+  if (getShapeVec(srcTy) != getShapeVec(dstTy))
+    return emitOpError("expects src and dst to have the same shape");
+  if (getElemTy(srcTy) != getElemTy(dstTy))
+    return emitOpError("expects src and dst element types to match");
+  return success();
 }
 
 LogicalResult pto::TAddSOp::verify() {
@@ -10164,6 +10223,13 @@ void SetValidShapeOp::getEffects(
 
 // Elementwise + reductions: mostly PIPE_V tilebuf ops
 PTO_DEFINE_BINARY_EFFECTS(TAddOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
+PTO_DEFINE_TERNARY_EFFECTS(TFmaOp, getSrc0Mutable(), getSrc1Mutable(), getSrc2Mutable(), getDstMutable())
+void GMovOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  PTO_ADD_READ(getSrcMutable());
+  PTO_ADD_READ(getPeerTidMutable());
+  PTO_ADD_WRITE(getDstMutable());
+}
 PTO_DEFINE_UNARY_EFFECTS(TAddSOp, getSrcMutable(), getDstMutable())
 void TAxpyOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {

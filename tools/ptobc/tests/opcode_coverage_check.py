@@ -53,12 +53,19 @@ NEW_V0571_OPCODE_ASSIGNMENTS = {
     "pto.tsort": (0x10A0, 3),
 }
 
+NEW_V0580_OPCODE_ASSIGNMENTS = {
+    "pto.gmov": (0x10A1, 3),
+    "pto.tfma": (0x10A2, 4),
+}
+
 EXACT_ARITY = {
     "pto.tprefetch": 2,
     **{name: arity for name, (_, arity) in NEW_V0571_OPCODE_ASSIGNMENTS.items()},
+    **{name: arity for name, (_, arity) in NEW_V0580_OPCODE_ASSIGNMENTS.items()},
 }
 
 PRE_V0571_MAX_PTO_OPCODE = 0x109B
+PRE_V0580_MAX_PTO_OPCODE = 0x10A0
 
 
 def parse_td_mnemonics(td_path: Path):
@@ -169,6 +176,15 @@ def check_header_contract(h_path: Path):
 
     for name, (opcode, arity) in NEW_V0571_OPCODE_ASSIGNMENTS.items():
         if opcode <= PRE_V0571_MAX_PTO_OPCODE:
+            errors.append(f"new operation {name} does not use a fresh opcode")
+        if table_by_name.get(name) != (opcode, arity):
+            errors.append(
+                f"{name}: expected opcode/arity {(opcode, arity)}, "
+                f"got {table_by_name.get(name)}"
+            )
+
+    for name, (opcode, arity) in NEW_V0580_OPCODE_ASSIGNMENTS.items():
+        if opcode <= PRE_V0580_MAX_PTO_OPCODE:
             errors.append(f"new operation {name} does not use a fresh opcode")
         if table_by_name.get(name) != (opcode, arity):
             errors.append(

@@ -207,6 +207,9 @@ ptoas test/lit/pto/empty_func.pto --enable-insert-sync -o outputfile.cpp
 # 指定目标硬件架构（A3 / A5）
 ptoas test/lit/pto/empty_func.pto --pto-arch=a5 -o outputfile.cpp
 
+# LinxISA v0.58 必须使用独立 Linx target，不得借用 A3/A5 target
+ptoas test/lit/pto/v058_linx_target.pto --pto-arch=linx -o outputfile.cpp
+
 # 指定构建 Level（level3 会禁用 PlanMemory/InsertSync）
 ptoas test/lit/pto/empty_func.pto --pto-level=level3 -o outputfile.cpp
 
@@ -214,6 +217,10 @@ ptoas test/lit/pto/empty_func.pto --pto-level=level3 -o outputfile.cpp
 ptoas --version
 
 ```
+
+`linx` target 对齐受管的 `Linx-TileOP-API`：生成代码包含
+`jcore/template_asm.hpp`，只接受 v0.58 公共 PTO 操作目录，并在 lowering
+前拒绝仅属于 A3/A5 方言面的操作。
 
 ### 5.2 Python 接口 (Python API)
 

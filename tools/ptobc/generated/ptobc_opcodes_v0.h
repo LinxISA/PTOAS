@@ -233,6 +233,8 @@ inline constexpr OpInfo kOpTable[] = {
   {0x109E, "pto.mgather_cas", 0, 0x00, 0x00, 5, 0, 0, 0x00},
   {0x109F, "pto.mscatter_mask", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x10A0, "pto.tsort", 0, 0x00, 0x00, 3, 0, 0, 0x00},
+  {0x10A1, "pto.gmov", 0, 0x00, 0x00, 3, 0, 0, 0x00},
+  {0x10A2, "pto.tfma", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x2000, "arith.addi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2001, "arith.ceildivsi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2002, "arith.cmpi", 0, 0x01, 0x00, 2, 1, 0, 0x01},
@@ -437,6 +439,8 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.comm.treduce", 0x1099)
     .Case("pto.tpartargmax", 0x109A)
     .Case("pto.tpartargmin", 0x109B)
+    .Case("pto.gmov", 0x10A1)
+    .Case("pto.tfma", 0x10A2)
     .Case("scf.for", 0x4000)
     .Case("scf.if", 0x4001)
     .Case("scf.yield", 0x4002)
@@ -625,6 +629,8 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.comm.treduce", OpcodeAndVariant{0x1099, 0, 0})
     .Case("pto.tpartargmax", OpcodeAndVariant{0x109A, 0, 0})
     .Case("pto.tpartargmin", OpcodeAndVariant{0x109B, 0, 0})
+    .Case("pto.gmov", OpcodeAndVariant{0x10A1, 0, 0})
+    .Case("pto.tfma", OpcodeAndVariant{0x10A2, 0, 0})
     .Case("scf.for", OpcodeAndVariant{0x4000, 0, 0})
     .Case("scf.if", OpcodeAndVariant{0x4001, 0, 0})
     .Case("scf.yield", OpcodeAndVariant{0x4002, 0, 0})

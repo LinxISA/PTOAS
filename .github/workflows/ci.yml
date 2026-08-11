@@ -213,6 +213,16 @@ jobs:
           export PYTHONPATH="${MLIR_PYTHONPATH}:${PTO_INSTALL_DIR}:${PYTHONPATH:-}"
           ninja -C build check-pto
 
+      - name: Run PTO ISA v0.58 contract gates
+        shell: bash
+        run: |
+          python3 tools/check_v058_pto_manifest.py --ptoas-root .
+          python3 tools/ptobc/tests/opcode_coverage_check.py \
+            include/PTO/IR/PTOOps.td \
+            tools/ptobc/generated/ptobc_opcodes_v0.h
+          ctest --test-dir build --output-on-failure \
+            -R 'pto_isa_v0580_contract_check|ptobc_v0580_ops_v0_encode|ptobc_tpartarg_v0_encode'
+
       - name: Run sample tests (py -> pto -> cpp)
         shell: bash
         env:

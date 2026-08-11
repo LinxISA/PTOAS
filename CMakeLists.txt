@@ -129,9 +129,9 @@ if(BUILD_TESTING)
   enable_testing()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
-    NAME pto_isa_v0571_contract_check
+    NAME pto_isa_v0580_contract_check
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v057_pto_manifest.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v058_pto_manifest.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
   add_subdirectory(tools/ptobc/tests)
 endif()

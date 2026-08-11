@@ -2900,7 +2900,14 @@ struct FuncToEmitC : public OpConversionPattern<func::FuncOp> {
       return success();
     }
 
-    if (pto::isPTOEntryFunction(op)) {
+    const bool isLinx = pto::isTargetArchLinx(op.getOperation());
+    if (isLinx && pto::isPTOEntryFunction(op)) {
+      emitcFunc.setSpecifiersAttr(rewriter.getStrArrayAttr({"extern \"C\""}));
+    } else if (isLinx && op.isPrivate()) {
+      emitcFunc.setSpecifiersAttr(rewriter.getStrArrayAttr({"static", "inline"}));
+    } else if (isLinx) {
+      emitcFunc.setSpecifiersAttr(rewriter.getStrArrayAttr({"inline"}));
+    } else if (pto::isPTOEntryFunction(op)) {
       emitcFunc.setSpecifiersAttr(
           rewriter.getStrArrayAttr({"__global__ AICORE"}));
     } else if (op.isPrivate()) {
@@ -2910,8 +2917,10 @@ struct FuncToEmitC : public OpConversionPattern<func::FuncOp> {
       emitcFunc.setSpecifiersAttr(rewriter.getStrArrayAttr({"AICORE"}));
     }
 
-    std::optional<StringRef> kernelKindMacro = getKernelKindMacro(op);
-    bool needsNoSplitGuard = needsA5NoSplitVectorGuard(op.getOperation());
+    std::optional<StringRef> kernelKindMacro =
+        isLinx ? std::nullopt : getKernelKindMacro(op);
+    bool needsNoSplitGuard =
+        !isLinx && needsA5NoSplitVectorGuard(op.getOperation());
 
     // Inline the original body, then convert region/block argument types to
     // match the converted signature (also covers CFG blocks introduced by
@@ -5751,6 +5760,39 @@ struct PTOTAddToTADD : public OpConversionPattern<pto::TAddOp> {
         ArrayAttr{}, ArrayAttr{},
         ValueRange{dst, src0, src1});
 
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOTFmaToTFMA : public OpConversionPattern<pto::TFmaOp> {
+  using OpConversionPattern<pto::TFmaOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TFmaOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value src0 = peelUnrealized(adaptor.getSrc0());
+    Value src1 = peelUnrealized(adaptor.getSrc1());
+    Value src2 = peelUnrealized(adaptor.getSrc2());
+    Value dst = peelUnrealized(adaptor.getDst());
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "TFMA", ArrayAttr{}, ArrayAttr{},
+        ValueRange{dst, src0, src1, src2});
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOGMovToGMOV : public OpConversionPattern<pto::GMovOp> {
+  using OpConversionPattern<pto::GMovOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::GMovOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value peerTid = peelUnrealized(adaptor.getPeerTid());
+    Value dst = peelUnrealized(adaptor.getDst());
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "GMOV", ArrayAttr{}, ArrayAttr{},
+        ValueRange{dst, peerTid, src});
     rewriter.eraseOp(op);
     return success();
   }
@@ -11802,6 +11844,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOLogToEmitC>(typeConverter, ctx);
   patterns.add<FuncToEmitC>(typeConverter, ctx);
   patterns.add<PTOMovToEmitC>(typeConverter, ctx);
+  patterns.add<PTOGMovToGMOV>(typeConverter, ctx);
   patterns.add<ArithConstantToEmitC>(typeConverter, ctx);
   patterns.add<ArithAddUIExtendedToEmitC>(typeConverter, ctx);
   patterns.add<ArithMulSIExtendedToEmitC>(typeConverter, ctx);
@@ -11896,6 +11939,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<ReinterpretCastToEmitC>(typeConverter, ctx);
   patterns.add<PTOTAbsToTABS>(typeConverter, ctx);
   patterns.add<PTOTAddToTADD>(typeConverter, ctx);
+  patterns.add<PTOTFmaToTFMA>(typeConverter, ctx);
   patterns.add<ArithCastOPToEmitC>(typeConverter, ctx);
   patterns.add<ArithTruncIToEmitC>(typeConverter, ctx);
   patterns.add<PTOBuildAsyncSessionToEmitC>(typeConverter, ctx);
@@ -12050,8 +12094,18 @@ struct EmitPTOManualPass
 	    auto loc = mop->getLoc();
 	    OpBuilder builder(ctx);
 	    builder.setInsertionPointToStart(mop.getBody());
-	    builder.create<emitc::IncludeOp>(
-	        loc, "pto/pto-inst.hpp", /*is_standard_include=*/false);
+	    if (targetArch == PTOArch::Linx) {
+	      builder.create<emitc::IncludeOp>(
+	          loc, "jcore/template_asm.hpp", /*is_standard_include=*/false);
+	    } else {
+	      builder.create<emitc::IncludeOp>(
+	          loc, "pto/pto-inst.hpp", /*is_standard_include=*/false);
+	    }
+	    if (targetArch == PTOArch::Linx &&
+	        (needsCommInclude || needsEventIdArrayHelper)) {
+	      mop.emitError("Linx target does not yet support PTO communication/session helpers");
+	      return signalPassFailure();
+	    }
         if (needsCommInclude) {
 	      builder.create<emitc::VerbatimOp>(
 	          loc, builder.getStringAttr(R"cpp(
@@ -12087,8 +12141,9 @@ struct PTOAS_EventIdArray {
 };
 )cpp"));
         }
-	    builder.create<emitc::VerbatimOp>(
-	        loc, builder.getStringAttr(R"cpp(
+	    if (targetArch != PTOArch::Linx) {
+	      builder.create<emitc::VerbatimOp>(
+	          loc, builder.getStringAttr(R"cpp(
 enum class PTOAutoSyncTailMode : int {
   kBarrierAll = 0,
   kSetWaitMte3ToSEvent0 = 1,
@@ -12108,6 +12163,7 @@ static AICORE inline void ptoas_auto_sync_tail(
   }
 }
 )cpp"));
+	    }
 	    // Only inject the bitcast helper when we actually lower ops that need it
 	    // (e.g. arith.bitcast or arith.maximumf/minimumf tie-breaking on zeros).
 	    bool needsBitcastHelper = false;

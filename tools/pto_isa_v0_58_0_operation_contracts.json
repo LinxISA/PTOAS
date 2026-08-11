@@ -1,0 +1,76 @@
+{
+  "release": "0.58.0",
+  "base_contract": "pto_isa_v0_57_1_operation_contracts.json",
+  "public_operation_count": 109,
+  "removed_public_operations": [
+    "ACCCVT",
+    "TALLOC",
+    "TAXPY",
+    "TDEINTERLEAVE",
+    "TFREE",
+    "TGATHERB",
+    "TINTERLEAVE",
+    "TPARTARGMAX",
+    "TPARTARGMIN",
+    "TPOP",
+    "TPRELU",
+    "TPUSH",
+    "TRESHAPE"
+  ],
+  "moved_to_dialect_only_operations": [
+    "ACCCVT",
+    "TALLOC",
+    "TAXPY",
+    "TDEINTERLEAVE",
+    "TFREE",
+    "TGATHERB",
+    "TINTERLEAVE",
+    "TPARTARGMAX",
+    "TPARTARGMIN",
+    "TPOP",
+    "TPRELU",
+    "TPUSH",
+    "TRESHAPE"
+  ],
+  "added_operations": {
+    "GMOV": {
+      "ptoas_mnemonic": "gmov",
+      "ptoas_arguments": ["src", "peer_tid", "dst"],
+      "isa_operands": [
+        ["destination0", "destination"],
+        ["source0", "resolved-peer-source"],
+        ["scalar0", "peer-tid"]
+      ]
+    },
+    "TFMA": {
+      "ptoas_mnemonic": "tfma",
+      "ptoas_arguments": ["src0", "src1", "src2", "dst"],
+      "isa_operands": [
+        ["destination0", "destination"],
+        ["source0", "multiplicand-left"],
+        ["source1", "multiplicand-right"],
+        ["source2", "addend"]
+      ]
+    }
+  },
+  "isa_operand_overrides": {
+    "TCVT": [["destination0", "destination"], ["source0", "source"], ["numeric_control", "rounding-and-saturation"]],
+    "TDEQUANT": [["destination0", "destination"], ["source0", "source"], ["scalar0", "scale"], ["scalar1", "zero-point"], ["numeric_control", "rounding-and-saturation"]],
+    "TGEMV": [["destination0", "destination"], ["source0", "matrix"], ["source1", "vector"]],
+    "TGEMV_ACC": [["destination0", "destination"], ["source0", "accumulator"], ["source1", "matrix"], ["source2", "vector"]],
+    "TGEMV_BIAS": [["destination0", "destination"], ["source0", "matrix"], ["source1", "vector"], ["source2", "bias"]],
+    "TGEMV_MX": [["destination0", "destination"], ["source0", "matrix"], ["source1", "row-scale"], ["source2", "vector"], ["source3", "column-scale"]],
+    "TGEMV_MX_ACC": [["destination0", "destination"], ["source0", "accumulator"], ["source1", "matrix"], ["source2", "row-scale"], ["source3", "vector"], ["source4", "column-scale"]],
+    "TGEMV_MX_BIAS": [["destination0", "destination"], ["source0", "matrix"], ["source1", "row-scale"], ["source2", "vector"], ["source3", "column-scale"], ["source4", "bias"]],
+    "TLOAD": [["destination0", "destination"], ["address", "base-address"], ["scalar0", "row-stride-elements"]],
+    "TMATMUL": [["destination0", "destination"], ["source0", "left"], ["source1", "right"]],
+    "TMATMUL_ACC": [["destination0", "destination"], ["source0", "accumulator"], ["source1", "left"], ["source2", "right"]],
+    "TMATMUL_BIAS": [["destination0", "destination"], ["source0", "left"], ["source1", "right"], ["source2", "bias"]],
+    "TMATMUL_MX": [["destination0", "destination"], ["source0", "left"], ["source1", "row-scale"], ["source2", "right"], ["source3", "column-scale"]],
+    "TMATMUL_MX_ACC": [["destination0", "destination"], ["source0", "accumulator"], ["source1", "left"], ["source2", "row-scale"], ["source3", "right"], ["source4", "column-scale"]],
+    "TMATMUL_MX_BIAS": [["destination0", "destination"], ["source0", "left"], ["source1", "row-scale"], ["source2", "right"], ["source3", "column-scale"], ["source4", "bias"]],
+    "TQUANT": [["destination0", "destination"], ["source0", "source"], ["scalar0", "scale"], ["scalar1", "zero-point"], ["numeric_control", "rounding-and-saturation"]],
+    "TSORT": [["destination0", "destination"], ["destination1", "original-indices-u32"], ["source0", "source"], ["sort_width", "sort-width"], ["flag0", "descending"]],
+    "TSTORE": [["address", "base-address"], ["scalar0", "row-stride-elements"], ["source0", "source"]]
+  }
+}

@@ -1179,6 +1179,34 @@ def TMovOp  : PTO_TOp<"tmov", [
   }];
 }
 
+def GMovOp : PTO_TOp<"gmov", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Move data from a peer thread into a destination tile.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    I64:$peer_tid,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $peer_tid `:` qualified(type($src)) `,` type($peer_tid) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)` attr-dict
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE2; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 
 //===----------------------------------------------------------------------===//
 // Pointer Cast Op (existing)
@@ -2874,6 +2902,36 @@ def TAddOp : PTO_TOp<"tadd", [
     ::mlir::MutableOperandRange getDpsInitsMutable() {
         return getDstMutable();
     }
+  }];
+}
+
+def TFmaOp : PTO_TOp<"tfma", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Elementwise fused multiply-add of three tiles.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$src2,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `,` $src2 `:` qualified(type($src0)) `,`
+      qualified(type($src1)) `,` qualified(type($src2)) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)` attr-dict
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 

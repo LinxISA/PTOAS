@@ -225,8 +225,8 @@ static llvm::cl::opt<bool> emitMlirIR(
 
 static llvm::cl::opt<std::string> ptoTargetArch(
     "pto-arch",
-    llvm::cl::desc("Target Ascend architecture for codegen: a3 or a5 (default: a3)"),
-    llvm::cl::value_desc("a3|a5"),
+    llvm::cl::desc("Target architecture for codegen: a3, a5, or linx (default: a3)"),
+    llvm::cl::value_desc("a3|a5|linx"),
     llvm::cl::init("a3"));
 
 static llvm::cl::opt<std::string> ptoBuildLevel(
@@ -240,6 +240,33 @@ enum class PTOBuildLevel {
   Level2,
   Level3,
 };
+
+static LogicalResult validateLinxOperationBoundary(ModuleOp module) {
+  if (!pto::isTargetArchLinx(module))
+    return success();
+
+  static constexpr llvm::StringLiteral linxDialectOnlyOps[] = {
+      "pto.acccvt",       "pto.talloc",      "pto.taxpy",
+      "pto.tdeinterleave", "pto.tfree",       "pto.tgatherb",
+      "pto.tinterleave",  "pto.tpartargmax", "pto.tpartargmin",
+      "pto.tpop",         "pto.tprelu",      "pto.tpush",
+      "pto.treshape",
+  };
+
+  llvm::SmallVector<Operation *, 4> invalid;
+  module.walk([&](Operation *op) {
+    StringRef name = op->getName().getStringRef();
+    if (llvm::is_contained(linxDialectOnlyOps, name))
+      invalid.push_back(op);
+  });
+  for (Operation *op : invalid) {
+    StringRef name = op->getName().getStringRef();
+    op->emitError() << "'" << name
+                    << "' op is dialect-only and not part of the active Linx "
+                       "PTO ISA v0.58.0 target";
+  }
+  return invalid.empty() ? success() : failure();
+}
 
 static PTOBuildLevel defaultBuildLevel() {
   return PTOBuildLevel::Level2;
@@ -1000,16 +1027,16 @@ int main(int argc, char **argv) {
 
   std::string arch = normalizeArch(ptoTargetArch);
   if (cliArchSpecified) {
-    if (arch != "a3" && arch != "a5") {
+    if (arch != "a3" && arch != "a5" && arch != "linx") {
       llvm::errs() << "Error: invalid --pto-arch='" << ptoTargetArch
-                   << "'. Expected 'a3' or 'a5'.\n";
+                   << "'. Expected 'a3', 'a5', or 'linx'.\n";
       return 1;
     }
   } else if (!isPTOBC) {
     if (auto detectedArch = detectTextualModuleArch(buf))
       arch = *detectedArch;
   }
-  if (arch != "a3" && arch != "a5")
+  if (arch != "a3" && arch != "a5" && arch != "linx")
     arch = "a3";
 
   if (isPTOBC) {
@@ -1033,9 +1060,12 @@ int main(int argc, char **argv) {
     // Parse textual MLIR (.pto).
     llvm::SourceMgr sourceMgr;
     sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-    pto::ScopedPTOParserTargetArch scopedParserArch(
-        &context, arch == "a5" ? pto::PTOParserTargetArch::A5
-                               : pto::PTOParserTargetArch::A3);
+    pto::PTOParserTargetArch parserArch = pto::PTOParserTargetArch::A3;
+    if (arch == "a5")
+      parserArch = pto::PTOParserTargetArch::A5;
+    else if (arch == "linx")
+      parserArch = pto::PTOParserTargetArch::Linx;
+    pto::ScopedPTOParserTargetArch scopedParserArch(&context, parserArch);
     module = parseSourceFile<ModuleOp>(sourceMgr, &context);
     if (!module) {
       llvm::errs() << "Error: Failed to parse MLIR.\n";
@@ -1050,6 +1080,9 @@ int main(int argc, char **argv) {
     module->getOperation()->setAttr("pto.target_arch",
                                     mlir::StringAttr::get(&context, arch));
   }
+
+  if (failed(validateLinxOperationBoundary(*module)))
+    return 1;
 
   PTOBuildLevel effectiveLevel = defaultBuildLevel();
   if (!parseBuildLevel(ptoBuildLevel, effectiveLevel)) {
@@ -1211,8 +1244,10 @@ int main(int argc, char **argv) {
   pm.addPass(createCSEPass());
   if (arch == "a3") {
     pm.addPass(pto::createEmitPTOManualPass(pto::PTOArch::A3));
-  } else {
+  } else if (arch == "a5") {
     pm.addPass(pto::createEmitPTOManualPass(pto::PTOArch::A5));
+  } else {
+    pm.addPass(pto::createEmitPTOManualPass(pto::PTOArch::Linx));
   }
   pm.addPass(emitc::createFormExpressionsPass());
   pm.addPass(mlir::createCSEPass());

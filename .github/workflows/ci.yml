@@ -107,6 +107,9 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Validate Python binding link contract
+        run: python3 tools/check_python_binding_link_contract.py --ptoas-root .
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -224,6 +227,7 @@ jobs:
       - name: Run PTO ISA v0.58 contract gates
         shell: bash
         run: |
+          python3 tools/check_python_binding_link_contract.py --ptoas-root .
           python3 tools/check_v058_pto_manifest.py --ptoas-root .
           python3 tools/ptobc/tests/opcode_coverage_check.py \
             include/PTO/IR/PTOOps.td \

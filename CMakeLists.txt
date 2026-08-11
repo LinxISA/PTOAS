@@ -139,6 +139,11 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v058_pto_manifest.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME python_binding_link_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_python_binding_link_contract.py
+            --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
   add_subdirectory(tools/ptobc/tests)
 endif()
 

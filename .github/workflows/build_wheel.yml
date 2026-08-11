@@ -56,6 +56,9 @@ jobs:
           echo "PY_VER=$PY_VER" >> $GITHUB_ENV
           echo "PY_PATH=/opt/python/$PY_VER" >> $GITHUB_ENV
 
+      - name: Validate Python binding link contract
+        run: ${PY_PATH}/bin/python tools/check_python_binding_link_contract.py --ptoas-root .
+
       - name: Compute PTOAS CLI version
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "release" ]; then

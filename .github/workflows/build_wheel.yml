@@ -101,7 +101,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v1
+          key: llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v2
 
       - name: Prepare LLVM source
         run: |
@@ -132,6 +132,9 @@ jobs:
           cmake -C "$PTO_SOURCE_DIR/cmake/LinuxHardeningCache.cmake" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
             -DLLVM_ENABLE_PROJECTS="mlir;clang" \
             -DMLIR_ENABLE_LINXISA_PTO=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
@@ -146,7 +149,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v1
+          key: llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v2
 
       - name: Build PTOAS
         run: |

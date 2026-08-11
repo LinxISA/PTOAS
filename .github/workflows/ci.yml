@@ -117,7 +117,7 @@ jobs:
             libedit-dev zlib1g-dev libxml2-dev libzstd-dev
           python3 -m pip install --upgrade pip
           # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x.
-          python3 -m pip install 'pybind11<3' numpy
+          python3 -m pip install 'pybind11<3' nanobind numpy
 
       - name: Define payload paths
         shell: bash

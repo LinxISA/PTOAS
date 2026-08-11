@@ -86,7 +86,7 @@ jobs:
           export PATH="${PY_PATH}/bin:$PATH"
           # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x
           # (see pybind11 static_assert on def_property + keep_alive).
-          pip install --no-cache-dir numpy 'pybind11<3' nanobind setuptools wheel auditwheel
+          pip install --no-cache-dir numpy 'pybind11<3' nanobind typing_extensions setuptools wheel auditwheel
 
       - name: Set build directories
         run: |

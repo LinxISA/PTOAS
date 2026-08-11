@@ -90,7 +90,7 @@ jobs:
         run: |
           # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x
           # (see pybind11 static_assert on def_property + keep_alive).
-          pip install --no-cache-dir numpy 'pybind11<3' nanobind setuptools wheel delocate
+          pip install --no-cache-dir numpy 'pybind11<3' nanobind typing_extensions setuptools wheel delocate
 
       - name: Set build directories
         run: |

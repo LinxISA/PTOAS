@@ -24,7 +24,8 @@ permissions:
   contents: write
 
 env:
-  LLVM_TAG: llvmorg-19.1.7
+  LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
+  LLVM_COMMIT: be1fc2451936a713e2a15620d5e7f8fe0a73688e
 
 jobs:
   build_wheel:
@@ -59,10 +60,15 @@ jobs:
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
             EXPECTED_RELEASE_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode release)"
-            PTOAS_VERSION="${GITHUB_REF_NAME#v}"
-            if [ "${PTOAS_VERSION}" != "${EXPECTED_RELEASE_VERSION}" ]; then
-              echo "release tag '${GITHUB_REF_NAME}' does not match computed version '${EXPECTED_RELEASE_VERSION}'" >&2
-              exit 1
+            if [ "${GITHUB_REF_NAME}" = "linxisa-v0.58.0" ]; then
+              ${PY_PATH}/bin/python tools/check_v058_pto_manifest.py --ptoas-root .
+              PTOAS_VERSION="${EXPECTED_RELEASE_VERSION}"
+            else
+              PTOAS_VERSION="${GITHUB_REF_NAME#v}"
+              if [ "${PTOAS_VERSION}" != "${EXPECTED_RELEASE_VERSION}" ]; then
+                echo "release tag '${GITHUB_REF_NAME}' does not match computed version '${EXPECTED_RELEASE_VERSION}'" >&2
+                exit 1
+              fi
             fi
           else
             PTOAS_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode dev)"
@@ -95,7 +101,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_TAG }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-hardening-v2
+          key: llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-hardening-v3
 
       - name: Prepare LLVM source
         run: |
@@ -103,10 +109,12 @@ jobs:
           cd $LLVM_SOURCE_DIR
           if [ ! -d .git ]; then
             git init
-            git remote add origin https://github.com/llvm/llvm-project.git
+            git remote add origin ${{ env.LLVM_REPOSITORY }}
           fi
-          git fetch --depth 1 origin tag ${{ env.LLVM_TAG }}
-          git checkout ${{ env.LLVM_TAG }}
+          git remote set-url origin ${{ env.LLVM_REPOSITORY }}
+          git fetch --depth 1 origin ${{ env.LLVM_COMMIT }}
+          git checkout --detach ${{ env.LLVM_COMMIT }}
+          test "$(git rev-parse HEAD)" = "${{ env.LLVM_COMMIT }}"
 
       - name: Warn when default-branch cache is missing for PR/release runs
         if: steps.cache-llvm.outputs.cache-hit != 'true' && (github.event_name == 'pull_request' || github.event_name == 'release')
@@ -114,7 +122,7 @@ jobs:
           echo "LLVM cache miss while running on PR/release."
           echo "PR/release runs are cache-consumers only and should reuse cache generated on the default branch."
           echo "Please run this workflow on the default branch first to populate cache key:"
-          echo "llvm-${{ env.LLVM_TAG }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-hardening-v2"
+          echo "llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-hardening-v3"
 
       - name: Build LLVM/MLIR
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -137,7 +145,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_TAG }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-hardening-v2
+          key: llvm-${{ env.LLVM_COMMIT }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-hardening-v3
 
       - name: Build PTOAS
         run: |
@@ -154,6 +162,7 @@ jobs:
             -Dpybind11_DIR=$(${PY_PATH}/bin/python -m pybind11 --cmakedir) \
             -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
             -DPTOAS_RELEASE_VERSION_OVERRIDE=${PTOAS_VERSION} \
+            -DPTOAS_ENABLE_WERROR=OFF \
             -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR} \
             -DCMAKE_BUILD_TYPE=Release
           ninja -C build
@@ -287,7 +296,7 @@ jobs:
 
   bump_base_version:
     name: Bump base version after release
-    if: github.event_name == 'release' && github.event.action == 'released'
+    if: ${{ github.event_name == 'release' && github.event.action == 'released' && !startsWith(github.event.release.tag_name, 'linxisa-') }}
     needs: upload_release_assets
     runs-on: ubuntu-latest
 

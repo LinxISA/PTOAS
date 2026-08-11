@@ -39,7 +39,7 @@ endif()
 message(STATUS "PTOAS CLI version: ${PTOAS_CLI_VERSION}")
 
 # =========================================================
-# [新增] 强制设置 C++17 标准 (LLVM 19 必需)
+# PTOAS uses the C++17 surface required by the governed LinxISA LLVM toolchain.
 # =========================================================
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,7 +76,10 @@ include(AddMLIR)
 # =========================================================
 # Keep warning policy in CMake so CI, wheel, and external build entrypoints
 # all enforce the same diagnostics contract.
-option(PTOAS_ENABLE_WERROR "Treat PTOAS warnings as errors" ON)
+# LLVM 23 deprecates the generic builder surface used across the existing
+# lowering code. Keep warnings visible, but do not make downstream LLVM API
+# deprecations fatal while the migration is completed incrementally.
+option(PTOAS_ENABLE_WERROR "Treat PTOAS warnings as errors" OFF)
 if(PTOAS_ENABLE_WERROR)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror>)

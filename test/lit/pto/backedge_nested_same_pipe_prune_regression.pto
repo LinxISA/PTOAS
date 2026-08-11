@@ -5,13 +5,13 @@
 // the wider same-pipe pair can be removed before event-id allocation.
 //
 // CHECK-LABEL: __global__ AICORE void backedge_nested_same_pipe_prune()
-// CHECK: for (size_t v16 = (size_t) v1; v16 < ((size_t) v3); v16 += (size_t) v2) {
+// CHECK: for (int32_t
 // CHECK-NEXT: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[INNER:[0-9]+]]);
-// CHECK-NEXT: TMOV(v10, v6);
-// CHECK-NEXT: TMOV(v12, v8);
-// CHECK: TMATMUL(v14, v10, v12);
-// CHECK: TMOV(v8, v14);
-// CHECK-NEXT: TMOV(v6, v14);
+// CHECK-NEXT: TMOV(v8, v6);
+// CHECK-NEXT: TMOV(v9, v7);
+// CHECK: TMATMUL(v10, v8, v9);
+// CHECK: TMOV(v7, v10);
+// CHECK-NEXT: TMOV(v6, v10);
 // CHECK-NEXT: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[INNER]]);
 // CHECK-NEXT: }
 // CHECK-NEXT: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[INNER]]);

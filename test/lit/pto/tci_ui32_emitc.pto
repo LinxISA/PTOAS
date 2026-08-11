@@ -7,7 +7,7 @@ module {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
-    %src = memref.reinterpret_cast %dst to offset: [%c0], sizes: [%c1, %c32], strides: [%c32, %c1] {layout = #pto.layout<nd>} : memref<32xui32, #pto.address_space<gm>> to memref<1x32xui32, strided<[32, 1], offset: ?>, #pto.address_space<gm>>
+    %src = memref.reinterpret_cast %dst to offset: [%c0], sizes: [1, 32], strides: [32, 1] {layout = #pto.layout<nd>} : memref<32xui32, #pto.address_space<gm>> to memref<1x32xui32, strided<[32, 1], offset: ?>, #pto.address_space<gm>>
     %tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     pto.tci ins(%c5_ui32 : ui32) outs(%tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%src : memref<1x32xui32, strided<[32, 1], offset: ?>, #pto.address_space<gm>>) {layout = #pto.layout<nd>, pto.inferred_layout = true}

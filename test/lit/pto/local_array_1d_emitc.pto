@@ -25,4 +25,5 @@ module {
 // CHECK-LABEL: local_array_1d
 // CHECK: int32_t [[A:v[0-9]+]][16];
 // CHECK: [[A]][{{v[0-9]+}}] = {{v[0-9]+}};
-// CHECK: [[A]][{{v[0-9]+}}] = [[A]][{{v[0-9]+}}];
+// CHECK: int32_t [[R:v[0-9]+]] = [[A]][{{v[0-9]+}}];
+// CHECK: [[A]][{{v[0-9]+}}] = [[R]];

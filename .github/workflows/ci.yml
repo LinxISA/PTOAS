@@ -93,7 +93,8 @@ jobs:
   build-and-test:
     runs-on: ubuntu-22.04
     env:
-      LLVM_COMMIT: cd708029e0b2869e80abe31ddb175f7c35361f90
+      LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
+      LLVM_COMMIT: be1fc2451936a713e2a15620d5e7f8fe0a73688e
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-shared
       PTO_INSTALL_DIR: ${{ github.workspace }}/install
       MLIR_PYTHONPATH: ${{ github.workspace }}/llvm-project/llvm/build-shared/tools/mlir/python_packages/mlir_core
@@ -154,11 +155,13 @@ jobs:
           # 如果 restore 只带来了 build-shared，这里补一个 git repo
           if [ ! -d .git ]; then
             git init
-            git remote add origin https://github.com/llvm/llvm-project.git
+            git remote add origin "${LLVM_REPOSITORY}"
           fi
 
-          git fetch --depth 1 origin tag llvmorg-19.1.7
-          git checkout "${LLVM_COMMIT}"
+          git remote set-url origin "${LLVM_REPOSITORY}"
+          git fetch --depth 1 origin "${LLVM_COMMIT}"
+          git checkout --detach "${LLVM_COMMIT}"
+          test "$(git rev-parse HEAD)" = "${LLVM_COMMIT}"
 
       - name: Build LLVM/MLIR (only if cache miss)
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -195,6 +198,7 @@ jobs:
             -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DMLIR_PYTHON_PACKAGE_DIR="${LLVM_DIR}/tools/mlir/python_packages/mlir_core" \
+            -DPTOAS_ENABLE_WERROR=OFF \
             -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release
           ninja -C build ptoas

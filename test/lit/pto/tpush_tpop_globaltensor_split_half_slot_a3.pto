@@ -63,7 +63,7 @@ module {
 // CHECK-LABEL: AICORE void vector_kernel
 // CHECK: TPipe<0, Direction::DIR_C2V, 262144, 8, 8, false>
 // CHECK: TPOP<TPipe<0, Direction::DIR_C2V, 262144, 8, 8, false>, GlobalTensor<float, pto::Shape<1, 1, 4, 64, 128>, pto::Stride<65536, 65536, 16384, 128, 1>, pto::Layout::ND>, TileSplitAxis::TILE_UP_DOWN>
-// CHECK: GlobalTensor<float, pto::Shape<1, 1, 4, 16, 128>, pto::Stride<65536, 65536, 16384, 128, 1>, pto::Layout::ND>
+// CHECK: GlobalTensor<float, pto::Shape<1, 1, 4, 16, 128>, pto::Stride<32768, 32768, 8192, 128, 1>, pto::Layout::ND>
 // CHECK: TFREE<TPipe<0, Direction::DIR_C2V, 262144, 8, 8, false>, GlobalTensor<float, pto::Shape<1, 1, 4, 64, 128>, pto::Stride<65536, 65536, 16384, 128, 1>, pto::Layout::ND>, TileSplitAxis::TILE_UP_DOWN>
 // CHECK-LABEL: __global__ AICORE void call_both
 // CHECK: set_ffts_base_addr

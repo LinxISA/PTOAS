@@ -290,14 +290,6 @@ static bool isEmitCTileLikeType(Type ty) {
   return value && (value->contains("Tile<") || value->contains("ConvTile<"));
 }
 
-static Value loadEmitCLValueIfNeeded(OpBuilder &builder, Location loc,
-                                     Value value) {
-  if (auto lvalueTy = dyn_cast<emitc::LValueType>(value.getType()))
-    return builder.create<emitc::LoadOp>(loc, lvalueTy.getValueType(), value)
-        .getResult();
-  return value;
-}
-
 static std::string getEmitCScalarTypeToken(Type elemTy) {
   if (pto::isPTOFloat8E4M3FamilyType(elemTy))
     return "float8_e4m3_t";
@@ -544,8 +536,9 @@ public:
     });
 
     addConversion([Ctx](pto::EventIdArrayType type) -> Type {
-      std::string tok = "PTOAS_EventIdArray<" + std::to_string(type.getSize()) + ">";
-      return emitc::OpaqueType::get(Ctx, tok);
+      return emitc::ArrayType::get(
+          ArrayRef<int64_t>{static_cast<int64_t>(type.getSize())},
+          emitc::OpaqueType::get(Ctx, "int32_t"));
     });
 
     // !pto.local_array<D1 x D2 x ... x T> -> !emitc.array<D1 x D2 x ... x T>.
@@ -2668,9 +2661,6 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
 
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
-    memArg = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), memArg);
-    idx = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), idx);
 
     auto gatherOobTok = [&](pto::GatherOOB mode) -> StringRef {
       switch (mode) {
@@ -2723,10 +2713,6 @@ struct PTOMGatherMaskToMGATHER_MASK
     Value dst = peelUnrealized(adaptor.getDst());
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
-    memArg = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), memArg);
-    idx = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), idx);
-    mask = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), mask);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "MGATHER_MASK",
@@ -2749,12 +2735,6 @@ struct PTOMGatherCasToMGATHER_CAS
     Value dst = peelUnrealized(adaptor.getDst());
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
-    memArg = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), memArg);
-    idx = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), idx);
-    expected = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), expected);
-    replacement =
-        loadEmitCLValueIfNeeded(rewriter, op.getLoc(), replacement);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "MGATHER_CAS",
@@ -4222,12 +4202,9 @@ struct PointerCastConversion : public OpConversionPattern<pto::PointerCastOp> {
                  .getResult(0);
     }
 
-    Value assignDst =
-        loadEmitCLValueIfNeeded(rewriter, loc, resultValue);
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TASSIGN",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{assignDst, addr});
+    rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
+                                         ArrayAttr{}, ArrayAttr{},
+                                         ValueRange{resultValue, addr});
 
     rewriter.replaceOp(op, resultValue);
     return success();
@@ -4261,8 +4238,6 @@ struct PTOTLoadToTLOAD : public OpConversionPattern<pto::TLoadOp> {
           srcArg = gt;
       }
     }
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
-    srcArg = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), srcArg);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TLOAD",
@@ -4285,8 +4260,6 @@ struct PTOTPrefetchToTPREFETCH : public OpConversionPattern<pto::TPrefetchOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     Value address = peelUnrealized(adaptor.getAddress());
     Value byteCount = peelUnrealized(adaptor.getByteCount());
-    address = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), address);
-    byteCount = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), byteCount);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TPREFETCH",
@@ -4359,7 +4332,8 @@ struct PTOTStoreToTSTORE : public OpConversionPattern<pto::TStoreOp> {
     const bool reluNonDefault = reluPreMode != pto::ReluPreMode::NoRelu;
 
     auto getOpaqueTok = [&](Value v, StringRef name) -> FailureOr<std::string> {
-      if (auto ot = mlir::dyn_cast<emitc::OpaqueType>(v.getType()))
+      if (auto ot =
+              mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(v.getType())))
         return ot.getValue().str();
       return rewriter.notifyMatchFailure(op, (name + " must be emitc::OpaqueType").str());
     };
@@ -5392,9 +5366,6 @@ struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterOp> {
 
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
-    memArg = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), memArg);
-    src = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src);
-    idx = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), idx);
 
     auto scatterAtomicTok = [&](pto::ScatterAtomicOp atomic) -> StringRef {
       switch (atomic) {
@@ -5460,10 +5431,6 @@ struct PTOMScatterMaskToMSCATTER_MASK
     Value mem = peelUnrealized(adaptor.getMem());
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
-    memArg = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), memArg);
-    src = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src);
-    idx = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), idx);
-    mask = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), mask);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "MSCATTER_MASK",
@@ -5575,8 +5542,6 @@ struct PTOGetScaleAddrToEmitC
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
-    src = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src);
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
 
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TGET_SCALE_ADDR",
@@ -5601,11 +5566,7 @@ struct PTOSetValidShapeToEmitC : public OpConversionPattern<pto::SetValidShapeOp
       return v;
     };
     auto isTileLike = [](Value v) -> bool {
-      auto ot = dyn_cast<emitc::OpaqueType>(v.getType());
-      if (!ot)
-        return false;
-      StringRef s = ot.getValue();
-      return s.contains("Tile<") || s.contains("ConvTile<");
+      return isEmitCTileLikeType(v.getType());
     };
 
     Value src = peelAllCasts(peelUnrealized(adaptor.getSource()));
@@ -5638,11 +5599,7 @@ struct PTOTAssignToEmitC : public OpConversionPattern<pto::TAssignOp> {
       return v;
     };
     auto isTileLike = [](Value v) -> bool {
-      auto ot = dyn_cast<emitc::OpaqueType>(v.getType());
-      if (!ot)
-        return false;
-      StringRef s = ot.getValue();
-      return s.contains("Tile<") || s.contains("ConvTile<");
+      return isEmitCTileLikeType(v.getType());
     };
 
     auto loc = op.getLoc();
@@ -6500,8 +6457,10 @@ struct PTOEventIdArrayGetToEmitC
       return rewriter.notifyMatchFailure(op,
                                          "failed to map eventid_array get result type");
 
+    auto slot = rewriter.create<emitc::SubscriptOp>(
+        op.getLoc(), emitc::LValueType::get(resultTy), array, index);
     auto load =
-        rewriter.create<emitc::SubscriptOp>(op.getLoc(), resultTy, array, index);
+        rewriter.create<emitc::LoadOp>(op.getLoc(), resultTy, slot.getResult());
     rewriter.replaceOp(op, load.getResult());
     return success();
   }
@@ -6519,9 +6478,13 @@ struct PTOEventIdArraySetToEmitC
     Value index = peelUnrealized(adaptor.getIndex());
     Value value = peelUnrealized(adaptor.getValue());
 
-    rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "PTOAS__EVENTID_ARRAY_STORE",
-        ArrayAttr{}, ArrayAttr{}, ValueRange{array, index, value});
+    Type elemTy = getEmitCValueType(value.getType());
+    Value slot = rewriter
+                     .create<emitc::SubscriptOp>(op.getLoc(),
+                                                 emitc::LValueType::get(elemTy),
+                                                 array, ValueRange{index})
+                     .getResult();
+    rewriter.create<emitc::AssignOp>(op.getLoc(), slot, value);
     rewriter.eraseOp(op);
     return success();
   }
@@ -6572,9 +6535,12 @@ struct PTOLocalArrayGetToEmitC
       return rewriter.notifyMatchFailure(
           op, "failed to map local_array element type");
 
-    auto sub = rewriter.create<emitc::SubscriptOp>(
-        op.getLoc(), resultTy, adaptor.getArray(), adaptor.getIndices());
-    rewriter.replaceOp(op, sub.getResult());
+    auto slot = rewriter.create<emitc::SubscriptOp>(
+        op.getLoc(), emitc::LValueType::get(resultTy), adaptor.getArray(),
+        adaptor.getIndices());
+    auto load =
+        rewriter.create<emitc::LoadOp>(op.getLoc(), resultTy, slot.getResult());
+    rewriter.replaceOp(op, load.getResult());
     return success();
   }
 };
@@ -6591,12 +6557,12 @@ struct PTOLocalArraySetToEmitC
                                 OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value value = adaptor.getValue();
-    Type elemTy = value.getType();
+    Type elemTy = getEmitCValueType(value.getType());
 
     Value slot = rewriter
-                     .create<emitc::SubscriptOp>(op.getLoc(), elemTy,
-                                                 adaptor.getArray(),
-                                                 adaptor.getIndices())
+                     .create<emitc::SubscriptOp>(
+                         op.getLoc(), emitc::LValueType::get(elemTy),
+                         adaptor.getArray(), adaptor.getIndices())
                      .getResult();
     rewriter.create<emitc::AssignOp>(op.getLoc(), slot, value);
     rewriter.eraseOp(op);
@@ -6833,7 +6799,8 @@ struct PTOPartitionViewToEmitC
 };
 
 static FailureOr<std::string> getPipeDataTypeToken(Value value) {
-  auto opaqueTy = dyn_cast<emitc::OpaqueType>(value.getType());
+  auto opaqueTy =
+      dyn_cast<emitc::OpaqueType>(getEmitCValueType(value.getType()));
   if (!opaqueTy)
     return failure();
   StringRef token = opaqueTy.getValue();
@@ -7258,7 +7225,8 @@ struct PTOTCIToEmitC : public OpConversionPattern<pto::TCIOp> {
     std::string descTok = op.getDescending() ? "1" : "0";
 
     ArrayAttr targs;
-    if (auto ot = mlir::dyn_cast<emitc::OpaqueType>(dst.getType())) {
+    if (auto ot = mlir::dyn_cast<emitc::OpaqueType>(
+            getEmitCValueType(dst.getType()))) {
       std::string tileTok = ot.getValue().str(); // "Tile<...>"
       targs = rewriter.getArrayAttr({
           emitc::OpaqueAttr::get(ctx, tileTok),
@@ -7480,7 +7448,8 @@ struct PTOTTriToEmitC : public OpConversionPattern<pto::TTriOp> {
     Value diagonal = peelUnrealized(adaptor.getDiagonal());
 
     ArrayAttr templateArgs;
-    if (auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType())) {
+    if (auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(
+            getEmitCValueType(dst.getType()))) {
       templateArgs = rewriter.getArrayAttr({
           emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
           emitc::OpaqueAttr::get(ctx, std::to_string(op.getUpperOrLower())),
@@ -7783,7 +7752,6 @@ struct PTOAccCvtToEmitC : public OpConversionPattern<pto::AccCvtOp> {
   LogicalResult matchAndRewrite(pto::AccCvtOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value dst = peelUnrealized(adaptor.getDst());
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "ACCCVT",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
@@ -8113,7 +8081,8 @@ struct PTOGatherToEmitC : public OpConversionPattern<pto::TGatherOp> {
     Value src0 = peelUnrealized(adaptor.getSrc());
 
     auto getOpaqueTok = [&](Value v, StringRef name) -> FailureOr<std::string> {
-      if (auto ot = mlir::dyn_cast<emitc::OpaqueType>(v.getType()))
+      if (auto ot =
+              mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(v.getType())))
         return ot.getValue().str();
       return rewriter.notifyMatchFailure(op, (name + " must be emitc::OpaqueType (tile)").str());
     };
@@ -8232,8 +8201,6 @@ struct PTOImg2ColToEmitC : public OpConversionPattern<pto::TImg2ColOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
-    src = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src);
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TIMG2COL",
@@ -8253,9 +8220,6 @@ struct PTODeinterleaveToEmitC : public OpConversionPattern<pto::TDeinterleaveOp>
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst0 = peelUnrealized(adaptor.getDst0());
     Value dst1 = peelUnrealized(adaptor.getDst1());
-    src = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src);
-    dst0 = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst0);
-    dst1 = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst1);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TDEINTERLEAVE",
@@ -8275,9 +8239,6 @@ struct PTOInterleaveToEmitC : public OpConversionPattern<pto::TInterleaveOp> {
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
-    src0 = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src0);
-    src1 = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), src1);
-    dst = loadEmitCLValueIfNeeded(rewriter, op.getLoc(), dst);
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TINTERLEAVE",
@@ -8445,8 +8406,10 @@ struct PTOMovToEmitC : public OpConversionPattern<pto::TMovOp> {
     if (op.getPreQuantScalar())
       preQuantScalar = peelUnrealized(adaptor.getPreQuantScalar());
 
-    auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-    auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
+    auto dstOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(dst.getType()));
+    auto srcOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(src.getType()));
     if (!dstOT || !srcOT)
       return rewriter.notifyMatchFailure(
           op, "tmov lowering expects opaque dst/src types");
@@ -8489,7 +8452,8 @@ struct PTOMovToEmitC : public OpConversionPattern<pto::TMovOp> {
     StringRef callee = "TMOV";
 
     if (hasFp) {
-      auto fpOT = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+      auto fpOT =
+          mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(fp.getType()));
       if (!fpOT)
         return rewriter.notifyMatchFailure(
             op, "tmov fp lowering expects opaque fp type");
@@ -8554,9 +8518,12 @@ struct PTOMovFPToEmitC : public OpConversionPattern<pto::TMovFPOp> {
 
     // TMOV_FP<DstTileData, AccTile, FbTile>(dstTileData, cTile, fbTile)
     ArrayAttr templateArgs;
-    auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-    auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
-    auto fpOT  = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+    auto dstOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(dst.getType()));
+    auto srcOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(src.getType()));
+    auto fpOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(fp.getType()));
     if (dstOT && srcOT && fpOT) {
       templateArgs = rewriter.getArrayAttr({
           emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
@@ -8594,7 +8561,8 @@ struct PTOQuantToEmitC : public OpConversionPattern<pto::TQuantOp> {
     Value offsetPtr;
     if (op.getOffset()) {
       Value offset = peelUnrealized(adaptor.getOffset());
-      auto offsetOT = mlir::dyn_cast<emitc::OpaqueType>(offset.getType());
+      auto offsetOT = mlir::dyn_cast<emitc::OpaqueType>(
+          getEmitCValueType(offset.getType()));
       if (offsetOT) {
         offsetPtr = rewriter
                         .create<emitc::ApplyOp>(
@@ -8609,9 +8577,12 @@ struct PTOQuantToEmitC : public OpConversionPattern<pto::TQuantOp> {
             ? "pto::QuantType::INT8_SYM"
             : "pto::QuantType::INT8_ASYM";
     ArrayAttr templateArgs;
-    auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-    auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
-    auto fpOT  = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+    auto dstOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(dst.getType()));
+    auto srcOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(src.getType()));
+    auto fpOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(fp.getType()));
     if (dstOT && srcOT && fpOT) {
       templateArgs = rewriter.getArrayAttr({
           emitc::OpaqueAttr::get(ctx, quantTypeStr),
@@ -8651,9 +8622,12 @@ struct PTODequantToEmitC : public OpConversionPattern<pto::TDequantOp> {
 
     // TDEQUANT<DstTile, SrcTile, ParaTile>(dst, src, scale, offset)
     ArrayAttr templateArgs;
-    auto dstOT   = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-    auto srcOT   = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
-    auto scaleOT = mlir::dyn_cast<emitc::OpaqueType>(scale.getType());
+    auto dstOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(dst.getType()));
+    auto srcOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(src.getType()));
+    auto scaleOT =
+        mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(scale.getType()));
     if (dstOT && srcOT && scaleOT) {
       templateArgs = rewriter.getArrayAttr({
           emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
@@ -8709,8 +8683,10 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
       for (Value v : adaptor.getSrcs())
         srcs.push_back(peelUnrealized(v));
 
-      auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-      auto tmpOT = mlir::dyn_cast<emitc::OpaqueType>(tmp.getType());
+      auto dstOT =
+          mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(dst.getType()));
+      auto tmpOT =
+          mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(tmp.getType()));
       if (!dstOT || !tmpOT || srcs.size() < 2 || srcs.size() > 4)
         return op.emitOpError("format2 expects dst/tmp tilebufs and 2 to 4 srcs");
 
@@ -8719,7 +8695,8 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
       targs.push_back(emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()));
       targs.push_back(emitc::OpaqueAttr::get(ctx, tmpOT.getValue().str()));
       for (Value v : srcs) {
-        auto ot = mlir::dyn_cast<emitc::OpaqueType>(v.getType());
+        auto ot =
+            mlir::dyn_cast<emitc::OpaqueType>(getEmitCValueType(v.getType()));
         if (!ot)
           return op.emitOpError("format2 expects tilebuf srcs");
         targs.push_back(emitc::OpaqueAttr::get(ctx, ot.getValue().str()));
@@ -9919,9 +9896,6 @@ struct PTOSORTToEmitC : public OpConversionPattern<pto::TSortOp> {
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
     Value dstIndices = peelUnrealized(adaptor.getDstIndices());
-    src = loadEmitCLValueIfNeeded(rewriter, loc, src);
-    dst = loadEmitCLValueIfNeeded(rewriter, loc, dst);
-    dstIndices = loadEmitCLValueIfNeeded(rewriter, loc, dstIndices);
     auto boolTy = emitc::OpaqueType::get(ctx, "bool");
     Value descending = rewriter.create<emitc::ConstantOp>(
         loc, boolTy,
@@ -10806,10 +10780,9 @@ struct PTOAllocTileToEmitC
         addr = rewriter.create<emitc::CastOp>(loc, u64Ty, addr).getResult();
       }
 
-      Value tileValue = loadEmitCLValueIfNeeded(rewriter, loc, tile);
       rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
                                            ArrayAttr{}, ArrayAttr{},
-                                           ValueRange{tileValue, addr});
+                                           ValueRange{tile, addr});
     }
 
     rewriter.replaceOp(op, tile);
@@ -12356,6 +12329,15 @@ static AICORE inline void ptoas_auto_sync_tail(
         return;
       }
 
+      if (auto lvalueTy = dyn_cast<emitc::LValueType>(inTy);
+          lvalueTy && lvalueTy.getValueType() == outTy) {
+        OpBuilder builder(cast);
+        auto load = builder.create<emitc::LoadOp>(cast.getLoc(), outTy, input);
+        output.replaceAllUsesWith(load.getResult());
+        castsToErase.push_back(cast);
+        return;
+      }
+
       // SCF/CFG type conversion can transiently materialize pointer->memref
       // bridge casts. At this stage, the producing value is already in the
       // lowered EmitC pointer form; keep it and drop the bridge cast.
@@ -12426,6 +12408,125 @@ static AICORE inline void ptoas_auto_sync_tail(
         }
 
         castOp.erase();
+      }
+    }
+
+    // EmitC models mutable variables as lvalues, while call_opaque accepts
+    // value operands.  Void calls are instruction statements and may mutate
+    // tile/output arguments, so preserve their lvalue identity with verbatim
+    // placeholders.  Calls producing a value are input expressions; materialize
+    // reads for those operands before call_opaque verification.
+    {
+      SmallVector<emitc::CallOpaqueOp> calls;
+      mop.walk([&](emitc::CallOpaqueOp call) { calls.push_back(call); });
+
+      for (emitc::CallOpaqueOp call : calls) {
+        bool hasLValueOperand = llvm::any_of(call->getOperandTypes(),
+                                             llvm::IsaPred<emitc::LValueType>);
+        if (!hasLValueOperand)
+          continue;
+
+        if (call->getNumResults() == 0) {
+          auto escapeFormat = [](StringRef text) {
+            std::string escaped;
+            escaped.reserve(text.size());
+            for (char ch : text) {
+              escaped.push_back(ch);
+              if (ch == '{' || ch == '}')
+                escaped.push_back(ch);
+            }
+            return escaped;
+          };
+          auto renderAttribute =
+              [&](Attribute attr) -> std::optional<std::string> {
+            if (auto opaque = dyn_cast<emitc::OpaqueAttr>(attr))
+              return opaque.getValue().str();
+            if (auto integer = dyn_cast<IntegerAttr>(attr)) {
+              SmallString<32> value;
+              integer.getValue().toString(
+                  value, 10,
+                  /*Signed=*/!integer.getType().isUnsignedInteger());
+              return value.str().str();
+            }
+            return std::nullopt;
+          };
+
+          std::string format = escapeFormat(call.getCallee());
+          bool canUseVerbatim = true;
+          if (auto templateArgs = call.getTemplateArgs()) {
+            format += "<";
+            for (auto [index, attr] : llvm::enumerate(*templateArgs)) {
+              if (index)
+                format += ", ";
+              auto rendered = renderAttribute(attr);
+              if (!rendered) {
+                canUseVerbatim = false;
+                break;
+              }
+              format += escapeFormat(*rendered);
+            }
+            format += ">";
+          }
+
+          SmallVector<Value> formatOperands;
+          format += "(";
+          if (canUseVerbatim) {
+            if (auto args = call.getArgs()) {
+              for (auto [index, attr] : llvm::enumerate(*args)) {
+                if (index)
+                  format += ", ";
+                if (auto integer = dyn_cast<IntegerAttr>(attr);
+                    integer && integer.getType().isIndex()) {
+                  int64_t operandIndex = integer.getInt();
+                  if (operandIndex < 0 ||
+                      operandIndex >=
+                          static_cast<int64_t>(call.getNumOperands())) {
+                    canUseVerbatim = false;
+                    break;
+                  }
+                  format += "{}";
+                  formatOperands.push_back(call->getOperand(operandIndex));
+                  continue;
+                }
+                auto rendered = renderAttribute(attr);
+                if (!rendered) {
+                  canUseVerbatim = false;
+                  break;
+                }
+                format += escapeFormat(*rendered);
+              }
+            } else {
+              for (auto [index, operand] :
+                   llvm::enumerate(call.getOperands())) {
+                if (index)
+                  format += ", ";
+                format += "{}";
+                formatOperands.push_back(operand);
+              }
+            }
+          }
+          format += ");";
+
+          if (canUseVerbatim) {
+            OpBuilder builder(call);
+            builder.setInsertionPoint(call);
+            builder.create<emitc::VerbatimOp>(
+                call.getLoc(), builder.getStringAttr(format), formatOperands);
+            call.erase();
+            continue;
+          }
+        }
+
+        OpBuilder builder(call);
+        builder.setInsertionPoint(call);
+        for (OpOperand &operand : call->getOpOperands()) {
+          auto lvalueTy = dyn_cast<emitc::LValueType>(operand.get().getType());
+          if (!lvalueTy)
+            continue;
+          auto load = builder.create<emitc::LoadOp>(
+              call.getLoc(), lvalueTy.getValueType(), operand.get());
+          operand.set(load.getResult());
+        }
       }
     }
 

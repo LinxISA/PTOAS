@@ -2,7 +2,10 @@
 
 ## 1. 项目简介 (Introduction)
 
-**ptoas** (`ptoas`) 是一个基于 **LLVM/MLIR (llvmorg-19.1.7)***(Commit cd708029e0b2869e80abe31ddb175f7c35361f90)* 框架构建的专用编译器工具链，专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
+**ptoas** (`ptoas`) 是一个基于 LinxISA 受控 **LLVM/MLIR**
+（release `linxisa-v0.58.0`，commit
+`be1fc2451936a713e2a15620d5e7f8fe0a73688e`）构建的专用编译器工具链，
+专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
 
 作为连接上层 AI 框架与底层各类NPU/GPGPU/CPU硬件，`ptoas` 采用 **Out-of-Tree** 架构构建，提供了完整的 C++ 与 Python 接口，主要职责包括：
 
@@ -37,7 +40,9 @@ PTOAS/
 
 ## 3. 构建指南 (Build Instructions)
 
-⚠️ **重要提示**：本项目严格依赖 **LLVM llvmorg-19.1.7** 版本。
+⚠️ **重要提示**：本项目严格依赖 LinxISA LLVM
+`be1fc2451936a713e2a15620d5e7f8fe0a73688e`。该 SHA 对应
+`linxisa-v0.58.0`，不要替换为同名上游 LLVM tag。
 
 
 ### 3.0 环境变量配置 (Configuration)
@@ -83,18 +88,17 @@ python3 -m pip install pybind11==2.12.0 numpy
 
 ### 3.2 第一步：构建 LLVM/MLIR (Dependency)
 
-我们需要下载 LLVM 源码，切换到 `llvmorg-19.1.7` 标签，并以**动态库 (Shared Libs)** 模式编译，以确保 Python Binding 的正确链接。
+我们需要下载受控 LinxISA LLVM 源码，切换到上文的精确 SHA，并以
+**动态库 (Shared Libs)** 模式编译，以确保 Python Binding 的正确链接。
 
 ```bash
 # 1. 下载 LLVM 源码
 cd $WORKSPACE_DIR
-git clone https://github.com/llvm/llvm-project.git
+git clone https://github.com/LinxISA/llvm-project.git
 cd $LLVM_SOURCE_DIR
+git checkout --detach be1fc2451936a713e2a15620d5e7f8fe0a73688e
 
-# 2. [关键] 切换到 llvmorg-19.1.7
-git checkout llvmorg-19.1.7
-
-# 3. 配置 CMake (构建动态库并启用 Python 绑定)
+# 2. 配置 CMake (构建动态库并启用 Python 绑定)
 cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DLLVM_ENABLE_PROJECTS="mlir;clang" \
     -DBUILD_SHARED_LIBS=ON \
@@ -103,14 +107,14 @@ cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD="host"
 
-# 4. 编译 LLVM (这一步耗时较长)
+# 3. 编译 LLVM (这一步耗时较长)
 ninja -C $LLVM_BUILD_DIR
 
 ```
 
 ### 3.3 第二步：构建 PTOAS (Out-of-Tree)
 
-下载 PTOAS 源码并基于刚刚编译好的 LLVM 19 进行构建。
+下载 PTOAS 源码并基于刚刚编译好的受控 LinxISA LLVM 进行构建。
 
 ```bash
 # 1. 下载 PTOAS 源码
@@ -133,6 +137,7 @@ cmake -G Ninja \
     -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
+    -DPTOAS_ENABLE_WERROR=OFF \
     -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
 
 # 4. 编译并安装

@@ -162,6 +162,10 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_linx_verifier_contract.py)
   add_test(
+    NAME linx_decoded_verifier_contract_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_linx_verifier_contract.py)
+  add_test(
     NAME emitc_lvalue_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)

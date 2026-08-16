@@ -8989,17 +8989,7 @@ mlir::LogicalResult mlir::pto::TSqrtOp::verify() {
   return mlir::success();
 }
 
-
-
 mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
-  auto shouldBypassDecoded = [&]() -> bool {
-    Value src = getSrc();
-    Value fp = getFp();
-    return isa<MemRefType>(src.getType()) || isa<MemRefType>(fp.getType()) ||
-           src.getDefiningOp<pto::BindTileOp>() ||
-           fp.getDefiningOp<pto::BindTileOp>();
-  };
-
   auto verifyDstType = [&]() -> LogicalResult {
     Type dstTy = getDst().getType();
     if (!isa<MemRefType, pto::PartitionTensorViewType>(dstTy))
@@ -9068,19 +9058,8 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
       return emitOpError() << "expects src to be in the acc address space";
     return mlir::success();
   };
-  if (shouldBypassDecoded())
-    return success();
-  switch (getVerifierTargetArch(getOperation())) {
-  case VerifierTargetArch::A2A3:
-    return verifyA2A3();
-  case VerifierTargetArch::A5:
-    return verifyA5();
-  case VerifierTargetArch::Linx:
-    return emitOpError("Linx legality is not implemented for this operation");
-  }
-  return failure();
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
-
 
 mlir::LogicalResult mlir::pto::TSubOp::verify() {
   return verifyArithmeticBinaryTileOpWithArchDispatch(

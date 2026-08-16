@@ -154,6 +154,14 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_release_delivery_contract.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(
+    NAME release_delivery_contract_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_release_delivery_contract.py)
+  add_test(
+    NAME linx_decoded_verifier_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_linx_verifier_contract.py)
+  add_test(
     NAME emitc_lvalue_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)

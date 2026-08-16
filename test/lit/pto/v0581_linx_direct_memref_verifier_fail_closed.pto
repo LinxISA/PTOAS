@@ -1,0 +1,12 @@
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_direct_memref_verifier_must_not_bypass() {
+    %src = memref.alloc() : memref<16x16xi32, #pto.address_space<vec>>
+    %dst = memref.alloc() : memref<16x16xi32, #pto.address_space<vec>>
+    pto.tabs ins(%src : memref<16x16xi32, #pto.address_space<vec>>) outs(%dst : memref<16x16xi32, #pto.address_space<vec>>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tabs' op expects element type to be f16 or f32

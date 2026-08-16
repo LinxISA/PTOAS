@@ -79,7 +79,7 @@ ENV PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core/
 # copy pto.py, _pto_ops_gen.py 
 RUN cp $PTO_INSTALL_DIR/mlir/dialects/*.py $PY_PACKAGE_DIR/mlir/dialects/
 
-COPY ./setup.py $PY_PACKAGE_DIR/
+COPY docker/setup.py $PY_PACKAGE_DIR/
 
 WORKDIR $PY_PACKAGE_DIR
 RUN python setup.py bdist_wheel
@@ -110,7 +110,7 @@ RUN ptoas --enable-insert-sync ./abs.pto -o ./abs.cpp
 # collect only *.so actually needed by ptoas (transitive closure under build dirs)
 # it is smaller (<200 MB) than copying the full $LLVM_BUILD_DIR/lib (>700 MB)
 ENV PTOAS_DEPS_DIR=/ptoas-deps
-COPY copy_ptoas_deps.sh /tmp/copy_ptoas_deps.sh
+COPY docker/copy_ptoas_deps.sh /tmp/copy_ptoas_deps.sh
 RUN mkdir -p $PTOAS_DEPS_DIR && bash /tmp/copy_ptoas_deps.sh
 
 # -----------------------------------------------------------------------------
@@ -157,8 +157,10 @@ ARG PTO_ISA_COMMIT=662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
 # pinned: https://gitcode.com/cann/pto-isa/commit/662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
 
 WORKDIR /sources
-RUN git clone https://gitcode.com/cann/pto-isa.git \
-    && cd pto-isa && git checkout $PTO_ISA_COMMIT
+RUN git clone --no-checkout https://gitcode.com/cann/pto-isa.git pto-isa \
+    && git -C pto-isa fetch --depth 1 origin ${PTO_ISA_COMMIT} \
+    && git -C pto-isa checkout --detach ${PTO_ISA_COMMIT} \
+    && test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"
 ENV PTO_LIB_PATH=/sources/pto-isa
 ENV BISHENG_OPTS="-I${PTO_LIB_PATH}/include/pto \
     -fPIC -shared -O2 -std=c++17 \

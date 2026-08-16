@@ -373,6 +373,11 @@ static bool isVerifierTargetLinx(Operation *op) {
 static bool shouldBypassDecodedMemrefVerifier(Operation *op) {
   if (!op)
     return false;
+  // Decoded memrefs and bind_tile aliases are a legacy A2/A3/A5
+  // representation. Linx must verify the effective operation explicitly;
+  // never use representation alone as an architecture-wide success path.
+  if (isVerifierTargetLinx(op))
+    return false;
   for (Value operand : op->getOperands()) {
     if (isa<MemRefType>(operand.getType()))
       return true;
@@ -1602,8 +1607,30 @@ static std::optional<pto::Layout> getTileBufLogicalLayout(pto::TileBufType type)
 }
 
 static bool isRowMajorTileBuf(Type ty) {
-  auto tb = mlir::dyn_cast<pto::TileBufType>(ty);
-  return tb && tb.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
+  if (auto tb = mlir::dyn_cast<pto::TileBufType>(ty))
+    return tb.getBLayoutValueI32() ==
+           static_cast<int32_t>(pto::BLayout::RowMajor);
+  // Decoded ND tiles use row-major strides and may carry padding or a dynamic
+  // base offset while materialize-tile-handles introduces bind_tile aliases.
+  if (auto memref = mlir::dyn_cast<MemRefType>(ty)) {
+    SmallVector<int64_t> strides;
+    int64_t offset = 0;
+    if (failed(memref.getStridesAndOffset(strides, offset)) ||
+        strides.empty() || strides.back() != 1)
+      return false;
+    ArrayRef<int64_t> shape = memref.getShape();
+    for (int64_t index = static_cast<int64_t>(strides.size()) - 2; index >= 0;
+         --index) {
+      int64_t innerExtent = shape[index + 1];
+      if (ShapedType::isDynamic(strides[index]) ||
+          ShapedType::isDynamic(strides[index + 1]) ||
+          ShapedType::isDynamic(innerExtent) ||
+          strides[index] < strides[index + 1] * innerExtent)
+        return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 static LogicalResult verifyRowReductionSrcLayout(Operation *op, Type ty,
@@ -2335,7 +2362,41 @@ LogicalResult TLoadOp::verify() {
     return success();
   };
 
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+    if (!isa<MemRefType, pto::PartitionTensorViewType>(srcTy) ||
+        !isa<MemRefType, pto::TileBufType>(dstTy))
+      return emitOpError(
+          "expects Linx tload src to be a memref/partition tensor view and "
+          "dst to be a memref/tile buffer");
+    if (failed(verifyTileBufCommon(*this, dstTy, "dst")))
+      return failure();
+
+    auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+    auto dstSpace = getPTOMemorySpaceEnum(dstTy);
+    if (!srcSpace || *srcSpace != pto::AddressSpace::GM)
+      return emitOpError("expects Linx tload src to use loc=gm");
+    if (!dstSpace || *dstSpace != pto::AddressSpace::VEC)
+      return emitOpError("expects Linx tload dst to use loc=vec");
+    if (getElemByteSize(getElemTy(srcTy)) != getElemByteSize(getElemTy(dstTy)))
+      return emitOpError(
+          "expects Linx tload src and dst element sizes to match");
+    for (auto [name, shape] :
+         {std::pair<StringRef, SmallVector<int64_t>>{"src", getShapeVec(srcTy)},
+          std::pair<StringRef, SmallVector<int64_t>>{
+              "dst", getValidShapeVec(dstTy)}}) {
+      for (auto [index, dim] : llvm::enumerate(shape)) {
+        if (dim != ShapedType::kDynamic && dim <= 0)
+          return emitOpError() << "expects Linx tload " << name << " shape["
+                               << index << "] to be positive";
+      }
+    }
+    return success();
+  };
+
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 LogicalResult TPrefetchOp::verify() {
@@ -5193,15 +5254,34 @@ mlir::LogicalResult mlir::pto::TInsertOp::verify() {
         "acc->mat, vec->mat, or vec->vec");
   };
   auto verifyLinx = [&]() -> LogicalResult {
-    auto common = verifyCommon();
-    if (failed(common))
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+    if (!isa<pto::TileBufType, MemRefType>(srcTy) ||
+        !isa<pto::TileBufType, MemRefType>(dstTy))
+      return emitOpError(
+          "expects Linx tinsert src/dst to be tile buffers or decoded memrefs");
+    if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
+        failed(verifyTileBufCommon(*this, dstTy, "dst")) ||
+        failed(verifyNonNegativeIndexRowCol(
+            *getOperation(), getIndexRow(), getIndexCol(),
+            /*includeIndexAndIntOpsInConstFold=*/true)) ||
+        failed(verifyInsertStaticBoundsCommon(
+            *getOperation(), getIndexRow(), getIndexCol(), srcTy, dstTy,
+            /*includeIndexAndIntOpsInConstFold=*/true)))
       return failure();
-    auto [srcTy, dstTy, srcTb, dstTb, srcElem, dstElem, srcSpace, dstSpace] =
-        *common;
+    Type srcElem = getElemTy(srcTy);
+    Type dstElem = getElemTy(dstTy);
+    auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+    auto dstSpace = getPTOMemorySpaceEnum(dstTy);
     if (!srcSpace || !dstSpace || *srcSpace != pto::AddressSpace::VEC ||
         *dstSpace != pto::AddressSpace::VEC)
       return emitOpError("expects Linx VEC tinsert to use vec->vec");
-    if (!isRowMajorNoneBoxND(srcTb) || !isRowMajorNoneBoxND(dstTb))
+    auto isLinxND = [&](Type type) {
+      if (auto tile = dyn_cast<pto::TileBufType>(type))
+        return isRowMajorNoneBoxND(tile);
+      return isRowMajorTileBuf(type);
+    };
+    if (!isLinxND(srcTy) || !isLinxND(dstTy))
       return emitOpError("expects Linx VEC tinsert src/dst to use ND layout");
     if (srcElem != dstElem || !isA2A3VecInsertElemType(srcElem))
       return emitOpError(

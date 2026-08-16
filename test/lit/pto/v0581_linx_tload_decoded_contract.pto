@@ -1,0 +1,12 @@
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_decoded_tload_rejects_non_vec_destination(
+      %src: memref<16x16xf32, #pto.address_space<gm>>) {
+    %dst = memref.alloc() : memref<16x16xf32, #pto.address_space<gm>>
+    pto.tload ins(%src : memref<16x16xf32, #pto.address_space<gm>>) outs(%dst : memref<16x16xf32, #pto.address_space<gm>>) {layout = #pto.layout<nd>}
+    return
+  }
+}
+
+// CHECK: error: 'pto.tload' op expects Linx tload dst to use loc=vec

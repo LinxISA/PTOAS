@@ -1,0 +1,13 @@
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_memref_dispatch_must_not_bypass() {
+    %lhs = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %rhs = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %dst = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    pto.tadd ins(%lhs, %rhs : memref<16x16xf32, #pto.address_space<vec>>, memref<16x16xf32, #pto.address_space<vec>>) outs(%dst : memref<16x16xf32, #pto.address_space<vec>>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tadd' op Linx legality is not implemented for this operation

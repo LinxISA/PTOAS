@@ -1,0 +1,13 @@
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_non_nd_memref_must_not_bypass() {
+    %lhs = memref.alloc() : memref<16x16xf32, strided<[1, 16]>, #pto.address_space<vec>>
+    %rhs = memref.alloc() : memref<16x16xf32, strided<[1, 16]>, #pto.address_space<vec>>
+    %dst = memref.alloc() : memref<16x16xf32, strided<[1, 16]>, #pto.address_space<vec>>
+    pto.tdiv ins(%lhs, %rhs : memref<16x16xf32, strided<[1, 16]>, #pto.address_space<vec>>, memref<16x16xf32, strided<[1, 16]>, #pto.address_space<vec>>) outs(%dst : memref<16x16xf32, strided<[1, 16]>, #pto.address_space<vec>>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tdiv' op expects src0, src1, and dst to use row-major layout

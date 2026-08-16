@@ -63,6 +63,19 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         self.assertRegex(workflow, r"(?m)^\s+target:\s+builder\s*$")
         self.assertRegex(workflow, r"(?m)^\s+push:\s+false\s*$")
 
+    def test_packaged_cli_checks_exact_pto_isa_identity(self) -> None:
+        expected = 'EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"'
+        fallback = "grep -Eq '^ptoas [0-9]+\\.[0-9]+ \\(PTO ISA 0\\.58\\.1\\)$'"
+        for relative in (
+            "docker/test_ptoas_cli.sh",
+            "docker/collect_ptoas_dist.sh",
+            "docker/collect_ptoas_dist_mac.sh",
+        ):
+            with self.subTest(script=relative):
+                script = (ROOT / relative).read_text()
+                self.assertIn(expected, script)
+                self.assertIn(fallback, script)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -108,6 +108,17 @@ def main() -> int:
         if 'GITHUB_REF_NAME}" = "linxisa-v0.58.1"' in text:
             raise SystemExit(f"{name} conflates ISA identity with PTOAS product version")
 
+    expected_version = 'EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"'
+    fallback_version = "grep -Eq '^ptoas [0-9]+\\.[0-9]+ \\(PTO ISA 0\\.58\\.1\\)$'"
+    for name in (
+        "docker/test_ptoas_cli.sh",
+        "docker/collect_ptoas_dist.sh",
+        "docker/collect_ptoas_dist_mac.sh",
+    ):
+        text = (root / name).read_text()
+        if expected_version not in text or fallback_version not in text:
+            raise SystemExit(f"{name} does not verify the exact PTO ISA 0.58.1 CLI identity")
+
     print("release delivery contract OK")
     return 0
 

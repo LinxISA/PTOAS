@@ -39,13 +39,13 @@ echo "Checking ptoas version..."
 VERSION_OUTPUT="$(ptoas --version | tr -d '\r')"
 echo "$VERSION_OUTPUT"
 if [ -n "${PTOAS_VERSION:-}" ]; then
-  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION}"
+  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"
   if [ "${VERSION_OUTPUT}" != "${EXPECTED_VERSION_OUTPUT}" ]; then
     echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${VERSION_OUTPUT}'" >&2
     exit 1
   fi
 else
-  echo "$VERSION_OUTPUT" | grep -Eq '^ptoas [0-9]+\.[0-9]+$'
+  echo "$VERSION_OUTPUT" | grep -Eq '^ptoas [0-9]+\.[0-9]+ \(PTO ISA 0\.58\.1\)$'
 fi
 
 # Test MatMul sample

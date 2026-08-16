@@ -148,6 +148,15 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_python_binding_link_contract.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME release_delivery_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_release_delivery_contract.py
+            --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME emitc_lvalue_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)
   add_subdirectory(tools/ptobc/tests)
 endif()
 

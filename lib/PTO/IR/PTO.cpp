@@ -91,6 +91,7 @@ static std::optional<pto::AddressSpace> getPTOMemorySpaceEnum(Type ty);
 enum class VerifierTargetArch {
   A2A3,
   A5,
+  Linx,
 };
 static VerifierTargetArch getVerifierTargetArch(Operation *op);
 static std::optional<StringRef> getVerifierArchName(Operation *op);
@@ -337,16 +338,17 @@ uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
 
 static VerifierTargetArch getVerifierTargetArch(Operation *op) {
   if (auto archName = getVerifierArchName(op)) {
-    return (archName->equals_insensitive("a5") ||
-            archName->equals_insensitive("linx"))
-               ? VerifierTargetArch::A5
-               : VerifierTargetArch::A2A3;
+    if (archName->equals_insensitive("linx"))
+      return VerifierTargetArch::Linx;
+    return archName->equals_insensitive("a5") ? VerifierTargetArch::A5
+                                               : VerifierTargetArch::A2A3;
   }
 
   switch (getPTOParserTargetArch(op ? op->getContext() : nullptr)) {
   case PTOParserTargetArch::A5:
-  case PTOParserTargetArch::Linx:
     return VerifierTargetArch::A5;
+  case PTOParserTargetArch::Linx:
+    return VerifierTargetArch::Linx;
   case PTOParserTargetArch::A3:
   case PTOParserTargetArch::Unspecified:
     return VerifierTargetArch::A2A3;
@@ -365,10 +367,7 @@ static std::optional<StringRef> getVerifierArchName(Operation *op) {
 }
 
 static bool isVerifierTargetLinx(Operation *op) {
-  if (auto archName = getVerifierArchName(op))
-    return archName->equals_insensitive("linx");
-  return getPTOParserTargetArch(op ? op->getContext() : nullptr) ==
-         PTOParserTargetArch::Linx;
+  return getVerifierTargetArch(op) == VerifierTargetArch::Linx;
 }
 
 static bool shouldBypassDecodedMemrefVerifier(Operation *op) {
@@ -391,9 +390,10 @@ static SmallVector<int64_t, 4> canonicalizeTileBufValidShape(ArrayRef<int64_t> v
   return canonical;
 }
 
-template <typename FnA2A3, typename FnA5>
+template <typename FnA2A3, typename FnA5, typename FnLinx>
 static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
-                                            FnA5 &&verifyA5) {
+                                            FnA5 &&verifyA5,
+                                            FnLinx &&verifyLinx) {
   if (shouldBypassDecodedMemrefVerifier(op))
     return success();
   switch (getVerifierTargetArch(op)) {
@@ -401,8 +401,21 @@ static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
     return verifyA2A3();
   case VerifierTargetArch::A5:
     return verifyA5();
+  case VerifierTargetArch::Linx:
+    return verifyLinx();
   }
   return failure();
+}
+
+template <typename FnA2A3, typename FnA5>
+static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
+                                            FnA5 &&verifyA5) {
+  return dispatchVerifierByArch(
+      op, std::forward<FnA2A3>(verifyA2A3), std::forward<FnA5>(verifyA5),
+      [&]() -> LogicalResult {
+        return op->emitOpError(
+            "Linx legality is not implemented for this operation");
+      });
 }
 
 static ParseResult parseSyncEventOpCommon(OpAsmParser &parser,
@@ -2328,13 +2341,35 @@ LogicalResult TLoadOp::verify() {
 LogicalResult TPrefetchOp::verify() {
   if (!getAddress().getType().isInteger(64))
     return emitOpError("expects address to have type i64");
-  constexpr std::array<StringLiteral, 4> operandNames = {
-      "row_stride", "valid_cols", "valid_rows", "physical_cols"};
-  SmallVector<Value, 4> operands = {getRowStride(), getValidCols(),
-                                    getValidRows(), getPhysicalCols()};
-  for (auto [name, value] : llvm::zip_equal(operandNames, operands)) {
-    if (auto constant = getConstantIntegerValue(value); constant && *constant < 0)
-      return emitOpError() << "expects " << name << " to be nonnegative";
+  if (auto rowStride = getConstantIntegerValue(getRowStride());
+      rowStride && *rowStride < 0)
+    return emitOpError("expects row_stride to be nonnegative");
+  auto verifyU16Positive = [&](StringRef name, Value value) -> LogicalResult {
+    if (auto constant = getConstantIntegerValue(value);
+        constant && (*constant < 1 || *constant > 65535))
+      return emitOpError() << "expects " << name << " in range [1, 65535]";
+    return success();
+  };
+  if (failed(verifyU16Positive("valid_cols", getValidCols())) ||
+      failed(verifyU16Positive("valid_rows", getValidRows())) ||
+      failed(verifyU16Positive("physical_cols", getPhysicalCols())))
+    return failure();
+  auto physicalCols = getConstantIntegerValue(getPhysicalCols());
+  if (physicalCols && !llvm::isPowerOf2_64(static_cast<uint64_t>(*physicalCols)))
+    return emitOpError("expects physical_cols to be a power of two");
+  auto validCols = getConstantIntegerValue(getValidCols());
+  if (physicalCols && validCols && *physicalCols < *validCols)
+    return emitOpError("expects physical_cols to be at least valid_cols");
+  return success();
+}
+
+LogicalResult TImg2ColOp::verify() {
+  for (auto [name, value] :
+       llvm::zip_equal(std::array<StringLiteral, 2>{"posM", "posK"},
+                       std::array<Value, 2>{getPosM(), getPosK()})) {
+    if (auto constant = getConstantIntegerValue(value);
+        constant && (*constant < 0 || *constant > 65535))
+      return emitOpError() << "expects " << name << " in range [0, 65535]";
   }
   return success();
 }
@@ -3499,6 +3534,8 @@ static LogicalResult verifyVecTileCommon(Operation *op, Type ty, StringRef name)
     return verifyVecTileCommonA2A3(op, ty, name);
   case VerifierTargetArch::A5:
     return verifyVecTileCommonA5(op, ty, name);
+  case VerifierTargetArch::Linx:
+    return verifyVecTileCommonA2A3(op, ty, name);
   }
   return failure();
 }
@@ -3539,6 +3576,8 @@ static LogicalResult verifyAccTileCommon(Operation *op, Type ty, StringRef name)
     return verifyAccTileCommonA2A3(op, ty, name);
   case VerifierTargetArch::A5:
     return verifyAccTileCommonA5(op, ty, name);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx ACC tile legality is not implemented");
   }
   return failure();
 }
@@ -3618,6 +3657,8 @@ static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy
   case VerifierTargetArch::A5:
     return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy,
                                    allowLowPrecisionInputs);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx CUBE operand legality is not implemented");
   }
   return failure();
 }
@@ -3679,6 +3720,8 @@ static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsT
   case VerifierTargetArch::A5:
     return verifyGemvTileOperandsA5(op, lhsTy, rhsTy, dstTy,
                                     allowLowPrecisionInputs);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx CUBE GEMV legality is not implemented");
   }
   return failure();
 }
@@ -3720,6 +3763,8 @@ static LogicalResult verifyMatBiasTile(Operation *op, Type biasTy, Type dstTy,
     return verifyMatBiasTileA2A3(op, biasTy, dstTy, requireFloatBias);
   case VerifierTargetArch::A5:
     return verifyMatBiasTileA5(op, biasTy, dstTy, requireFloatBias);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx CUBE bias legality is not implemented");
   }
   return failure();
 }
@@ -4733,7 +4778,18 @@ LogicalResult mlir::pto::TDivOp::verify() {
       return emitOpError("expects A5 tdiv element type to be i32/i16/f16/f32");
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    FailureOr<Type> elemOr = verifyMatchingRowMajorBinaryTileOpCommon(
+        getOperation(), getSrc0().getType(), getSrc1().getType(),
+        getDst().getType());
+    if (failed(elemOr))
+      return failure();
+    if (!elemOr->isF16() && !elemOr->isF32())
+      return emitOpError("expects Linx SFU tdiv element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 mlir::LogicalResult mlir::pto::TDivSOp::verify() {
@@ -4780,7 +4836,18 @@ mlir::LogicalResult mlir::pto::TDivSOp::verify() {
   };
   auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
   auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    if (failed(verifyByArch(PTOArch::Linx)))
+      return failure();
+    Type tileTy = isTileLike(getSrc().getType()) ? getSrc().getType()
+                                                 : getScalar().getType();
+    Type elem = getElemTy(tileTy);
+    if (!elem.isF16() && !elem.isF32())
+      return emitOpError("expects Linx SFU tdivs element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 mlir::LogicalResult mlir::pto::TExpOp::verify() {
@@ -5125,7 +5192,24 @@ mlir::LogicalResult mlir::pto::TInsertOp::verify() {
         "expects A5 tinsert to use a supported src/dst loc pair: "
         "acc->mat, vec->mat, or vec->vec");
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    auto common = verifyCommon();
+    if (failed(common))
+      return failure();
+    auto [srcTy, dstTy, srcTb, dstTb, srcElem, dstElem, srcSpace, dstSpace] =
+        *common;
+    if (!srcSpace || !dstSpace || *srcSpace != pto::AddressSpace::VEC ||
+        *dstSpace != pto::AddressSpace::VEC)
+      return emitOpError("expects Linx VEC tinsert to use vec->vec");
+    if (!isRowMajorNoneBoxND(srcTb) || !isRowMajorNoneBoxND(dstTb))
+      return emitOpError("expects Linx VEC tinsert src/dst to use ND layout");
+    if (srcElem != dstElem || !isA2A3VecInsertElemType(srcElem))
+      return emitOpError(
+          "expects Linx VEC tinsert src/dst to have matching i8/f16/bf16/f32 dtype");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 static bool isColMajorRowMajorNZTileBuf(pto::TileBufType ty) {
@@ -7603,7 +7687,13 @@ mlir::LogicalResult mlir::pto::TRemOp::verify() {
       return emitOpError("expects A5 trem element type to be i32/i16/f16/f32");
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    if (!elem.isF16() && !elem.isF32())
+      return emitOpError("expects Linx SFU trem element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 mlir::LogicalResult mlir::pto::TRemSOp::verify() {
@@ -7646,7 +7736,13 @@ mlir::LogicalResult mlir::pto::TRemSOp::verify() {
       return emitOpError("expects A5 trems element type to be i32/i16/f16/f32");
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    if (!elem.isF16() && !elem.isF32())
+      return emitOpError("expects Linx SFU trems element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 static std::optional<int64_t> getStaticNumElements(ArrayRef<int64_t> shape) {
@@ -8899,6 +8995,8 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
     return verifyA2A3();
   case VerifierTargetArch::A5:
     return verifyA5();
+  case VerifierTargetArch::Linx:
+    return emitOpError("Linx legality is not implemented for this operation");
   }
   return failure();
 }

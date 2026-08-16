@@ -1,0 +1,14 @@
+// RUN: ptoas --pto-arch=a5 %s -o /dev/null
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module {
+  func.func @tdiv_i16_distinguishes_a5_from_linx() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tdiv ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tdiv' op expects Linx SFU tdiv element type to be f16/f32

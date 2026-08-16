@@ -32,6 +32,11 @@ ENV LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
 ENV PTO_SOURCE_DIR=$WORKSPACE_DIR/PTOAS
 ENV PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
+# Build the reviewed checkout supplied as the Docker build context. This keeps
+# PTOAS source identity coupled to the caller's exact checkout instead of an
+# unrelated fork's mutable default branch.
+COPY . ${PTO_SOURCE_DIR}
+
 # build LLVM
 WORKDIR $WORKSPACE_DIR
 RUN git clone --no-checkout ${LLVM_REPOSITORY} ${LLVM_SOURCE_DIR} \
@@ -51,11 +56,6 @@ RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR 
     -DLLVM_TARGETS_TO_BUILD="host"
 
 RUN ninja -C $LLVM_BUILD_DIR
-
-# build ptoas
-WORKDIR $WORKSPACE_DIR
-RUN git clone https://github.com/zhangstevenunity/PTOAS.git
-# TODO: tag git commit of PTOAS repo
 
 WORKDIR $PTO_SOURCE_DIR
 RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja \

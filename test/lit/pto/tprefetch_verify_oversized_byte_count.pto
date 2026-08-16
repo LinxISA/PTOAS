@@ -12,4 +12,4 @@ module attributes {pto.target_arch = "a5"} {
   }
 }
 
-// CHECK: error: 'pto.tprefetch' op expects physical_cols to be nonnegative
+// CHECK: error: 'pto.tprefetch' op expects physical_cols in range [1, 65535]

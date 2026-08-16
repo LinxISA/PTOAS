@@ -1,0 +1,63 @@
+// RUN: not ptoas --pto-arch=linx %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @tprefetch_zero_valid_cols() {
+    %address = arith.constant 4096 : i64
+    %stride = arith.constant 64 : index
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %physical = arith.constant 64 : index
+    pto.tprefetch ins(%address, %stride, %zero, %one, %physical : i64, index, index, index, index)
+    return
+  }
+  func.func @tprefetch_oversized_valid_rows() {
+    %address = arith.constant 4096 : i64
+    %stride = arith.constant 64 : index
+    %one = arith.constant 1 : index
+    %oversized = arith.constant 65536 : index
+    %physical = arith.constant 64 : index
+    pto.tprefetch ins(%address, %stride, %one, %oversized, %physical : i64, index, index, index, index)
+    return
+  }
+  func.func @tprefetch_non_power_of_two_physical_cols() {
+    %address = arith.constant 4096 : i64
+    %stride = arith.constant 64 : index
+    %valid = arith.constant 32 : index
+    %rows = arith.constant 1 : index
+    %physical = arith.constant 48 : index
+    pto.tprefetch ins(%address, %stride, %valid, %rows, %physical : i64, index, index, index, index)
+    return
+  }
+  func.func @tprefetch_undersized_physical_cols() {
+    %address = arith.constant 4096 : i64
+    %stride = arith.constant 64 : index
+    %valid = arith.constant 32 : index
+    %rows = arith.constant 1 : index
+    %physical = arith.constant 16 : index
+    pto.tprefetch ins(%address, %stride, %valid, %rows, %physical : i64, index, index, index, index)
+    return
+  }
+  func.func @timg2col_negative_pos_m() {
+    %minus_one = arith.constant -1 : index
+    %zero = arith.constant 0 : index
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.timg2col ins(%src, %minus_one, %zero : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index) outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+  func.func @timg2col_oversized_pos_k() {
+    %zero = arith.constant 0 : index
+    %oversized = arith.constant 65536 : index
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.timg2col ins(%src, %zero, %oversized : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index) outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-DAG: expects valid_cols in range [1, 65535]
+// CHECK-DAG: expects valid_rows in range [1, 65535]
+// CHECK-DAG: expects physical_cols to be a power of two
+// CHECK-DAG: expects physical_cols to be at least valid_cols
+// CHECK-DAG: expects posM in range [0, 65535]
+// CHECK-DAG: expects posK in range [0, 65535]

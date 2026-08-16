@@ -1,0 +1,18 @@
+// RUN: ptoas --pto-arch=linx --enable-insert-sync %s | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_sfu_pipeline(%a: memref<16x16xf32, #pto.address_space<gm>>,
+                              %b: memref<16x16xf32, #pto.address_space<gm>>) {
+    %src0 = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %src1 = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %dst = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    pto.tload ins(%a : memref<16x16xf32, #pto.address_space<gm>>) outs(%src0 : memref<16x16xf32, #pto.address_space<vec>>) {layout = #pto.layout<nd>}
+    pto.tload ins(%b : memref<16x16xf32, #pto.address_space<gm>>) outs(%src1 : memref<16x16xf32, #pto.address_space<vec>>) {layout = #pto.layout<nd>}
+    pto.tdiv ins(%src0, %src1 : memref<16x16xf32, #pto.address_space<vec>>, memref<16x16xf32, #pto.address_space<vec>>) outs(%dst : memref<16x16xf32, #pto.address_space<vec>>)
+    return
+  }
+}
+
+// CHECK: set_flag(PIPE_MTE2, PIPE_S,
+// CHECK: wait_flag(PIPE_MTE2, PIPE_S,
+// CHECK-NOT: set_flag(PIPE_MTE2, PIPE_V,

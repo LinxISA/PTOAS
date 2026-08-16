@@ -42,6 +42,12 @@
 
 #include "PTO/IR/PTOEnums.h.inc"
 
+namespace mlir::pto {
+/// Architectural Linx tile engines. This is intentionally distinct from
+/// PIPE, which describes the Ascend synchronization-pipe ABI.
+enum class LinxEngine { VEC, SFU, TLSU, CUBE };
+} // namespace mlir::pto
+
 //===----------------------------------------------------------------------===//
 // PTO Interfaces
 //===----------------------------------------------------------------------===//

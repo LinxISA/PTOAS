@@ -3725,6 +3725,7 @@ def TDivOp : PTO_TOp<"tdiv", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
@@ -3757,6 +3758,7 @@ def TDivSOp : PTO_TOp<"tdivs", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
@@ -4215,6 +4217,8 @@ def TImg2ColOp : PTO_TOp<"timg2col", [
   );
 
   let results = (outs);
+
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     `ins` `(` $src `,` $posM `,` $posK `:` qualified(type($src)) `,` type($posM) `,` type($posK) `)`
@@ -5106,6 +5110,7 @@ def TRemOp: PTO_TOp<"trem", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -5139,6 +5144,7 @@ def TRemSOp: PTO_TOp<"trems", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }

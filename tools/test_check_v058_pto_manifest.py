@@ -36,6 +36,28 @@ class LinxIdentityTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "PTOAS/root PTO ISA lock mismatch"):
                 CHECKER.validate_linx_identity(linx_root, local_lock)
 
+    def test_effective_sfu_mapping_is_read_from_ods(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        operations = CHECKER.load_ptoas_ops(ptoas_root)
+        for mnemonic in ("TDIV", "TDIVS", "TREM", "TREMS"):
+            self.assertEqual(operations[mnemonic]["linx_engine"], "SFU")
+
+    def test_pipe_v_only_mapping_is_not_accepted_as_linx_engine(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        ods = (ptoas_root / "include/PTO/IR/PTOOps.td").read_text()
+        ods = ods.replace(
+            "::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }",
+            "",
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            fake_root = Path(directory)
+            fake_ods = fake_root / "include/PTO/IR/PTOOps.td"
+            fake_ods.parent.mkdir(parents=True)
+            fake_ods.write_text(ods)
+            operations = CHECKER.load_ptoas_ops(fake_root)
+            self.assertIsNone(operations["TDIV"]["linx_engine"])
+
 
 if __name__ == "__main__":
     unittest.main()

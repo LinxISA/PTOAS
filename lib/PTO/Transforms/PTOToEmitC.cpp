@@ -12511,8 +12511,16 @@ static AICORE inline void ptoas_auto_sync_tail(
             call.erase();
             continue;
           }
+
+          call.emitError(
+              "cannot preserve mutable lvalue operands for this void call; "
+              "unsupported call_opaque argument or template shape");
+          signalPassFailure();
+          return;
         }
 
+        // Result-producing call_opaque operations are input expressions, so
+        // converting their lvalues to explicit reads preserves semantics.
         OpBuilder builder(call);
         builder.setInsertionPoint(call);
         for (OpOperand &operand : call->getOpOperands()) {

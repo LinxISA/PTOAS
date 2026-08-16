@@ -342,7 +342,15 @@ def load_ptoas_ops(ptoas_root: Path) -> dict[str, dict]:
         key = normalize(mnemonic)
         if key in operations:
             raise SystemExit(f"duplicate normalized PTOAS mnemonic in {ods_path}: {mnemonic}")
-        operations[key] = {"mnemonic": mnemonic, "arguments": arguments}
+        linx_engine = re.search(
+            r"getLinxEngine\(\).*?LinxEngine::(VEC|SFU|TLSU|CUBE)", body,
+            re.DOTALL,
+        )
+        operations[key] = {
+            "mnemonic": mnemonic,
+            "arguments": arguments,
+            "linx_engine": linx_engine.group(1) if linx_engine else None,
+        }
     return operations
 
 
@@ -438,6 +446,20 @@ def main() -> int:
         for error in contract_errors:
             print(f"  - {error}")
         return 1
+
+    # These four operations moved from the Ascend vector pipe to the Linx SFU.
+    # Require an explicit executable mapping so PIPE_V cannot silently become
+    # the effective Linx engine.
+    for name in ("TDIV", "TDIVS", "TREM", "TREMS"):
+        actual_engine = ptoas_ops[normalize(expected_public[name]["ptoas_mnemonic"])][
+            "linx_engine"
+        ]
+        if actual_engine != "SFU":
+            print(
+                f"PTOAS effective Linx engine mismatch for {name}: "
+                f"expected SFU, got {actual_engine or 'unmapped'}"
+            )
+            return 1
 
     if args.linx_root is None:
         print(

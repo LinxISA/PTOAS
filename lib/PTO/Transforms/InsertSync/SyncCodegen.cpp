@@ -28,6 +28,11 @@ using namespace mlir::pto;
 // ==============================================================================
  
 static pto::PipeAttr getPipeAttr(Builder &builder, PipelineType pipe) {
+  // The current sync instruction ABI has no SFU token. Lower Linx SFU syncs
+  // through the scalar synchronization channel only at this ABI boundary;
+  // dependency analysis keeps LINX_SFU distinct from PIPE_V throughout.
+  if (pipe == PipelineType::LINX_SFU)
+    return pto::PipeAttr::get(builder.getContext(), pto::PIPE::PIPE_S);
   auto odsPipeVal = static_cast<pto::PIPE>(pipe);
   return pto::PipeAttr::get(builder.getContext(), odsPipeVal);
 }

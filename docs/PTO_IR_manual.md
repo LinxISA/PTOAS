@@ -810,6 +810,17 @@ The detailed cache placement is target-defined, but access faults are
 architectural rather than optional hint behavior. Unlike most generated PTO
 intrinsic wrappers, `TPREFETCH` does not add implicit wait-event synchronization.
 
+For Linx ISA 0.58.1, statically known `valid_cols`, `valid_rows`, and
+`physical_cols` values must be in `1..65535`. `physical_cols` must also be a
+power of two and at least `valid_cols`. Dynamic values are accepted by the IR;
+the producer must guarantee the same constraints at runtime before execution.
+`row_stride` must be nonnegative when static and has the same runtime
+precondition when dynamic.
+
+For `TIMG2COL`, statically known `posM` and `posK` values must be in
+`0..65535`. Dynamic positions are accepted by the IR and must satisfy that
+range at runtime.
+
 **Arguments:**
 
 | Name | Type | Description |
@@ -826,7 +837,10 @@ queue value.
 **Constraints & Verification:**
 
 - `address` must have exactly type `i64`.
-- Shape and stride operands have `index` type and must be nonnegative.
+- Shape and stride operands have `index` type. `row_stride` must be
+  nonnegative; `valid_cols`, `valid_rows`, and `physical_cols` must be in
+  `1..65535`; and `physical_cols` must be a power of two no smaller than
+  `valid_cols`. Dynamic operands carry the equivalent runtime preconditions.
 - A partition view or tile destination is not a compatibility spelling and is
   rejected by the PTOAS parser/verifier.
 

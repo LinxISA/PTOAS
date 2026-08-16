@@ -11,7 +11,7 @@ ARG ARCH
 # NOTE: change $PY_VER for different Python versions (3.8 - 3.14 available)
 ARG PY_VER=cp311-cp311
 ARG LLVM_REPOSITORY=https://github.com/LinxISA/llvm-project.git
-ARG LLVM_COMMIT=7cbc206194e3ecd5b259d5683307334fa49f58af
+ARG LLVM_COMMIT=1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
 
 ## -- usually no need to change below --
 

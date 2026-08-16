@@ -18,10 +18,20 @@ from pathlib import Path
 
 
 CHECKER = Path(__file__).with_name("check_python_binding_link_contract.py")
+VALID_PRODUCER = """
+if(UNIX AND NOT APPLE)
+  target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
+  install(TARGETS nanobind-mlir
+    LIBRARY DESTINATION lib
+  )
+endif()
+"""
 
 
 class PythonBindingLinkContractTest(unittest.TestCase):
-    def run_checker(self, cmake_source: str, workflow: str) -> subprocess.CompletedProcess[str]:
+    def run_checker(
+        self, cmake_source: str, workflow: str
+    ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cmake_path = root / "lib/Bindings/Python/CMakeLists.txt"
@@ -51,17 +61,49 @@ endif()
 
     def test_accepts_installed_runtime_and_matching_auditwheel_search_path(self) -> None:
         result = self.run_checker(
+            VALID_PRODUCER,
             """
-if(UNIX AND NOT APPLE)
-  target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
-  install(TARGETS nanobind-mlir
-    LIBRARY DESTINATION lib
-  )
-endif()
+jobs:
+  build:
+    steps:
+      - name: Repair wheel with auditwheel
+        run: |
+          export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH
+          auditwheel repair dist/ptoas.whl -w wheelhouse
 """,
-            "export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_valid_producer_with_missing_repair_step_search_path(self) -> None:
+        result = self.run_checker(
+            VALID_PRODUCER,
+            """
+jobs:
+  build:
+    steps:
+      - name: Repair wheel with auditwheel
+        run: auditwheel repair dist/ptoas.whl -w wheelhouse
+""",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Repair wheel with auditwheel", result.stderr)
+
+    def test_rejects_search_path_only_in_unrelated_comment_and_step(self) -> None:
+        result = self.run_checker(
+            VALID_PRODUCER,
+            """
+# $PTO_INSTALL_DIR/lib is documented here but not exported by repair.
+jobs:
+  build:
+    steps:
+      - name: Diagnose installed libraries
+        run: export LD_LIBRARY_PATH=$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH
+      - name: Repair wheel with auditwheel
+        run: auditwheel repair dist/ptoas.whl -w wheelhouse
+""",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Repair wheel with auditwheel", result.stderr)
 
 
 if __name__ == "__main__":

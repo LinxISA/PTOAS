@@ -26,7 +26,41 @@ def _find_matching_open_paren(source: str, close_index: int) -> int | None:
     return None
 
 
-def _has_explicit_linx_fail_closed_path(source: str, position: int) -> bool:
+def _call_argument_count(source: str, open_index: int) -> int | None:
+    depth = 0
+    commas = 0
+    has_content = False
+    for character in source[open_index:]:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return commas + 1 if has_content else 0
+        elif depth == 1:
+            if character == ",":
+                commas += 1
+            elif not character.isspace():
+                has_content = True
+    return None
+
+
+def _has_implicit_linx_fail_closed_dispatch(function: str) -> bool:
+    dispatcher = "dispatchVerifierByArch"
+    position = 0
+    while (position := function.find(dispatcher, position)) >= 0:
+        open_index = function.find("(", position + len(dispatcher))
+        if open_index < 0:
+            return False
+        # The overload with two verifier callbacks (three total arguments)
+        # synthesizes the fail-closed Linx verifier.
+        if _call_argument_count(function, open_index) == 3:
+            return True
+        position = open_index + 1
+    return False
+
+
+def _has_linx_fail_closed_path(source: str, position: int) -> bool:
     function_start = source.rfind("LogicalResult", 0, position)
     function_end = source.find("\n}\n", position)
     if function_start < 0 or function_end < 0:
@@ -35,6 +69,7 @@ def _has_explicit_linx_fail_closed_path(source: str, position: int) -> bool:
     return (
         "VerifierTargetArch::Linx" in function
         or "Linx legality is not implemented" in function
+        or _has_implicit_linx_fail_closed_dispatch(function)
     )
 
 
@@ -48,7 +83,7 @@ def find_independent_early_success_bypasses(source: str) -> list[str]:
     )
     for match in lambda_pattern.finditer(source):
         if not _contains_representation_marker(match.group("body")) or not (
-            _has_explicit_linx_fail_closed_path(source, match.start())
+            _has_linx_fail_closed_path(source, match.start())
         ):
             continue
         function_tail = source[match.end() :]
@@ -86,7 +121,7 @@ def find_independent_early_success_bypasses(source: str) -> list[str]:
             continue
         condition = source[open_index + 1 : cursor]
         if _contains_representation_marker(condition) and (
-            _has_explicit_linx_fail_closed_path(source, open_index)
+            _has_linx_fail_closed_path(source, open_index)
         ):
             line = source.count("\n", 0, open_index) + 1
             findings.append(f"direct@{line}")

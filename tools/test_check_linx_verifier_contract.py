@@ -28,6 +28,27 @@ LogicalResult pto::ExampleOp::verify() {
             ["acceptDecoded"],
         )
 
+    def test_finds_early_success_before_implicit_linx_fail_closed_dispatch(
+        self,
+    ) -> None:
+        scanner = getattr(contract, "find_independent_early_success_bypasses", None)
+        self.assertIsNotNone(scanner, "checker must expose the independent bypass audit")
+        source = """
+LogicalResult pto::TStoreFPOp::verify() {
+  auto acceptDecoded = [&]() -> bool {
+    return isa<MemRefType>(getDst().getType()) ||
+           getDst().getDefiningOp<pto::BindTileOp>();
+  };
+  if (acceptDecoded())
+    return success();
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+}
+"""
+        self.assertEqual(
+            scanner(source),
+            ["acceptDecoded"],
+        )
+
     def test_ignores_representation_predicate_without_early_success(self) -> None:
         scanner = getattr(contract, "find_independent_early_success_bypasses", None)
         self.assertIsNotNone(scanner, "checker must expose the independent bypass audit")

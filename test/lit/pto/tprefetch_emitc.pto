@@ -1,17 +1,16 @@
 // RUN: ptoas %s | FileCheck %s --check-prefix=A3
 
 module attributes {pto.target_arch = "a3"} {
-  func.func @tprefetch_emitc(%dynamic_bytes: index) {
+  func.func @tprefetch_emitc(%dynamic_rows: index) {
     %addr = arith.constant 4096 : i64
-    %bytes = arith.constant 512 : index
-    %max_bytes = arith.constant 262144 : index
-    pto.tprefetch ins(%addr, %bytes : i64, index)
-    pto.tprefetch ins(%addr, %max_bytes : i64, index)
-    pto.tprefetch ins(%addr, %dynamic_bytes : i64, index)
+    %stride = arith.constant 64 : index
+    %cols = arith.constant 32 : index
+    %rows = arith.constant 16 : index
+    %physical_cols = arith.constant 64 : index
+    pto.tprefetch ins(%addr, %stride, %cols, %rows, %physical_cols : i64, index, index, index, index)
+    pto.tprefetch ins(%addr, %stride, %cols, %dynamic_rows, %physical_cols : i64, index, index, index, index)
     return
   }
 }
 
-// A3: TPREFETCH(
-// A3: TPREFETCH(
-// A3: TPREFETCH(
+// A3-COUNT-2: TPREFETCH({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^)]+}})

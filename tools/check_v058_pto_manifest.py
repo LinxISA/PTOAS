@@ -7,12 +7,12 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Check PTOAS PTO-op contracts against the LinxISA v0.58.0 PTO manifest.
+"""Check PTOAS PTO-op contracts against the LinxISA v0.58.1 PTO manifest.
 
 PTOAS is an MLIR PTO dialect-to-EmitC compiler, not a Linx scalar assembler.
 This check validates all 109 public operations' exact Linx operand roles/arity,
-the matching PTOAS ODS argument surface, the explicit v0.57.1-to-v0.58.0
-contract delta, and the bounded dialect-only surface.
+the matching PTOAS ODS argument surface, exact operation engines and roles,
+and the bounded dialect-only surface.
 """
 
 from __future__ import annotations
@@ -26,23 +26,30 @@ from pathlib import Path
 
 
 EXPECTED_LOCK = {
-    "release": "0.58.0",
-    "encoding_abi": "pto-isa-0.58.0-mode-function-v1",
-    "encoding_projection_sha256": "0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa",
-    "content_sha256": "355e96045cd3f159c367c75d32b1b2d0a8438cd8df61def2b5d4cd650d103873",
-    "release_manifest_sha256": "9f9a5c81cb78b5409e88eb8007bb89d145e298377a458f15a6dbb0ee9ff0ceee",
-    "source_commit": "1c2cb0dcafdbc151357c83e89e7d9460b5d9f401",
+    "release": "0.58.1",
+    "encoding_abi": "pto-isa-0.58.1-mode-function-v1",
+    "encoding_projection_sha256": "89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c",
+    "content_sha256": "693e8c0734b48598ac35ffe7fe6f2a01037788fba30ebe026895808d23139f2c",
+    "release_manifest_sha256": "acea87af67301173e6d1c6e04014a8dc6e2f658cd2992ed658ab2589cddc7841",
+    "source_commit": "c381465b2b8e457e162a4246ee58bb9a2c5b49fd",
+    "source_tree": "463a19db3d6ba70022f18bdbca0d4b2c6ed586e4",
     "hardware_profile_path": "spec/hardware-conformance-profile.json",
-    "hardware_profile_id": "pto-hardware-numeric-0.58.0-ieee-v1",
-    "hardware_profile_sha256": "c4076cf8ac6ebd0c6db8a070b7c290b9928ed7f98c089538ee53ed4644e1531a",
-    "numeric_vectors_path": "spec/evidence/pto-isa-0580-hardware-numeric-vectors.json",
-    "numeric_vectors_sha256": "0ad9405b5b7da3803fcf3f803c66ea66918d4363e4342356b1f818804d7f30e8",
+    "hardware_profile_id": "pto-hardware-numeric-0.58.1-ieee-v1",
+    "hardware_profile_sha256": "170deadacb174c933c287231fb67da1046d7989f84b6852bf353d68a495d1755",
+    "numeric_vectors_path": "spec/evidence/pto-isa-0581-hardware-numeric-vectors.json",
+    "numeric_vectors_sha256": "59c96cc2f45f8e8f3eebb8230338b21ec3a77a99e8fb5e1c7c7b391819a6aa81",
     "command_forms_path": "spec/catalog/command-forms.json",
-    "command_forms_sha256": "aaa16ddd046b7c6ee06aedd6444c90da2541c6f3204ef8d12dba34815e96f15b",
-    "command_forms_count": 99,
+    "command_forms_sha256": "300a3a57a8728e6c4770da6fff0202b372ec2830edb8dc978dc141d1c26424d0",
+    "command_forms_count": 74,
+    "scalar_forms_path": "spec/catalog/scalar-forms.json",
+    "scalar_forms_sha256": "9f3841d568ffa73fcb43bf4fd365d3c4dba42d27acffa7e273e0f403c0f0c602",
+    "scalar_forms_count": 474,
     "tile_operations_path": "spec/catalog/tile-operations.json",
-    "tile_operations_sha256": "aa1fa0a5ba07c7f015875025cc93c42f49b8d4313c55ce2cd72eaaa51bdc7d56",
+    "tile_operations_sha256": "f163dea8be281fd67173713d373b60f95a9c3c4e558adcdf8034cc213507a1a3",
     "tile_operation_count": 109,
+    "extension_encoding_reservations_path": "spec/catalog/extension-encoding-reservations.json",
+    "extension_encoding_reservations_sha256": "bdb82b839b98984779d9a1394f6b308f141052ef0b520e5bedb8e87dadd883d4",
+    "extension_encoding_reservations_count": 32,
     "release_manifest_path": "spec/release-manifest.json",
     "source_repository": "https://github.com/PTO-ISA/pto-spec.git",
 }
@@ -81,7 +88,7 @@ def sha256(path: Path) -> str:
 
 
 def load_lock(ptoas_root: Path) -> dict:
-    lock_path = ptoas_root / "tools/pto_isa_v0_58_0_lock.json"
+    lock_path = ptoas_root / "tools/pto_isa_v0_58_1_lock.json"
     lock = json.loads(lock_path.read_text())
     errors = []
     for key in ("release", "encoding_abi", "encoding_projection_sha256", "content_sha256"):
@@ -97,6 +104,7 @@ def load_lock(ptoas_root: Path) -> dict:
     source = lock.get("source", {})
     for key, expected_key in (
         ("commit", "source_commit"),
+        ("tree", "source_tree"),
         ("repository", "source_repository"),
     ):
         if source.get(key) != EXPECTED_LOCK[expected_key]:
@@ -123,8 +131,20 @@ def load_lock(ptoas_root: Path) -> dict:
             ("command_forms_path", "command_forms_sha256", "command_forms_count"),
         ),
         (
+            "scalar_forms",
+            ("scalar_forms_path", "scalar_forms_sha256", "scalar_forms_count"),
+        ),
+        (
             "tile_operations",
             ("tile_operations_path", "tile_operations_sha256", "tile_operation_count"),
+        ),
+        (
+            "extension_encoding_reservations",
+            (
+                "extension_encoding_reservations_path",
+                "extension_encoding_reservations_sha256",
+                "extension_encoding_reservations_count",
+            ),
         ),
     ):
         entry = catalogs.get(catalog, {})
@@ -132,7 +152,7 @@ def load_lock(ptoas_root: Path) -> dict:
             if entry.get(key) != EXPECTED_LOCK[expected_key]:
                 errors.append(f"catalogs.{catalog}.{key} mismatch")
     if errors:
-        raise SystemExit("unexpected PTO ISA 0.58.0 lock:\n  " + "\n  ".join(errors))
+        raise SystemExit("unexpected PTO ISA 0.58.1 lock:\n  " + "\n  ".join(errors))
     return lock
 
 
@@ -150,10 +170,19 @@ def validate_source_tree(source_root: Path, lock: dict) -> None:
         raise SystemExit(
             f"PTO ISA source commit mismatch: expected {lock['source']['commit']}, got {head}"
         )
+    tree = subprocess.run(
+        ["git", "-C", str(source_root), "rev-parse", "HEAD^{tree}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if tree != lock["source"]["tree"]:
+        raise SystemExit(
+            f"PTO ISA source tree mismatch: expected {lock['source']['tree']}, got {tree}"
+        )
 
     pinned_files = (
-        lock["catalogs"]["command_forms"],
-        lock["catalogs"]["tile_operations"],
+        *lock["catalogs"].values(),
         lock["release_manifest"],
         lock["hardware_conformance_profile"],
         lock["numeric_conformance_vectors"],
@@ -211,10 +240,10 @@ def load_manifest(linx_root: Path) -> dict[str, dict]:
     manifest_path = linx_root / "isa/v0.58/state/pto_ops.json"
     manifest = json.loads(manifest_path.read_text())
     if manifest["profile"] != "v0.58" or manifest["operation_count"] != 109:
-        raise SystemExit(f"unexpected v0.58.0 manifest header in {manifest_path}")
+        raise SystemExit(f"unexpected v0.58.1 manifest header in {manifest_path}")
     source_lock = manifest.get("source_lock")
     if source_lock != "isa/v0.58/pto-spec.lock.json":
-        raise SystemExit(f"unexpected v0.58.0 source_lock in {manifest_path}: {source_lock}")
+        raise SystemExit(f"unexpected v0.58.1 source_lock in {manifest_path}: {source_lock}")
     operations = manifest["operations"]
     names = [entry["name"] for entry in operations]
     if len(names) != len(set(names)):
@@ -222,39 +251,58 @@ def load_manifest(linx_root: Path) -> dict[str, dict]:
     return {entry["name"]: entry for entry in operations}
 
 
-def load_expected_contracts(ptoas_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
-    delta_path = ptoas_root / "tools/pto_isa_v0_58_0_operation_contracts.json"
-    delta = json.loads(delta_path.read_text())
-    if delta.get("release") != EXPECTED_LOCK["release"]:
-        raise SystemExit(f"unexpected release in {delta_path}")
+def validate_linx_identity(linx_root: Path, lock: dict) -> None:
+    root_lock_path = linx_root / "isa/v0.58/pto-spec.lock.json"
+    root_lock = json.loads(root_lock_path.read_text())
+    if root_lock != lock:
+        local_text = json.dumps(lock, sort_keys=True, indent=2)
+        root_text = json.dumps(root_lock, sort_keys=True, indent=2)
+        raise SystemExit(
+            "PTOAS/root PTO ISA lock mismatch:\n"
+            f"--- PTOAS lock\n{local_text}\n--- LinxISA lock\n{root_text}"
+        )
 
-    base_path = ptoas_root / "tools" / delta.get("base_contract", "")
-    base = json.loads(base_path.read_text())
-    base_operations = dict(base.get("operations", {}))
-    operations = dict(base_operations)
-    for name in delta.get("removed_public_operations", []):
-        if operations.pop(name, None) is None:
-            raise SystemExit(f"missing removed base operation {name} in {base_path}")
-    for name, contract in delta.get("added_operations", {}).items():
-        if name in operations:
-            raise SystemExit(f"duplicate added operation {name} in {delta_path}")
-        operations[name] = contract
-    for name, operands in delta.get("isa_operand_overrides", {}).items():
-        if name not in operations:
-            raise SystemExit(f"operand override references unknown operation {name}")
-        operations[name] = dict(operations[name])
-        operations[name]["isa_operands"] = operands
+    release_path = linx_root / "isa/v0.58/release_manifest.json"
+    release = json.loads(release_path.read_text())
+    if release.get("profile") != "v0.58" or release.get("version") != lock["release"]:
+        raise SystemExit(
+            f"LinxISA release manifest mismatch: expected v0.58/{lock['release']}, "
+            f"got {release.get('profile')}/{release.get('version')}"
+        )
+    cardinality = release.get("cardinality", {})
+    expected_counts = {
+        "command_forms": lock["catalogs"]["command_forms"]["count"],
+        "scalar_forms": lock["catalogs"]["scalar_forms"]["count"],
+        "tile_operations": lock["catalogs"]["tile_operations"]["count"],
+        "extension_encoding_reservations": lock["catalogs"]["extension_encoding_reservations"]["count"],
+    }
+    for name, expected in expected_counts.items():
+        if cardinality.get(name) != expected:
+            raise SystemExit(
+                f"LinxISA release manifest {name} count mismatch: "
+                f"expected {expected}, got {cardinality.get(name)}"
+            )
+
+
+def load_expected_contracts(ptoas_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
+    contract_path = ptoas_root / "tools/pto_isa_v0_58_1_operation_contracts.json"
+    contract_file = json.loads(contract_path.read_text())
+    for field in (
+        "release",
+        "encoding_abi",
+        "encoding_projection_sha256",
+        "source_commit",
+        "source_tree",
+    ):
+        if contract_file.get(field) != EXPECTED_LOCK[field]:
+            raise SystemExit(f"unexpected {field} in {contract_path}")
+    operations = dict(contract_file.get("operations", {}))
 
     expected_count = EXPECTED_LOCK["tile_operation_count"]
-    if delta.get("public_operation_count") != expected_count or len(operations) != expected_count:
-        raise SystemExit(f"unexpected public operation count in {delta_path}")
+    if contract_file.get("public_operation_count") != expected_count or len(operations) != expected_count:
+        raise SystemExit(f"unexpected public operation count in {contract_path}")
 
-    dialect_only_entries = dict(base.get("dialect_only_operations", {}))
-    for name in delta.get("moved_to_dialect_only_operations", []):
-        contract = base_operations.get(name)
-        if contract is None:
-            raise SystemExit(f"missing dialect-only migration source {name} in {base_path}")
-        dialect_only_entries[contract["ptoas_mnemonic"]] = contract["ptoas_arguments"]
+    dialect_only_entries = dict(contract_file.get("dialect_only_operations", {}))
     dialect_only = {
         normalize(mnemonic): {
             "ptoas_mnemonic": mnemonic,
@@ -263,14 +311,14 @@ def load_expected_contracts(ptoas_root: Path) -> tuple[dict[str, dict], dict[str
         for mnemonic, arguments in dialect_only_entries.items()
     }
     if len(dialect_only) != len(dialect_only_entries):
-        raise SystemExit(f"duplicate dialect-only operation names in {base_path}")
+        raise SystemExit(f"duplicate dialect-only operation names in {contract_path}")
     public_mnemonics = {
         normalize(entry["ptoas_mnemonic"]) for entry in operations.values()
     }
     overlap = sorted(public_mnemonics & set(dialect_only))
     if overlap:
         raise SystemExit(
-            f"public/dialect-only operation overlap in {delta_path}: {overlap}"
+            f"public/dialect-only operation overlap in {contract_path}: {overlap}"
         )
     return operations, dialect_only
 
@@ -310,25 +358,19 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
     ):
         if token not in cli_text and token not in lowering_text:
             errors.append(f"missing Linx target implementation token: {token}")
-    delta = json.loads(
-        (ptoas_root / "tools/pto_isa_v0_58_0_operation_contracts.json").read_text()
+    contracts = json.loads(
+        (ptoas_root / "tools/pto_isa_v0_58_1_operation_contracts.json").read_text()
     )
-    base = json.loads(
-        (ptoas_root / "tools" / delta["base_contract"]).read_text()
-    )
-    for name in delta["removed_public_operations"]:
-        contract = base["operations"][name]
-        mnemonic = f'"pto.{contract["ptoas_mnemonic"]}"'
+    for mnemonic_name in contracts.get("linx_rejected_mnemonics", []):
+        mnemonic = f'"pto.{mnemonic_name}"'
         if mnemonic not in cli_text:
-            errors.append(
-                f"Linx target boundary does not explicitly reject dialect-only {mnemonic}"
-            )
+            errors.append(f"Linx target boundary does not explicitly reject dialect-only {mnemonic}")
     if 'ValueRange{dst, peerTid, src}' not in lowering_text:
         errors.append("GMOV lowering must match Linx-TileOP-API order (dst, peer_tid, src)")
     if 'ValueRange{dst, src0, src1, src2}' not in lowering_text:
         errors.append("TFMA lowering must match Linx-TileOP-API order (dst, src0, src1, src2)")
     if errors:
-        raise SystemExit("invalid PTOAS Linx v0.58 target surface:\n  " + "\n  ".join(errors))
+        raise SystemExit("invalid PTOAS Linx v0.58.1 target surface:\n  " + "\n  ".join(errors))
 
 
 def main() -> int:
@@ -357,7 +399,7 @@ def main() -> int:
     )
     boundary_error = bool(deleted_present)
     if deleted_present:
-        print("PTOAS has deleted PTO ISA 0.58.0 names active in the dialect:")
+        print("PTOAS has deleted PTO ISA 0.58.1 names active in the dialect:")
         for name in deleted_present:
             print(f"  - {name}")
 
@@ -392,14 +434,14 @@ def main() -> int:
                 f"expected PTOAS arguments {expected}, got {actual}"
             )
     if contract_errors:
-        print("PTOAS has incorrect PTO ISA 0.58.0 operation roles/arity:")
+        print("PTOAS has incorrect PTO ISA 0.58.1 operation roles/arity:")
         for error in contract_errors:
             print(f"  - {error}")
         return 1
 
     if args.linx_root is None:
         print(
-            "PTOAS v0.58.0 PTO lock/dialect check OK: all 109 public "
+            "PTOAS v0.58.1 PTO lock/dialect check OK: all 109 public "
             f"operation argument contracts and {len(expected_dialect_only)} explicit "
             "dialect-only contracts match; hardware numeric profile/vectors are "
             "identity metadata only (execution conformance not evaluated)"
@@ -407,11 +449,12 @@ def main() -> int:
         return 0
 
     manifest = load_manifest(args.linx_root.resolve())
+    validate_linx_identity(args.linx_root.resolve(), lock)
 
     expected_names = set(expected_public)
     actual_names = set(manifest)
     if actual_names != expected_names:
-        print("LinxISA v0.58.0 public operation boundary mismatch:")
+        print("LinxISA v0.58.1 public operation boundary mismatch:")
         for name in sorted(expected_names - actual_names):
             print(f"  - missing manifest operation: {name}")
         for name in sorted(actual_names - expected_names):
@@ -421,6 +464,10 @@ def main() -> int:
     role_errors = []
     for name, contract in expected_public.items():
         entry = manifest[name]
+        if entry.get("engine") != contract.get("engine"):
+            role_errors.append(
+                f"{name}: expected engine {contract.get('engine')}, got {entry.get('engine')}"
+            )
         actual = tuple(
             (operand.get("field"), operand.get("role"))
             for operand in entry.get("operands", [])
@@ -434,13 +481,13 @@ def main() -> int:
                 f"{name}: expected ISA operands {expected}, got {actual}"
             )
     if role_errors:
-        print("LinxISA v0.58.0 manifest role/arity mismatch:")
+        print("LinxISA v0.58.1 manifest role/arity mismatch:")
         for error in role_errors:
             print(f"  - {error}")
         return 1
 
     print(
-        "PTOAS v0.58.0 PTO manifest contract check OK: "
+        "PTOAS v0.58.1 PTO manifest contract check OK: "
         f"all {len(manifest)} public operations match exact Linx roles/arity; "
         f"{len(expected_dialect_only)} dialect-only operations are explicitly bounded; "
         "hardware numeric profile/vectors are identity metadata only "

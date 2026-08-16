@@ -20,10 +20,6 @@
 #include "PTO/IR/PTOSyncUtils.h"
 #include "PTO/Transforms/Passes.h"
 
-#include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
-#include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
-#include "mlir/Analysis/DataFlowFramework.h"
-
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
@@ -3735,7 +3731,8 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
 static Value castToGMBytePointer(ConversionPatternRewriter &rewriter,
                                  Location loc, Value value) {
   auto *ctx = rewriter.getContext();
-  auto targetTy = emitc::OpaqueType::get(ctx, "__gm__ uint8_t*");
+  auto targetTy = emitc::PointerType::get(
+      emitc::OpaqueType::get(ctx, "__gm__ uint8_t"));
   if (value.getType() == targetTy)
     return value;
 
@@ -4259,11 +4256,15 @@ struct PTOTPrefetchToTPREFETCH : public OpConversionPattern<pto::TPrefetchOp> {
   LogicalResult matchAndRewrite(pto::TPrefetchOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value address = peelUnrealized(adaptor.getAddress());
-    Value byteCount = peelUnrealized(adaptor.getByteCount());
+    Value rowStride = peelUnrealized(adaptor.getRowStride());
+    Value validCols = peelUnrealized(adaptor.getValidCols());
+    Value validRows = peelUnrealized(adaptor.getValidRows());
+    Value physicalCols = peelUnrealized(adaptor.getPhysicalCols());
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TPREFETCH",
-        ArrayAttr{}, ArrayAttr{}, ValueRange{address, byteCount});
+        ArrayAttr{}, ArrayAttr{},
+        ValueRange{address, rowStride, validCols, validRows, physicalCols});
     rewriter.eraseOp(op);
     return success();
   }
@@ -5825,7 +5826,8 @@ struct PTOInitializeL2LPipeToEmitC
     auto emitPipeTy =
         cast<Type>(getTypeConverter()->convertType(op.getPipe().getType()));
 
-    auto gmPtrTy = emitc::OpaqueType::get(ctx, "__gm__ void *");
+    auto gmPtrTy = emitc::PointerType::get(
+        emitc::OpaqueType::get(ctx, "__gm__ void"));
     Value nullGm =
         makeEmitCOpaqueConstant(rewriter, op.getLoc(), gmPtrTy, "nullptr");
     auto i32Ty = emitc::OpaqueType::get(ctx, "int32_t");
@@ -7934,7 +7936,7 @@ struct PTOExtractFPToEmitC : public OpConversionPattern<pto::TExtractFPOp> {
   }
 };
 //===----------------------------------------------------------------------===//
-// pto.tinsert lowering -> TINSERT(dst, src, indexRow, indexCol)
+// pto.tinsert lowering -> TINSERT(dst, dst, src, indexRow, indexCol)
 // Keep lowering arch-agnostic and let PTO-ISA infer proper A5 path.
 //===----------------------------------------------------------------------===//
 
@@ -7953,7 +7955,7 @@ struct PTOInsertToEmitC : public OpConversionPattern<pto::TInsertOp> {
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TINSERT",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/ValueRange{dst, src, r0, c0});
+        /*operands=*/ValueRange{dst, dst, src, r0, c0});
 
     rewriter.eraseOp(op);
     return success();
@@ -8200,12 +8202,14 @@ struct PTOImg2ColToEmitC : public OpConversionPattern<pto::TImg2ColOp> {
   LogicalResult matchAndRewrite(pto::TImg2ColOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value src = peelUnrealized(adaptor.getSrc());
+    Value posM = peelUnrealized(adaptor.getPosM());
+    Value posK = peelUnrealized(adaptor.getPosK());
     Value dst = peelUnrealized(adaptor.getDst());
 
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TIMG2COL",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/ValueRange{dst, src});
+        /*operands=*/ValueRange{dst, src, posM, posK});
 
     rewriter.eraseOp(op);
     return success();
@@ -11725,9 +11729,7 @@ struct CFSwitchToCondBr : public OpRewritePattern<cf::SwitchOp> {
 static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
                                        TypeConverter &typeConverter,
                                        MLIRContext *ctx,
-                                       DataFlowSolver &solver,
                                        PTOArch targetArch) {
-  (void)solver;
   patterns.add<ArithCmpIToEmitC>(typeConverter, ctx);
   patterns.add<PTOAllocTileToEmitC>(typeConverter, ctx);
   patterns.add<PTOMaterializeTileToEmitC>(typeConverter, ctx);
@@ -12269,14 +12271,8 @@ static AICORE inline void ptoas_auto_sync_tail(
     target.addLegalDialect<emitc::EmitCDialect>();
     target.addLegalOp<ModuleOp>();
 
-    auto solver = std::make_unique<DataFlowSolver>();
-    solver->load<dataflow::DeadCodeAnalysis>();
-    solver->load<dataflow::IntegerRangeAnalysis>();
-    if (failed(solver->initializeAndRun(getOperation())))
-      return signalPassFailure();
-
     RewritePatternSet patterns(ctx);
-    populatePTOToEmitCPatterns(patterns, typeConverter, ctx, *solver, targetArch);
+    populatePTOToEmitCPatterns(patterns, typeConverter, ctx, targetArch);
 
     // 4. 执行转换
     if (failed(applyPartialConversion(mop, target, std::move(patterns)))) {

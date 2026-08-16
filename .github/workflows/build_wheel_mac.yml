@@ -24,7 +24,7 @@ permissions:
 
 env:
   LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-  LLVM_COMMIT: 9fb4f7aa89ee22541bfae288e2085ada266ffd75
+  LLVM_COMMIT: b14f16a0cccf1a360a6a64aca8606d7780db3049
 
 jobs:
   build_wheel:
@@ -66,7 +66,7 @@ jobs:
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
             EXPECTED_RELEASE_VERSION="$(python .github/scripts/compute_ptoas_version.py --mode release)"
-            if [ "${GITHUB_REF_NAME}" = "linxisa-v0.58.0" ]; then
+            if [ "${GITHUB_REF_NAME}" = "linxisa-v0.58.1" ]; then
               python tools/check_v058_pto_manifest.py --ptoas-root .
               PTOAS_VERSION="${EXPECTED_RELEASE_VERSION}"
             else

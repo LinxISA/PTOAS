@@ -3,8 +3,8 @@
 ## 1. 项目简介 (Introduction)
 
 **ptoas** (`ptoas`) 是一个基于 LinxISA 受控 **LLVM/MLIR**
-（release `linxisa-v0.58.0`，commit
-`9fb4f7aa89ee22541bfae288e2085ada266ffd75`）构建的专用编译器工具链，
+（ISA release `linxisa-v0.58.1`，LLVM commit
+`b14f16a0cccf1a360a6a64aca8606d7780db3049`）构建的专用编译器工具链，
 专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
 
 作为连接上层 AI 框架与底层各类NPU/GPGPU/CPU硬件，`ptoas` 采用 **Out-of-Tree** 架构构建，提供了完整的 C++ 与 Python 接口，主要职责包括：
@@ -41,8 +41,8 @@ PTOAS/
 ## 3. 构建指南 (Build Instructions)
 
 ⚠️ **重要提示**：本项目严格依赖 LinxISA LLVM
-`9fb4f7aa89ee22541bfae288e2085ada266ffd75`。该 SHA 对应
-`linxisa-v0.58.0`，不要替换为同名上游 LLVM tag。
+`b14f16a0cccf1a360a6a64aca8606d7780db3049`。`linxisa-v0.58.1`
+是 ISA release tag，不是 PTOAS 产品版本；不要替换为同名上游 LLVM tag。
 
 
 ### 3.0 环境变量配置 (Configuration)
@@ -92,7 +92,7 @@ python3 -m pip install nanobind numpy
 cd $WORKSPACE_DIR
 git clone https://github.com/LinxISA/llvm-project.git
 cd $LLVM_SOURCE_DIR
-git checkout --detach 9fb4f7aa89ee22541bfae288e2085ada266ffd75
+git checkout --detach b14f16a0cccf1a360a6a64aca8606d7780db3049
 
 # 2. 配置 CMake (构建动态库并启用 Python 绑定)
 cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
@@ -215,12 +215,14 @@ ptoas test/lit/pto/v058_linx_target.pto --pto-arch=linx -o outputfile.cpp
 # 指定构建 Level（level3 会禁用 PlanMemory/InsertSync）
 ptoas test/lit/pto/empty_func.pto --pto-level=level3 -o outputfile.cpp
 
-# 查看当前 ptoas release 版本号
+# 查看 PTOAS 产品版本及其 PTO ISA contract 版本
 ptoas --version
 
 ```
 
-`linx` target 对齐受管的 `Linx-TileOP-API`：生成代码包含
+`ptoas --version` 中的 `0.41` 是 PTOAS 产品版本；括号中的 `PTO ISA
+0.58.1` 是独立的 ISA contract 版本。`linx` target 对齐受管的
+`Linx-TileOP-API`：生成代码包含
 `jcore/template_asm.hpp`，只接受 v0.58 公共 PTO 操作目录，并在 lowering
 前拒绝仅属于 A3/A5 方言面的操作。
 

@@ -522,16 +522,18 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Prefetch a byte range from a global address.";
+  let summary = "Prefetch a rectangular tile region from a global address.";
   let description = [{
-    PTO ISA 0.57.1 models TPREFETCH as a destination-free TMA operation over
-    a base address and byte count. Unlike most PTO intrinsics, TPREFETCH does
-    not carry implicit TSYNC(wait_events...) semantics in PTO-ISA.
+    PTO ISA 0.58.1 models TPREFETCH as a destination-free TLSU operation over
+    a base address, element row stride, valid shape, and physical row width.
   }];
 
   let arguments = (ins
     I64:$address,
-    Index:$byte_count
+    Index:$row_stride,
+    Index:$valid_cols,
+    Index:$valid_rows,
+    Index:$physical_cols
   );
 
   let results = (outs);
@@ -539,7 +541,9 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $address `,` $byte_count `:` type($address) `,` type($byte_count) `)`
+    `ins` `(` $address `,` $row_stride `,` $valid_cols `,` $valid_rows `,` $physical_cols
+    `:` type($address) `,` type($row_stride) `,` type($valid_cols) `,`
+    type($valid_rows) `,` type($physical_cols) `)`
     attr-dict
   }];
 
@@ -4201,17 +4205,19 @@ def TImg2ColOp : PTO_TOp<"timg2col", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TIMG2COL(src, dst) image-to-column tile transform";
+  let summary = "TIMG2COL(src, posM, posK, dst) image-to-column tile transform";
 
   let arguments = (ins
     PTODpsType:$src,
+    Index:$posM,
+    Index:$posK,
     PTODpsType:$dst
   );
 
   let results = (outs);
 
   let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
+    `ins` `(` $src `,` $posM `,` $posK `:` qualified(type($src)) `,` type($posM) `,` type($posK) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];

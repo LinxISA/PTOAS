@@ -1,0 +1,2831 @@
+{
+  "release": "0.58.1",
+  "encoding_abi": "pto-isa-0.58.1-mode-function-v1",
+  "encoding_projection_sha256": "89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c",
+  "source_commit": "c381465b2b8e457e162a4246ee58bb9a2c5b49fd",
+  "source_tree": "463a19db3d6ba70022f18bdbca0d4b2c6ed586e4",
+  "public_operation_count": 109,
+  "operations": {
+    "GMOV": {
+      "ptoas_mnemonic": "gmov",
+      "ptoas_arguments": [
+        "src",
+        "peer_tid",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "resolved-peer-source"
+        ],
+        [
+          "scalar0",
+          "peer-tid"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "MGATHER": {
+      "ptoas_mnemonic": "mgather",
+      "ptoas_arguments": [
+        "mem",
+        "idx",
+        "dst",
+        "gatherOob"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "source0",
+          "indices"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "MGATHER_CAS": {
+      "ptoas_mnemonic": "mgather_cas",
+      "ptoas_arguments": [
+        "mem",
+        "idx",
+        "expected",
+        "replacement",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "source0",
+          "indices"
+        ],
+        [
+          "source1",
+          "expected"
+        ],
+        [
+          "source2",
+          "replacement"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "MGATHER_MASK": {
+      "ptoas_mnemonic": "mgather_mask",
+      "ptoas_arguments": [
+        "mem",
+        "idx",
+        "mask",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "source0",
+          "indices"
+        ],
+        [
+          "source1",
+          "mask"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "MSCATTER": {
+      "ptoas_mnemonic": "mscatter",
+      "ptoas_arguments": [
+        "src",
+        "idx",
+        "mem",
+        "scatterAtomicOp",
+        "scatterOob"
+      ],
+      "isa_operands": [
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "source0",
+          "source"
+        ],
+        [
+          "source1",
+          "byte-displacement-indices"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "MSCATTER_MASK": {
+      "ptoas_mnemonic": "mscatter_mask",
+      "ptoas_arguments": [
+        "src",
+        "idx",
+        "mask",
+        "mem"
+      ],
+      "isa_operands": [
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "source0",
+          "source"
+        ],
+        [
+          "source1",
+          "byte-displacement-indices"
+        ],
+        [
+          "source2",
+          "exact-predicate-mask"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "TABS": {
+      "ptoas_mnemonic": "tabs",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TADD": {
+      "ptoas_mnemonic": "tadd",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TADDS": {
+      "ptoas_mnemonic": "tadds",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TAND": {
+      "ptoas_mnemonic": "tand",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TANDS": {
+      "ptoas_mnemonic": "tands",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TCI": {
+      "ptoas_mnemonic": "tci",
+      "ptoas_arguments": [
+        "S",
+        "dst",
+        "descending"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local S32, S16, U32, or U16 destination"
+        ],
+        [
+          "scalar0",
+          "typed sequence start"
+        ],
+        [
+          "flag0",
+          "ascending or descending direction"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCMP": {
+      "ptoas_mnemonic": "tcmp",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst",
+        "cmpMode"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "predicate destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ],
+        [
+          "comparison",
+          "comparison"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TCMPS": {
+      "ptoas_mnemonic": "tcmps",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "cmpMode",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new packed Local predicate destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ],
+        [
+          "comparison",
+          "six-mode comparison"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TCOLARGMAX": {
+      "ptoas_mnemonic": "tcolargmax",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local U32 index destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLARGMIN": {
+      "ptoas_mnemonic": "tcolargmin",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local U32 index destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPAND": {
+      "ptoas_mnemonic": "tcolexpand",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDADD": {
+      "ptoas_mnemonic": "tcolexpandadd",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDDIV": {
+      "ptoas_mnemonic": "tcolexpanddiv",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDEXPDIF": {
+      "ptoas_mnemonic": "tcolexpandexpdif",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDMAX": {
+      "ptoas_mnemonic": "tcolexpandmax",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDMIN": {
+      "ptoas_mnemonic": "tcolexpandmin",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDMUL": {
+      "ptoas_mnemonic": "tcolexpandmul",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLEXPANDSUB": {
+      "ptoas_mnemonic": "tcolexpandsub",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-row broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLMAX": {
+      "ptoas_mnemonic": "tcolmax",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLMIN": {
+      "ptoas_mnemonic": "tcolmin",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLPROD": {
+      "ptoas_mnemonic": "tcolprod",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCOLSUM": {
+      "ptoas_mnemonic": "tcolsum",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst",
+        "isBinary"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCONCAT": {
+      "ptoas_mnemonic": "tconcat",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TCVT": {
+      "ptoas_mnemonic": "tcvt",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "rmode",
+        "sat_mode"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ],
+        [
+          "numeric_control",
+          "rounding-and-saturation"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TDEQUANT": {
+      "ptoas_mnemonic": "tdequant",
+      "ptoas_arguments": [
+        "src",
+        "scale",
+        "offset",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new FP32 destination"
+        ],
+        [
+          "source0",
+          "persistent S8 or U8 source"
+        ],
+        [
+          "scalar0",
+          "positive finite FP32 multiplier"
+        ],
+        [
+          "scalar1",
+          "source-typed integer zero point"
+        ],
+        [
+          "numeric_control",
+          "rounding"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TDIV": {
+      "ptoas_mnemonic": "tdiv",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "numerator"
+        ],
+        [
+          "source1",
+          "denominator"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TDIVS": {
+      "ptoas_mnemonic": "tdivs",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TEXP": {
+      "ptoas_mnemonic": "texp",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local floating destination"
+        ],
+        [
+          "source0",
+          "persistent Local floating source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TEXPANDS": {
+      "ptoas_mnemonic": "texpands",
+      "ptoas_arguments": [
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TEXTRACT": {
+      "ptoas_mnemonic": "textract",
+      "ptoas_arguments": [
+        "src",
+        "indexRow",
+        "indexCol",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ],
+        [
+          "natural0",
+          "row-offset"
+        ],
+        [
+          "natural1",
+          "column-offset"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TFILLPAD": {
+      "ptoas_mnemonic": "tfillpad",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ],
+        [
+          "scalar0",
+          "padding"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TFMA": {
+      "ptoas_mnemonic": "tfma",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "src2",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "multiplicand-left"
+        ],
+        [
+          "source1",
+          "multiplicand-right"
+        ],
+        [
+          "source2",
+          "addend"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TGATHER": {
+      "ptoas_mnemonic": "tgather",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "cdst",
+        "indices",
+        "tmp",
+        "kValue",
+        "maskPattern",
+        "cmpMode",
+        "offset"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local value destination"
+        ],
+        [
+          "source0",
+          "persistent Local value source"
+        ],
+        [
+          "source1",
+          "persistent Local S32 or U32 row-index source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TGEMV": {
+      "ptoas_mnemonic": "tgemv",
+      "ptoas_arguments": [
+        "lhs",
+        "rhs",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left-vector"
+        ],
+        [
+          "source1",
+          "right-matrix"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TGEMV_ACC": {
+      "ptoas_mnemonic": "tgemv.acc",
+      "ptoas_arguments": [
+        "acc_in",
+        "lhs",
+        "rhs",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "accumulator"
+        ],
+        [
+          "source1",
+          "left-vector"
+        ],
+        [
+          "source2",
+          "right-matrix"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TGEMV_BIAS": {
+      "ptoas_mnemonic": "tgemv.bias",
+      "ptoas_arguments": [
+        "a",
+        "b",
+        "bias",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left-vector"
+        ],
+        [
+          "source1",
+          "right-matrix"
+        ],
+        [
+          "source2",
+          "bias"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TGEMV_MX": {
+      "ptoas_mnemonic": "tgemv.mx",
+      "ptoas_arguments": [
+        "a",
+        "a_scale",
+        "b",
+        "b_scale",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left-vector"
+        ],
+        [
+          "source1",
+          "row-scale"
+        ],
+        [
+          "source2",
+          "right-matrix"
+        ],
+        [
+          "source3",
+          "column-scale"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TGEMV_MX_ACC": {
+      "ptoas_mnemonic": "tgemv.mx.acc",
+      "ptoas_arguments": [
+        "c_in",
+        "a",
+        "a_scale",
+        "b",
+        "b_scale",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "accumulator"
+        ],
+        [
+          "source1",
+          "left-vector"
+        ],
+        [
+          "source2",
+          "row-scale"
+        ],
+        [
+          "source3",
+          "right-matrix"
+        ],
+        [
+          "source4",
+          "column-scale"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TGEMV_MX_BIAS": {
+      "ptoas_mnemonic": "tgemv.mx.bias",
+      "ptoas_arguments": [
+        "a",
+        "a_scale",
+        "b",
+        "b_scale",
+        "bias",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left-vector"
+        ],
+        [
+          "source1",
+          "row-scale"
+        ],
+        [
+          "source2",
+          "right-matrix"
+        ],
+        [
+          "source3",
+          "column-scale"
+        ],
+        [
+          "source4",
+          "bias"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "THISTOGRAM": {
+      "ptoas_mnemonic": "thistogram",
+      "ptoas_arguments": [
+        "src",
+        "idx",
+        "dst",
+        "isMSB"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local U32 prefix-histogram destination"
+        ],
+        [
+          "source0",
+          "persistent Local U16 or U32 source"
+        ],
+        [
+          "source1",
+          "persistent Local U8 prefix filter"
+        ],
+        [
+          "selected_byte",
+          "B.DATR ByteId zero through three"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TIMG2COL": {
+      "ptoas_mnemonic": "timg2col",
+      "ptoas_arguments": [
+        "src",
+        "posM",
+        "posK",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local Matrix destination"
+        ],
+        [
+          "source0",
+          "persistent Local Matrix feature-map source"
+        ],
+        [
+          "natural0",
+          "unsigned low-sixteen-bit posM"
+        ],
+        [
+          "natural1",
+          "unsigned low-sixteen-bit posK"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TINSERT": {
+      "ptoas_mnemonic": "tinsert",
+      "ptoas_arguments": [
+        "src",
+        "indexRow",
+        "indexCol",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "persistent old destination"
+        ],
+        [
+          "source1",
+          "persistent insertion source"
+        ],
+        [
+          "natural0",
+          "row-offset"
+        ],
+        [
+          "natural1",
+          "column-offset"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TLOAD": {
+      "ptoas_mnemonic": "tload",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "pad_mode",
+        "pad_value",
+        "left_padding_num",
+        "right_padding_num",
+        "init_out_buffer",
+        "init_condition"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "scalar0",
+          "row-stride-elements"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "TLOG": {
+      "ptoas_mnemonic": "tlog",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local floating destination"
+        ],
+        [
+          "source0",
+          "persistent Local floating source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TMATMUL": {
+      "ptoas_mnemonic": "tmatmul",
+      "ptoas_arguments": [
+        "lhs",
+        "rhs",
+        "dst",
+        "accPhase"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left"
+        ],
+        [
+          "source1",
+          "right"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TMATMUL_ACC": {
+      "ptoas_mnemonic": "tmatmul.acc",
+      "ptoas_arguments": [
+        "acc_in",
+        "lhs",
+        "rhs",
+        "dst",
+        "accPhase"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "accumulator"
+        ],
+        [
+          "source1",
+          "left"
+        ],
+        [
+          "source2",
+          "right"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TMATMUL_BIAS": {
+      "ptoas_mnemonic": "tmatmul.bias",
+      "ptoas_arguments": [
+        "a",
+        "b",
+        "bias",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left"
+        ],
+        [
+          "source1",
+          "right"
+        ],
+        [
+          "source2",
+          "bias"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TMATMUL_MX": {
+      "ptoas_mnemonic": "tmatmul.mx",
+      "ptoas_arguments": [
+        "a",
+        "a_scale",
+        "b",
+        "b_scale",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left"
+        ],
+        [
+          "source1",
+          "row-scale"
+        ],
+        [
+          "source2",
+          "right"
+        ],
+        [
+          "source3",
+          "column-scale"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TMATMUL_MX_ACC": {
+      "ptoas_mnemonic": "tmatmul.mx.acc",
+      "ptoas_arguments": [
+        "c_in",
+        "a",
+        "a_scale",
+        "b",
+        "b_scale",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "accumulator"
+        ],
+        [
+          "source1",
+          "left"
+        ],
+        [
+          "source2",
+          "row-scale"
+        ],
+        [
+          "source3",
+          "right"
+        ],
+        [
+          "source4",
+          "column-scale"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TMATMUL_MX_BIAS": {
+      "ptoas_mnemonic": "tmatmul.mx.bias",
+      "ptoas_arguments": [
+        "a",
+        "a_scale",
+        "b",
+        "b_scale",
+        "bias",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "left"
+        ],
+        [
+          "source1",
+          "row-scale"
+        ],
+        [
+          "source2",
+          "right"
+        ],
+        [
+          "source3",
+          "column-scale"
+        ],
+        [
+          "source4",
+          "bias"
+        ]
+      ],
+      "engine": "CUBE"
+    },
+    "TMAX": {
+      "ptoas_mnemonic": "tmax",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TMAXS": {
+      "ptoas_mnemonic": "tmaxs",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TMIN": {
+      "ptoas_mnemonic": "tmin",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TMINS": {
+      "ptoas_mnemonic": "tmins",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TMOV": {
+      "ptoas_mnemonic": "tmov",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "fp",
+        "preQuantScalar",
+        "accToVecMode",
+        "reluPreMode"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "TMRGSORT": {
+      "ptoas_mnemonic": "tmrgsort",
+      "ptoas_arguments": [
+        "srcs",
+        "blockLen",
+        "dsts",
+        "tmp",
+        "excuted",
+        "exhausted"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local merged destination"
+        ],
+        [
+          "source0",
+          "persistent sorted Local left source"
+        ],
+        [
+          "source1",
+          "persistent sorted Local right source"
+        ],
+        [
+          "flag0",
+          "ascending or descending selection"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TMUL": {
+      "ptoas_mnemonic": "tmul",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TMULS": {
+      "ptoas_mnemonic": "tmuls",
+      "ptoas_arguments": [
+        "src0",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TNEG": {
+      "ptoas_mnemonic": "tneg",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TNOT": {
+      "ptoas_mnemonic": "tnot",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TOR": {
+      "ptoas_mnemonic": "tor",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TORS": {
+      "ptoas_mnemonic": "tors",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TPARTADD": {
+      "ptoas_mnemonic": "tpartadd",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local union destination"
+        ],
+        [
+          "source0",
+          "persistent Local left source anchored at origin"
+        ],
+        [
+          "source1",
+          "persistent Local right source anchored at origin"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TPARTMAX": {
+      "ptoas_mnemonic": "tpartmax",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local union destination"
+        ],
+        [
+          "source0",
+          "persistent Local left source anchored at origin"
+        ],
+        [
+          "source1",
+          "persistent Local right source anchored at origin"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TPARTMIN": {
+      "ptoas_mnemonic": "tpartmin",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local union destination"
+        ],
+        [
+          "source0",
+          "persistent Local left source anchored at origin"
+        ],
+        [
+          "source1",
+          "persistent Local right source anchored at origin"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TPARTMUL": {
+      "ptoas_mnemonic": "tpartmul",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local union destination"
+        ],
+        [
+          "source0",
+          "persistent Local left source anchored at origin"
+        ],
+        [
+          "source1",
+          "persistent Local right source anchored at origin"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TPREFETCH": {
+      "ptoas_mnemonic": "tprefetch",
+      "ptoas_arguments": [
+        "address",
+        "row_stride",
+        "valid_cols",
+        "valid_rows",
+        "physical_cols"
+      ],
+      "isa_operands": [
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "scalar0",
+          "row-stride-elements"
+        ],
+        [
+          "positive0",
+          "valid-columns"
+        ],
+        [
+          "positive1",
+          "valid-rows"
+        ],
+        [
+          "positive2",
+          "physical-columns"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "TQUANT": {
+      "ptoas_mnemonic": "tquant",
+      "ptoas_arguments": [
+        "src",
+        "fp",
+        "offset",
+        "dst",
+        "quant_type"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new S8 or U8 destination"
+        ],
+        [
+          "source0",
+          "persistent FP32 source"
+        ],
+        [
+          "scalar0",
+          "positive finite FP32 multiplier"
+        ],
+        [
+          "scalar1",
+          "destination-typed integer zero point"
+        ],
+        [
+          "numeric_control",
+          "rounding and saturation"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TRECIP": {
+      "ptoas_mnemonic": "trecip",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local floating destination"
+        ],
+        [
+          "source0",
+          "persistent Local floating source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TRELU": {
+      "ptoas_mnemonic": "trelu",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TREM": {
+      "ptoas_mnemonic": "trem",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "dividend"
+        ],
+        [
+          "source1",
+          "divisor"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TREMS": {
+      "ptoas_mnemonic": "trems",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWARGMAX": {
+      "ptoas_mnemonic": "trowargmax",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local U32 index destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWARGMIN": {
+      "ptoas_mnemonic": "trowargmin",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local U32 index destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPAND": {
+      "ptoas_mnemonic": "trowexpand",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDADD": {
+      "ptoas_mnemonic": "trowexpandadd",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDDIV": {
+      "ptoas_mnemonic": "trowexpanddiv",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDEXPDIF": {
+      "ptoas_mnemonic": "trowexpandexpdif",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDMAX": {
+      "ptoas_mnemonic": "trowexpandmax",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDMIN": {
+      "ptoas_mnemonic": "trowexpandmin",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDMUL": {
+      "ptoas_mnemonic": "trowexpandmul",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWEXPANDSUB": {
+      "ptoas_mnemonic": "trowexpandsub",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local full-shape numeric source"
+        ],
+        [
+          "source1",
+          "persistent Local one-column broadcast source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWMAX": {
+      "ptoas_mnemonic": "trowmax",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWMIN": {
+      "ptoas_mnemonic": "trowmin",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWPROD": {
+      "ptoas_mnemonic": "trowprod",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TROWSUM": {
+      "ptoas_mnemonic": "trowsum",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local same-type numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TRSQRT": {
+      "ptoas_mnemonic": "trsqrt",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "tmp"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local floating destination"
+        ],
+        [
+          "source0",
+          "persistent Local floating source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TSCATTER": {
+      "ptoas_mnemonic": "tscatter",
+      "ptoas_arguments": [
+        "src",
+        "indexes",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new zero-initialized Local value destination"
+        ],
+        [
+          "source0",
+          "persistent Local value source"
+        ],
+        [
+          "source1",
+          "persistent Local width-matched row-index source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TSEL": {
+      "ptoas_mnemonic": "tsel",
+      "ptoas_arguments": [
+        "mask",
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "numeric destination"
+        ],
+        [
+          "source0",
+          "packed predicate mask"
+        ],
+        [
+          "source1",
+          "source-true"
+        ],
+        [
+          "source2",
+          "source-false"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSELS": {
+      "ptoas_mnemonic": "tsels",
+      "ptoas_arguments": [
+        "mask",
+        "src",
+        "tmp",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "packed Local predicate mask"
+        ],
+        [
+          "source1",
+          "persistent Local source selected by one"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE scalar selected by zero"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSHL": {
+      "ptoas_mnemonic": "tshl",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "value-source"
+        ],
+        [
+          "source1",
+          "shift-count-source"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSHLS": {
+      "ptoas_mnemonic": "tshls",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSHR": {
+      "ptoas_mnemonic": "tshr",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "value-source"
+        ],
+        [
+          "source1",
+          "shift-count-source"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSHRS": {
+      "ptoas_mnemonic": "tshrs",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSORT": {
+      "ptoas_mnemonic": "tsort",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "dst_indices",
+        "descending"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local sorted-value destination"
+        ],
+        [
+          "destination1",
+          "new Local U32 original-index destination"
+        ],
+        [
+          "source0",
+          "persistent Local source"
+        ],
+        [
+          "sort_width",
+          "LB0 row-group width"
+        ],
+        [
+          "flag0",
+          "ascending or descending selection"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TSQRT": {
+      "ptoas_mnemonic": "tsqrt",
+      "ptoas_arguments": [
+        "src",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local floating destination"
+        ],
+        [
+          "source0",
+          "persistent Local floating source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TSTORE": {
+      "ptoas_mnemonic": "tstore",
+      "ptoas_arguments": [
+        "src",
+        "dst",
+        "preQuantScalar",
+        "stPhase",
+        "atomicType",
+        "reluPreMode"
+      ],
+      "isa_operands": [
+        [
+          "address",
+          "base-address"
+        ],
+        [
+          "scalar0",
+          "row-stride-elements"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "TLSU"
+    },
+    "TSUB": {
+      "ptoas_mnemonic": "tsub",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TSUBS": {
+      "ptoas_mnemonic": "tsubs",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TTRANS": {
+      "ptoas_mnemonic": "ttrans",
+      "ptoas_arguments": [
+        "src",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TTRI": {
+      "ptoas_mnemonic": "ttri",
+      "ptoas_arguments": [
+        "diagonal",
+        "dst",
+        "upperOrLower"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local triangular destination"
+        ],
+        [
+          "flag0",
+          "lower or upper orientation"
+        ],
+        [
+          "diagonal",
+          "signed diagonal displacement"
+        ]
+      ],
+      "engine": "SFU"
+    },
+    "TXOR": {
+      "ptoas_mnemonic": "txor",
+      "ptoas_arguments": [
+        "src0",
+        "src1",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "destination"
+        ],
+        [
+          "source0",
+          "source-left"
+        ],
+        [
+          "source1",
+          "source-right"
+        ]
+      ],
+      "engine": "VEC"
+    },
+    "TXORS": {
+      "ptoas_mnemonic": "txors",
+      "ptoas_arguments": [
+        "src",
+        "scalar",
+        "tmp",
+        "dst"
+      ],
+      "isa_operands": [
+        [
+          "destination0",
+          "new Local numeric destination"
+        ],
+        [
+          "source0",
+          "persistent Local numeric source"
+        ],
+        [
+          "scalar0",
+          "per-participating-PE private-GPR scalar"
+        ]
+      ],
+      "engine": "VEC"
+    }
+  },
+  "linx_rejected_mnemonics": [
+    "acccvt",
+    "talloc",
+    "taxpy",
+    "tdeinterleave",
+    "tfree",
+    "tgatherb",
+    "tinterleave",
+    "tpartargmax",
+    "tpartargmin",
+    "tpop",
+    "tprelu",
+    "tpush",
+    "treshape"
+  ],
+  "dialect_only_operations": {
+    "acccvt": [
+      "dst"
+    ],
+    "talloc": [
+      "entry",
+      "pipe_handle",
+      "split"
+    ],
+    "talloc_to_aic": [
+      "id",
+      "split"
+    ],
+    "talloc_to_aiv": [
+      "id",
+      "split"
+    ],
+    "taxpy": [
+      "src",
+      "scalar",
+      "dst"
+    ],
+    "tconcatidx": [
+      "src0",
+      "src1",
+      "src0Idx",
+      "src1Idx",
+      "dst"
+    ],
+    "tdeinterleave": [
+      "src",
+      "dst0",
+      "dst1"
+    ],
+    "textract_fp": [
+      "src",
+      "fp",
+      "indexRow",
+      "indexCol",
+      "dst"
+    ],
+    "tfillpad_expand": [
+      "src",
+      "dst"
+    ],
+    "tfillpad_inplace": [
+      "src",
+      "dst"
+    ],
+    "tfree": [
+      "entry",
+      "pipe_handle",
+      "split"
+    ],
+    "tfree_from_aic": [
+      "entry",
+      "id",
+      "split"
+    ],
+    "tfree_from_aiv": [
+      "entry",
+      "id",
+      "split"
+    ],
+    "tgatherb": [
+      "src",
+      "offsets",
+      "dst"
+    ],
+    "tget_scale_addr": [
+      "src",
+      "dst"
+    ],
+    "tgetval": [
+      "src",
+      "offset"
+    ],
+    "tinsert_fp": [
+      "src",
+      "fp",
+      "indexRow",
+      "indexCol",
+      "dst"
+    ],
+    "tinterleave": [
+      "src0",
+      "src1",
+      "dst"
+    ],
+    "tmov.fp": [
+      "src",
+      "fp",
+      "dst"
+    ],
+    "tpartargmax": [
+      "src0",
+      "src1",
+      "src0Idx",
+      "src1Idx",
+      "dst",
+      "dstIdx"
+    ],
+    "tpartargmin": [
+      "src0",
+      "src1",
+      "src0Idx",
+      "src1Idx",
+      "dst",
+      "dstIdx"
+    ],
+    "tpop": [
+      "tile",
+      "pipe_handle",
+      "split"
+    ],
+    "tpop_from_aic": [
+      "valid_row",
+      "valid_col",
+      "id",
+      "split"
+    ],
+    "tpop_from_aiv": [
+      "valid_row",
+      "valid_col",
+      "id",
+      "split"
+    ],
+    "tprelu": [
+      "src0",
+      "src1",
+      "tmp",
+      "dst"
+    ],
+    "tprint": [
+      "src"
+    ],
+    "tpush": [
+      "tile",
+      "pipe_handle",
+      "split"
+    ],
+    "tpush_to_aic": [
+      "tile",
+      "id",
+      "split"
+    ],
+    "tpush_to_aiv": [
+      "tile",
+      "id",
+      "split"
+    ],
+    "treshape": [
+      "src"
+    ],
+    "tsetval": [
+      "dst",
+      "offset",
+      "val"
+    ],
+    "tstore_fp": [
+      "src",
+      "fp",
+      "dst"
+    ],
+    "tsync": [
+      "events"
+    ]
+  }
+}

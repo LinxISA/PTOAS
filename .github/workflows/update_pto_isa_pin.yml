@@ -9,16 +9,20 @@
 name: Update pto-isa pin
 
 on:
-  schedule:
-    - cron: "0 2 * * 1"
   workflow_dispatch:
+    inputs:
+      commit:
+        description: "Reviewed GitCode pto-isa implementation-header commit"
+        required: true
+        type: string
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   update-pto-isa-pin:
-    if: github.repository == 'zhangstevenunity/PTOAS'
+    if: github.repository == 'LinxISA/ptoas'
     runs-on: ubuntu-22.04
     env:
       AUTOMATION_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN || secrets.RELEASE_BOT_TOKEN || '' }}
@@ -50,7 +54,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha="$(python .github/scripts/update_pto_isa_pin.py)"
+          sha="${{ github.event.inputs.commit }}"
+          python .github/scripts/update_pto_isa_pin.py --commit "${sha}"
           python .github/scripts/update_pto_isa_pin.py --commit "${sha}" --check
           echo "pto_isa_commit=${sha}" >> "${GITHUB_OUTPUT}"
           echo "pto_isa_short=${sha:0:12}" >> "${GITHUB_OUTPUT}"
@@ -72,9 +77,17 @@ jobs:
           git commit -m "chore(ci): bump pto-isa pin to ${{ steps.update.outputs.pto_isa_short }}"
           echo "created_commit=true" >> "${GITHUB_OUTPUT}"
 
-      - name: Push pinned pto-isa update
+      - name: Push reviewed pin branch and open pull request
         if: steps.commit.outputs.created_commit == 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+          branch="automation/pto-isa-${{ steps.update.outputs.pto_isa_short }}"
+          git push --force-with-lease origin "HEAD:${branch}"
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "${branch}" \
+            --title "chore(ci): pin reviewed pto-isa implementation ${{ steps.update.outputs.pto_isa_short }}" \
+            --body "Pins the separately reviewed GitCode implementation-header dependency. This is not the PTO-SPEC source commit."

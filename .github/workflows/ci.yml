@@ -43,7 +43,7 @@ on:
         type: string
         default: https://gitcode.com/cann/pto-isa.git
       pto_isa_commit:
-        description: "pto-isa ref (commit/tag/branch; empty = repo-pinned weekly commit)"
+        description: "Reviewed GitCode pto-isa implementation-header commit"
         type: string
         # NOTE: Pin a known-good GitCode commit for deterministic runs.
         default: 662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-      LLVM_COMMIT: 9fb4f7aa89ee22541bfae288e2085ada266ffd75
+      LLVM_COMMIT: b14f16a0cccf1a360a6a64aca8606d7780db3049
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-shared
       PTO_INSTALL_DIR: ${{ github.workspace }}/install
       MLIR_PYTHONPATH: ${{ github.workspace }}/llvm-project/llvm/build-shared/tools/mlir/python_packages/mlir_core
@@ -233,7 +233,7 @@ jobs:
             include/PTO/IR/PTOOps.td \
             tools/ptobc/generated/ptobc_opcodes_v0.h
           ctest --test-dir build --output-on-failure \
-            -R 'pto_isa_v0580_contract_check|ptobc_v0580_ops_v0_encode|ptobc_tpartarg_v0_encode'
+            -R 'pto_isa_v0581_contract_check|ptobc_v0580_ops_v0_encode|ptobc_v0581_contract_encode|ptobc_tpartarg_v0_encode'
 
       - name: Run sample tests (py -> pto -> cpp)
         shell: bash
@@ -317,7 +317,7 @@ jobs:
           SKIP_CASES: ${{ github.event.inputs.skip_cases || '' }}
           RUN_ONLY_CASES: ${{ github.event.inputs.run_only_cases || '' }}
           PTO_ISA_REPO: ${{ github.event.inputs.pto_isa_repo || 'https://gitcode.com/cann/pto-isa.git' }}
-          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '5dbf1b2f6b8ea934f03e62367c2f540ece21134e' }}
+          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '662d7f2a916d6bbde3109ce4a16ed5c28f5d900a' }}
           REMOTE_HOST: ${{ github.event.inputs.remote_host || '101.245.68.6' }}
           REMOTE_USER: ${{ github.event.inputs.remote_user || 'zhongxuan' }}
           REMOTE_PORT: ${{ github.event.inputs.remote_port || '22' }}
@@ -403,11 +403,8 @@ jobs:
 
           rm -rf "${work}/pto-isa"
           git clone "${PTO_ISA_REPO}" "${work}/pto-isa"
-          if [[ -n "${PTO_ISA_COMMIT}" ]]; then
-            git -C "${work}/pto-isa" checkout -f "${PTO_ISA_COMMIT}"
-          else
-            git -C "${work}/pto-isa" checkout -f origin/HEAD || true
-          fi
+          test -n "${PTO_ISA_COMMIT}"
+          git -C "${work}/pto-isa" checkout -f "${PTO_ISA_COMMIT}"
           # Ship a working tree only; remote should not need outbound network.
           rm -rf "${work}/pto-isa/.git"
 

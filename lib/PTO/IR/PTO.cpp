@@ -39,6 +39,7 @@
 #include "llvm/Support/ErrorHandling.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -2327,10 +2328,14 @@ LogicalResult TLoadOp::verify() {
 LogicalResult TPrefetchOp::verify() {
   if (!getAddress().getType().isInteger(64))
     return emitOpError("expects address to have type i64");
-  if (auto byteCount = getConstantIntegerValue(getByteCount());
-      byteCount && (*byteCount < 0 || *byteCount > 262144))
-    return emitOpError(
-        "expects a static byte_count in the inclusive range 0..262144");
+  constexpr std::array<StringLiteral, 4> operandNames = {
+      "row_stride", "valid_cols", "valid_rows", "physical_cols"};
+  SmallVector<Value, 4> operands = {getRowStride(), getValidCols(),
+                                    getValidRows(), getPhysicalCols()};
+  for (auto [name, value] : llvm::zip_equal(operandNames, operands)) {
+    if (auto constant = getConstantIntegerValue(value); constant && *constant < 0)
+      return emitOpError() << "expects " << name << " to be nonnegative";
+  }
   return success();
 }
 
@@ -10060,12 +10065,15 @@ void TLoadOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffec
 
 void TPrefetchOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  // Model the architectural cache-state mutation, not just reads of the two
+  // Model the architectural cache-state mutation, not just reads of the five
   // scalar operands.  The conservative unbound write keeps generic DCE from
   // erasing a destination-free prefetch hint.
   effects.emplace_back(MemoryEffects::Write::get());
   addEffect(effects, &getAddressMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getByteCountMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getRowStrideMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getValidColsMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getValidRowsMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getPhysicalColsMutable(), MemoryEffects::Read::get());
 }
 
 // === TAbsOp ===
@@ -10332,10 +10340,11 @@ void TExtractOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// TINSERT: Read(src) -> Write(dst)
+// TINSERT: Read(old dst), Read(src) -> Write(dst)
 void TInsertOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
+  PTO_ADD_READ(getDstMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 

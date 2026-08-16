@@ -10,7 +10,8 @@ ARG ARCH
 
 # NOTE: change $PY_VER for different Python versions (3.8 - 3.14 available)
 ARG PY_VER=cp311-cp311
-ARG LLVM_TAG=llvmorg-19.1.7
+ARG LLVM_REPOSITORY=https://github.com/LinxISA/llvm-project.git
+ARG LLVM_COMMIT=b14f16a0cccf1a360a6a64aca8606d7780db3049
 
 ## -- usually no need to change below --
 
@@ -33,11 +34,16 @@ ENV PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
 # build LLVM
 WORKDIR $WORKSPACE_DIR
-RUN git clone --depth 1 --branch ${LLVM_TAG} https://github.com/llvm/llvm-project.git
+RUN git clone --no-checkout ${LLVM_REPOSITORY} ${LLVM_SOURCE_DIR} \
+    && git -C ${LLVM_SOURCE_DIR} fetch --depth 1 origin ${LLVM_COMMIT} \
+    && git -C ${LLVM_SOURCE_DIR} checkout --detach ${LLVM_COMMIT} \
+    && test "$(git -C ${LLVM_SOURCE_DIR} rev-parse HEAD)" = "${LLVM_COMMIT}"
 
 WORKDIR $LLVM_SOURCE_DIR
 RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+    -DMLIR_ENABLE_LINXISA_PTO=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DPython3_EXECUTABLE=${PY_PATH}/bin/python \

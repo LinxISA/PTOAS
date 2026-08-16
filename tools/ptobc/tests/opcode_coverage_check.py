@@ -58,10 +58,22 @@ NEW_V0580_OPCODE_ASSIGNMENTS = {
     "pto.tfma": (0x10A2, 4),
 }
 
+# PTO-BC serializes MLIR SSA operands, not duplicated architectural roles.
+# TINSERT therefore has four bytecode operands (src, row, col, dst), while its
+# five-role Linx contract and emitted call are dst, dst, src, row, col.
+V0581_EXACT_BYTECODE_SSA_ARITY = {
+    "pto.trowexpand": 2,
+    "pto.tcolexpand": 2,
+    "pto.tconcat": 3,
+    "pto.timg2col": 4,
+    "pto.tinsert": 4,
+    "pto.tprefetch": 5,
+}
+
 EXACT_ARITY = {
-    "pto.tprefetch": 2,
     **{name: arity for name, (_, arity) in NEW_V0571_OPCODE_ASSIGNMENTS.items()},
     **{name: arity for name, (_, arity) in NEW_V0580_OPCODE_ASSIGNMENTS.items()},
+    **V0581_EXACT_BYTECODE_SSA_ARITY,
 }
 
 PRE_V0571_MAX_PTO_OPCODE = 0x109B

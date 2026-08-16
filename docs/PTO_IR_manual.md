@@ -793,17 +793,17 @@ pto.tload ins(%pv : !pto.partition_tensor_view<16x16xf16>)
 
 ---
 
-##### `pto.tprefetch` - Prefetch a Global Byte Range
+##### `pto.tprefetch` - Prefetch a Global Tile Region
 
-**Summary:** Probes and prefetches a global byte range with TLOAD-equivalent
+**Summary:** Probes and prefetches a rectangular global tile region with TLOAD-equivalent
 translation, permission, fault, restart, coherence, and ordering behavior. PTO
-ISA 0.57.1 deliberately makes this operation destination-free: it changes
+ISA 0.58.1 makes this operation destination-free: it changes
 target cache or data-movement state without publishing a tile result.
 
 **Semantics:**
 
 ```
-TPREFETCH(address, byte_count)
+TPREFETCH(address, row_stride, valid_cols, valid_rows, physical_cols)
 ```
 
 The detailed cache placement is target-defined, but access faults are
@@ -815,7 +815,10 @@ intrinsic wrappers, `TPREFETCH` does not add implicit wait-event synchronization
 | Name | Type | Description |
 |------|------|-------------|
 | `address` | `i64` | Base address of the global byte range |
-| `byte_count` | `index` | Number of bytes to prefetch |
+| `row_stride` | `index` | Row stride in elements |
+| `valid_cols` | `index` | Number of valid columns |
+| `valid_rows` | `index` | Number of valid rows |
+| `physical_cols` | `index` | Physical row width in elements |
 
 **Results:** None. The operation has no destination tile and publishes no result
 queue value.
@@ -823,24 +826,25 @@ queue value.
 **Constraints & Verification:**
 
 - `address` must have exactly type `i64`.
-- `byte_count` is an `index` operand and denotes bytes, not elements.
-- `byte_count` must be in the inclusive range `0..262144`. PTOAS rejects an
-  out-of-range compile-time constant; a dynamic value remains legal in the IR
-  and must satisfy the same range when executed.
+- Shape and stride operands have `index` type and must be nonnegative.
 - A partition view or tile destination is not a compatibility spelling and is
   rejected by the PTOAS parser/verifier.
 
 **Hardware Mapping:**
 
 - Executes on the **DMA pipeline** (`PIPE_MTE2`).
-- EmitC lowers exactly to `TPREFETCH(address, byte_count)`.
+- EmitC lowers exactly to
+  `TPREFETCH(address, row_stride, valid_cols, valid_rows, physical_cols)`.
 
 **Basic Example:**
 
 ```mlir
 %address = arith.constant 4096 : i64
-%bytes = arith.constant 512 : index
-pto.tprefetch ins(%address, %bytes : i64, index)
+%stride = arith.constant 64 : index
+%cols = arith.constant 32 : index
+%rows = arith.constant 16 : index
+%physical_cols = arith.constant 64 : index
+pto.tprefetch ins(%address, %stride, %cols, %rows, %physical_cols : i64, index, index, index, index)
 ```
 
 ---

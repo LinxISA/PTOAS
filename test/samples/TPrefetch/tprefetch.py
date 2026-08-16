@@ -18,13 +18,13 @@ def build():
             module = Module.create()
             i64 = IntegerType.get_signless(64, ctx)
             idx = IndexType.get(ctx)
-            fn_ty = func.FunctionType.get([i64, idx], [])
+            fn_ty = func.FunctionType.get([i64, idx, idx, idx, idx], [])
             with InsertionPoint(module.body):
                 fn = func.FuncOp("tprefetch_kernel", fn_ty)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                pto.TPrefetchOp(entry.arguments[0], entry.arguments[1])
+                pto.TPrefetchOp(*entry.arguments)
                 func.ReturnOp([])
 
             module.operation.verify()

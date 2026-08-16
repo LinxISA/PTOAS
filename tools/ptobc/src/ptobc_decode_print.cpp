@@ -530,21 +530,23 @@ static void addImmediateAttrs(BuildCtx &bc, mlir::OperationState &state,
                               const KnownOpImmediates &imms) {
   switch (info.imm_kind) {
   case 0x01:
-    state.addAttribute("predicate",
-                       mlir::arith::CmpIPredicateAttr::get(
-                           bc.ctx, mlir::arith::CmpIPredicate(imms.cmpPred)));
+    state.attributes.set(
+        "predicate", mlir::arith::CmpIPredicateAttr::get(
+                         bc.ctx, mlir::arith::CmpIPredicate(imms.cmpPred)));
     return;
   case 0x02:
-    state.addAttribute("src_op", mlir::pto::SyncOpTypeAttr::get(
-                                     bc.ctx, mlir::pto::SyncOpType(imms.evA)));
-    state.addAttribute("dst_op", mlir::pto::SyncOpTypeAttr::get(
-                                     bc.ctx, mlir::pto::SyncOpType(imms.evB)));
-    state.addAttribute("event_id",
-                       mlir::pto::EventAttr::get(bc.ctx,
-                                                 mlir::pto::EVENT(imms.evC)));
+    state.attributes.set(
+        "src_op", mlir::pto::SyncOpTypeAttr::get(
+                      bc.ctx, mlir::pto::SyncOpType(imms.evA)));
+    state.attributes.set(
+        "dst_op", mlir::pto::SyncOpTypeAttr::get(
+                      bc.ctx, mlir::pto::SyncOpType(imms.evB)));
+    state.attributes.set(
+        "event_id",
+        mlir::pto::EventAttr::get(bc.ctx, mlir::pto::EVENT(imms.evC)));
     return;
   case 0x05:
-    state.addAttribute("value", buildConstAttr(bc, imms.constId));
+    state.attributes.set("value", buildConstAttr(bc, imms.constId));
     return;
   default:
     return;

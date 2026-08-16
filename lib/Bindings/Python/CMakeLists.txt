@@ -34,6 +34,13 @@ nanobind_add_module(_pto
 # hardening flags stay enabled.
 if(UNIX AND NOT APPLE)
   target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
+  # NB_SHARED creates libnanobind-mlir.so outside LLVM's library directory.
+  # Install it into the directory exported to auditwheel so every architecture
+  # can resolve and vendor the runtime into the repaired wheel.
+  install(TARGETS nanobind-mlir
+    LIBRARY DESTINATION lib
+    COMPONENT PTOASPythonRuntime
+  )
 endif()
 
 target_compile_definitions(_pto PRIVATE

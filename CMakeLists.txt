@@ -149,6 +149,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_python_binding_link_contract.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(
+    NAME python_binding_link_contract_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_python_binding_link_contract.py)
+  add_test(
     NAME release_delivery_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_release_delivery_contract.py

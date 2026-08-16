@@ -36,7 +36,28 @@ def main() -> int:
             "LINKER:-z,undefs so CPython resolves its ABI symbols at module load"
         )
 
-    print("OK: Python binding ELF link contract is explicit")
+    install_contract = re.compile(
+        r"install\s*\(\s*TARGETS\s+nanobind-mlir\s+"
+        r"LIBRARY\s+DESTINATION\s+lib\s+"
+        r"(?:COMPONENT\s+PTOASPythonRuntime\s+)?\)",
+        re.DOTALL,
+    )
+    if not install_contract.search(source):
+        raise SystemExit(
+            "error: install nanobind-mlir into lib so auditwheel can locate "
+            "the NB_SHARED runtime"
+        )
+
+    workflow_path = args.ptoas_root / ".github" / "workflows" / "build_wheel.yml"
+    workflow = workflow_path.read_text(encoding="utf-8")
+    if "$PTO_INSTALL_DIR/lib" not in workflow:
+        raise SystemExit(
+            "error: auditwheel LD_LIBRARY_PATH must include $PTO_INSTALL_DIR/lib"
+        )
+
+    print(
+        "OK: Python binding ELF link and shared-runtime packaging contract is explicit"
+    )
     return 0
 
 

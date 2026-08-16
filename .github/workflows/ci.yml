@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-      LLVM_COMMIT: f708abb5b1559e4bbeb03209523dc2097f0ae8d6
+      LLVM_COMMIT: 7cbc206194e3ecd5b259d5683307334fa49f58af
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-shared
       PTO_INSTALL_DIR: ${{ github.workspace }}/install
       MLIR_PYTHONPATH: ${{ github.workspace }}/llvm-project/llvm/build-shared/tools/mlir/python_packages/mlir_core

@@ -1,0 +1,12 @@
+// RUN: ptoas --pto-arch=linx %s | FileCheck %s
+
+module {
+  func.func @linx_target_smoke() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    return
+  }
+}
+
+// CHECK: #include "jcore/template_asm.hpp"
+// CHECK-NOT: pto/pto-inst.hpp
+// CHECK-NOT: AICORE
+// CHECK-LABEL: extern "C" void linx_target_smoke()

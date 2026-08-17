@@ -25,7 +25,9 @@ module {
 
 // CHECK-LABEL: local_array_get_rvalue
 // CHECK: int32_t [[A:v[0-9]+]][16];
+// CHECK: int32_t [[R:v[0-9]+]] = [[A]][{{v[0-9]+}}];
+// CHECK: uint32_t [[SUM:v[0-9]+]] = {{.*}}[[R]]{{.*}};
 // `a[i] = ...a[j]... + ...;` — confirms the get result flows through arith as
 // a scalar rvalue. The exact cast/paren shape comes from arith.addi's signless
 // overflow-aware lowering; we only pin the subscript-rvalue flow here.
-// CHECK: [[A]][{{v[0-9]+}}] = {{.*}}[[A]][{{v[0-9]+}}]{{.*}};
+// CHECK: [[A]][{{v[0-9]+}}] = {{.*}}[[SUM]]{{.*}};

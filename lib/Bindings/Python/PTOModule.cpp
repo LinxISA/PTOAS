@@ -8,16 +8,15 @@
 
 //===- DialectPTO.cpp -----------------------------------------------------===//
 //
-// Python bindings for the PTO dialect types (pybind11 version).
+// Python bindings for the PTO dialect types.
 //
-// This file is intended to be built via declare_mlir_python_extension(...)
-// with PYTHON_BINDINGS_LIBRARY pybind11, and linked with MLIRCAPIPTO.
+// This extension uses MLIR's nanobind adaptors and links with MLIRCAPIPTO.
 //
 //===----------------------------------------------------------------------===//
 
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
-#include "mlir/Bindings/Python/PybindAdaptors.h"
+#include "mlir/Bindings/Python/Nanobind.h"
+#include "mlir/Bindings/Python/NanobindAdaptors.h"
+#include "nanobind/stl/vector.h"
 #include "pto-c/Dialect/PTO.h"
 #include "mlir-c/IR.h"
 #include "PTO/IR/PTO.h"
@@ -25,12 +24,13 @@
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/Support.h"
 #include "mlir/IR/BuiltinTypes.h"
-namespace py = pybind11;
-using namespace mlir::python::adaptors;
+namespace py = nanobind;
+using namespace nanobind::literals;
+using namespace mlir::python::nanobind_adaptors;
 
 static std::vector<int64_t> toInt64Vector(const py::sequence &seq) {
   std::vector<int64_t> out;
-  out.reserve(seq.size());
+  out.reserve(py::len(seq));
   for (py::handle h : seq)
     out.push_back(py::cast<int64_t>(h));
   return out;
@@ -38,13 +38,13 @@ static std::vector<int64_t> toInt64Vector(const py::sequence &seq) {
 
 static std::vector<int64_t> toShapeVectorOrDynamicRank(py::object shapeOrRank) {
   if (py::isinstance<py::int_>(shapeOrRank)) {
-    auto rank = shapeOrRank.cast<int64_t>();
+    auto rank = py::cast<int64_t>(shapeOrRank);
     if (rank < 0)
       throw py::value_error("rank must be non-negative");
     return std::vector<int64_t>(static_cast<size_t>(rank),
                                 mlir::ShapedType::kDynamic);
   }
-  return toInt64Vector(shapeOrRank.cast<py::sequence>());
+  return toInt64Vector(py::cast<py::sequence>(shapeOrRank));
 }
 
 static MlirContext inferContextFromElementType(MlirContext context,
@@ -63,13 +63,13 @@ static py::list shapeToPyList(const int64_t *data, intptr_t n) {
   return lst;
 }
 
-void populatePTODialectSubmodule(pybind11::module &m);
-void populatePTODialectSubmodule(pybind11::module &m) {
+void populatePTODialectSubmodule(nanobind::module_ &m);
+void populatePTODialectSubmodule(nanobind::module_ &m) {
   (void)m;
 }
 
-static void bindPTOModule(pybind11::module &m) {
-    m.doc() = "PTO dialect Python bindings (pybind11).";
+static void bindPTOModule(nanobind::module_ &m) {
+    m.doc() = "PTO dialect Python bindings.";
 
     // --------------------------------------------------------------------------
     // Dialect registration helper
@@ -376,7 +376,7 @@ static void bindPTOModule(pybind11::module &m) {
             v = py::cast<int32_t>(value);
         } else {
             // enum: pto.AddressSpace.UB -> 转成 int
-            v = py::cast<int32_t>(value.attr("value").cast<py::int_>());
+            v = py::cast<int32_t>(value.attr("value"));
         }
         MlirAttribute a = mlirPTOAddressSpaceAttrGet(context, v);
         return cls.attr("__call__")(a);
@@ -396,10 +396,10 @@ static void bindPTOModule(pybind11::module &m) {
         [](py::object cls, py::object value, MlirContext ctx) -> py::object {
         int32_t v = 0;
         if (py::isinstance<py::int_>(value)) {
-            v = value.cast<int32_t>();
+            v = py::cast<int32_t>(value);
         } else if (py::hasattr(value, "value")) {
             // 通用：py::enum_ 通常有 .value
-            v = value.attr("value").cast<int32_t>();
+            v = py::cast<int32_t>(value.attr("value"));
         } else {
             throw std::runtime_error("RoundModeAttr.get expects int or RoundMode enum");
         }
@@ -424,9 +424,9 @@ static void bindPTOModule(pybind11::module &m) {
         [](py::object cls, py::object value, MlirContext ctx) -> py::object {
         int32_t v = 0;
         if (py::isinstance<py::int_>(value)) {
-            v = value.cast<int32_t>();
+            v = py::cast<int32_t>(value);
         } else if (py::hasattr(value, "value")) {
-            v = value.attr("value").cast<int32_t>();
+            v = py::cast<int32_t>(value.attr("value"));
         } else {
             throw std::runtime_error("SaturationModeAttr.get expects int or SaturationMode enum");
         }
@@ -451,9 +451,9 @@ static void bindPTOModule(pybind11::module &m) {
           [](py::object cls, py::object value, MlirContext ctx) -> py::object {
             int32_t v = 0;
             if (py::isinstance<py::int_>(value)) {
-              v = value.cast<int32_t>();
+              v = py::cast<int32_t>(value);
             } else if (py::hasattr(value, "value")) {
-              v = value.attr("value").cast<int32_t>();
+              v = py::cast<int32_t>(value.attr("value"));
             } else {
               throw std::runtime_error("PipeAttr.get expects int or PIPE enum");
             }
@@ -477,9 +477,9 @@ static void bindPTOModule(pybind11::module &m) {
           [](py::object cls, py::object value, MlirContext ctx) -> py::object {
             int32_t v = 0;
             if (py::isinstance<py::int_>(value)) {
-              v = value.cast<int32_t>();
+              v = py::cast<int32_t>(value);
             } else if (py::hasattr(value, "value")) {
-              v = value.attr("value").cast<int32_t>();
+              v = py::cast<int32_t>(value.attr("value"));
             } else {
               throw std::runtime_error("LayoutAttr.get expects int or Layout enum");
             }
@@ -518,7 +518,7 @@ static void bindPTOModule(pybind11::module &m) {
             if (py::isinstance<py::int_>(value)) {
               v = py::cast<int32_t>(value);
             } else if (py::hasattr(value, "value")) {
-              v = value.attr("value").cast<int32_t>();
+              v = py::cast<int32_t>(value.attr("value"));
             } else {
               throw std::runtime_error("SyncOpTypeAttr.get expects int or SyncOpType enum");
             }
@@ -543,7 +543,7 @@ static void bindPTOModule(pybind11::module &m) {
             if (py::isinstance<py::int_>(value)) {
               v = py::cast<int32_t>(value);
             } else if (py::hasattr(value, "value")) {
-              v = value.attr("value").cast<int32_t>();
+              v = py::cast<int32_t>(value.attr("value"));
             } else {
               throw std::runtime_error("EventAttr.get expects int or EVENT enum");
             }
@@ -573,7 +573,7 @@ static void bindPTOModule(pybind11::module &m) {
             if (py::isinstance<py::int_>(value)) {
               v = py::cast<int32_t>(value);
             } else if (py::hasattr(value, "value")) {
-              v = value.attr("value").cast<int32_t>();
+              v = py::cast<int32_t>(value.attr("value"));
             } else {
               throw std::runtime_error("QuantTypeAttr.get expects int or QuantType enum");
             }
@@ -598,7 +598,8 @@ static void bindPTOModule(pybind11::module &m) {
             MlirAttribute a{nullptr};
             if (py::isinstance(value, maskPatternEnumType)) {
               auto v =
-                  static_cast<MlirPTOMaskPattern>(value.attr("value").cast<int32_t>());
+                  static_cast<MlirPTOMaskPattern>(
+                      py::cast<int32_t>(value.attr("value")));
               a = mlirPTOMaskPatternAttrGetEnum(ctx, v);
             } else if (py::isinstance<py::int_>(value)) {
               int32_t v = py::cast<int32_t>(value);
@@ -841,12 +842,13 @@ static void bindPTOModule(pybind11::module &m) {
                 if (!compactModeObj.is_none()) {
                   if (py::isinstance<py::int_>(compactModeObj)) {
                     compactMode = mlirPTOCompactModeAttrGet(
-                        ctx, compactModeObj.cast<int32_t>());
+                        ctx, py::cast<int32_t>(compactModeObj));
                   } else if (py::hasattr(compactModeObj, "value")) {
                     compactMode = mlirPTOCompactModeAttrGet(
-                        ctx, compactModeObj.attr("value").cast<int32_t>());
+                        ctx,
+                        py::cast<int32_t>(compactModeObj.attr("value")));
                   } else {
-                    compactMode = compactModeObj.cast<MlirAttribute>();
+                    compactMode = py::cast<MlirAttribute>(compactModeObj);
                   }
                 }
                 MlirAttribute a = mlirPTOTileBufConfigAttrGetWithCompactMode(
@@ -882,17 +884,18 @@ static void bindPTOModule(pybind11::module &m) {
 
             if (!validShapeObj.is_none()) {
             // 支持 valid_shape 为 list[int] 或 list[Optional[int]]
-            py::list lst = validShapeObj.cast<py::list>();
-            if ((size_t)lst.size() != shape.size()) {
+            py::list lst = py::cast<py::list>(validShapeObj);
+            const size_t listSize = py::len(lst);
+            if (listSize != shape.size()) {
                 throw std::runtime_error("valid_shape rank must match shape rank");
             }
-            validShape.resize(lst.size());
-            for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(lst.size()); ++i) {
+            validShape.resize(listSize);
+            for (size_t i = 0; i < listSize; ++i) {
                 py::object e = lst[i];
                 if (e.is_none()) {
                 validShape[i] = -1;  // None -> dynamic
                 } else {
-                validShape[i] = e.cast<int64_t>();
+                validShape[i] = py::cast<int64_t>(e);
                 }
             }
             }
@@ -900,7 +903,7 @@ static void bindPTOModule(pybind11::module &m) {
             // 2) 调 CAPI
             MlirType ty;
             if (!configObj.is_none()) {
-            MlirAttribute cfg = configObj.cast<MlirAttribute>();
+            MlirAttribute cfg = py::cast<MlirAttribute>(configObj);
             ty = mlirPTOTileBufTypeGetWithValidShapeAndConfig(
                 ctx,
                 (intptr_t)shape.size(), shape.data(),
@@ -936,6 +939,6 @@ static void bindPTOModule(pybind11::module &m) {
 	populatePTODialectSubmodule(m);
 }
 
-PYBIND11_MODULE(_pto, m) {
+NB_MODULE(_pto, m) {
   bindPTOModule(m);
 }

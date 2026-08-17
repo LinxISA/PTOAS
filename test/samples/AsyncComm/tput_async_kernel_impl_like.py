@@ -143,7 +143,7 @@ def build():
                     arith.AndIOp(count_gt_zero, offset_ge_zero).result, end_le_bound
                 ).result
 
-                valid_if = scf.IfOp(valid, [], hasElse=False)
+                valid_if = scf.IfOp(valid, [], has_else=False)
 
                 with InsertionPoint(valid_if.then_block):
                     scratch = pto.AllocTileOp(scratch_ty).result
@@ -152,7 +152,7 @@ def build():
                     is_root = arith.CmpIOp(
                         arith.CmpIPredicate.eq, my_rank, root_rank
                     ).result
-                    root_if = scf.IfOp(is_root, [], hasElse=False)
+                    root_if = scf.IfOp(is_root, [], has_else=False)
 
                     with InsertionPoint(root_if.then_block):
                         nranks_idx = arith.IndexCastOp(idx, nranks).result
@@ -163,13 +163,13 @@ def build():
                             is_not_self = arith.CmpIOp(
                                 arith.CmpIPredicate.ne, target_rank_i32, root_rank
                             ).result
-                            target_if = scf.IfOp(is_not_self, [], hasElse=False)
+                            target_if = scf.IfOp(is_not_self, [], has_else=False)
 
                             with InsertionPoint(target_if.then_block):
                                 is_rank1 = arith.CmpIOp(
                                     arith.CmpIPredicate.eq, target_rank_i32, c1_i32
                                 ).result
-                                rank1_if = scf.IfOp(is_rank1, [], hasElse=False)
+                                rank1_if = scf.IfOp(is_rank1, [], has_else=False)
                                 with InsertionPoint(rank1_if.then_block):
                                     event1 = _tput_async(dst_rank1, src, session, ctx)
                                     _wait_after_async(event1, session)
@@ -178,7 +178,7 @@ def build():
                                 is_rank2 = arith.CmpIOp(
                                     arith.CmpIPredicate.eq, target_rank_i32, c2_i32
                                 ).result
-                                rank2_if = scf.IfOp(is_rank2, [], hasElse=False)
+                                rank2_if = scf.IfOp(is_rank2, [], has_else=False)
                                 with InsertionPoint(rank2_if.then_block):
                                     event2 = _tput_async(dst_rank2, src, session, ctx)
                                     _wait_after_async(event2, session)
@@ -187,7 +187,7 @@ def build():
                                 is_rank3 = arith.CmpIOp(
                                     arith.CmpIPredicate.eq, target_rank_i32, c3_i32
                                 ).result
-                                rank3_if = scf.IfOp(is_rank3, [], hasElse=False)
+                                rank3_if = scf.IfOp(is_rank3, [], has_else=False)
                                 with InsertionPoint(rank3_if.then_block):
                                     event3 = _tput_async(dst_rank3, src, session, ctx)
                                     _wait_after_async(event3, session)

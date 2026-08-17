@@ -59,7 +59,7 @@ def build():
                 ping = pto.AllocTileOp(tb_f32).result
 
                 is_root = arith.CmpIOp(arith.CmpIPredicate.eq, my_rank, c1_i32).result
-                root_if = scf.IfOp(is_root, [], hasElse=False)
+                root_if = scf.IfOp(is_root, [], has_else=False)
                 with InsertionPoint(root_if.then_block):
                     pto.TBroadcastOp(src, ping, group, 1)
                     scf.YieldOp([])

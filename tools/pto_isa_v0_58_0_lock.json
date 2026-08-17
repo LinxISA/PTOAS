@@ -1,0 +1,47 @@
+{
+  "$schema": "https://docs.openclaw.ai/schemas/linxisa/pto_spec_lock.v1.json",
+  "catalogs": {
+    "command_forms": {
+      "path": "spec/catalog/command-forms.json",
+      "sha256": "aaa16ddd046b7c6ee06aedd6444c90da2541c6f3204ef8d12dba34815e96f15b",
+      "count": 99
+    },
+    "scalar_forms": {
+      "path": "spec/catalog/scalar-forms.json",
+      "sha256": "f6f753034d8c6538c6eeb5320005184e2267152f350748e2442254f1b30c9e5f",
+      "count": 474
+    },
+    "tile_operations": {
+      "path": "spec/catalog/tile-operations.json",
+      "sha256": "aa1fa0a5ba07c7f015875025cc93c42f49b8d4313c55ce2cd72eaaa51bdc7d56",
+      "count": 109
+    },
+    "linx_vector_reservations": {
+      "path": "spec/catalog/linx-vector-reservations.json",
+      "sha256": "1d3c666f2d2c6e5b8f3546cfaee55dd68ae10b29168bd02cdca63f99accfecfd",
+      "count": 5
+    }
+  },
+  "content_sha256": "355e96045cd3f159c367c75d32b1b2d0a8438cd8df61def2b5d4cd650d103873",
+  "encoding_abi": "pto-isa-0.58.0-mode-function-v1",
+  "encoding_projection_sha256": "0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa",
+  "hardware_conformance_profile": {
+    "path": "spec/hardware-conformance-profile.json",
+    "profile_id": "pto-hardware-numeric-0.58.0-ieee-v1",
+    "sha256": "c4076cf8ac6ebd0c6db8a070b7c290b9928ed7f98c089538ee53ed4644e1531a"
+  },
+  "numeric_conformance_vectors": {
+    "path": "spec/evidence/pto-isa-0580-hardware-numeric-vectors.json",
+    "sha256": "0ad9405b5b7da3803fcf3f803c66ea66918d4363e4342356b1f818804d7f30e8"
+  },
+  "release": "0.58.0",
+  "release_manifest": {
+    "path": "spec/release-manifest.json",
+    "sha256": "9f9a5c81cb78b5409e88eb8007bb89d145e298377a458f15a6dbb0ee9ff0ceee"
+  },
+  "source": {
+    "commit": "1c2cb0dcafdbc151357c83e89e7d9460b5d9f401",
+    "tree": "2c0685f8d82ca289aeda2a33989ff200aeb9d81a",
+    "repository": "https://github.com/PTO-ISA/pto-spec.git"
+  }
+}

@@ -13,6 +13,7 @@ from pathlib import Path
 from mlir import ir as _ods_ir
 
 from . import _pto_ops_gen as _pto_ops_gen
+from ._ods_common import get_op_result_or_value as _ods_get_op_result_or_value
 
 
 def _load_local_pto_ext():
@@ -43,7 +44,7 @@ def _export_generated_symbols():
 
 
 def get_op_result_or_value(value):
-    return getattr(_pto_ops_gen, "_get_op_result_or_value")(value)
+    return _ods_get_op_result_or_value(value)
 
 
 _export_generated_symbols()
@@ -656,7 +657,7 @@ class PartitionViewOp(_GeneratedPartitionViewOp):
             sizes, *args = args
         if args:
             raise TypeError(f"too many positional arguments: {len(args)}")
-        source_value = _pto_ops_gen._get_op_result_or_value(source)
+        source_value = get_op_result_or_value(source)
         source_type = source_value.type
         result = PartitionTensorViewType.get(source_type.rank, source_type.element_type)
         self._init_explicit(result, source_value, offsets, sizes, (), loc, ip)
@@ -673,7 +674,7 @@ class PartitionViewOp(_GeneratedPartitionViewOp):
         if args:
             raise TypeError(f"too many positional arguments: {len(args)}")
         operands = [
-            _pto_ops_gen._get_op_result_or_value(source),
+            get_op_result_or_value(source),
             _pto_ops_gen._get_op_results_or_values(offsets),
             _pto_ops_gen._get_op_results_or_values(sizes),
         ]

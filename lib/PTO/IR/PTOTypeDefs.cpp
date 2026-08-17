@@ -172,6 +172,8 @@ static BLayout resolveTileBufBLayout(MLIRContext *context,
     return BLayout::RowMajor;
   case PTOParserTargetArch::A5:
     return BLayout::ColMajor;
+  case PTOParserTargetArch::Linx:
+    return parsedLayout;
   case PTOParserTargetArch::Unspecified:
     return parsedLayout;
   }

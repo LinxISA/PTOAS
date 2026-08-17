@@ -10,7 +10,8 @@ ARG ARCH
 
 # NOTE: change $PY_VER for different Python versions (3.8 - 3.14 available)
 ARG PY_VER=cp311-cp311
-ARG LLVM_TAG=llvmorg-19.1.7
+ARG LLVM_REPOSITORY=https://github.com/LinxISA/llvm-project.git
+ARG LLVM_COMMIT=1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
 
 ## -- usually no need to change below --
 
@@ -19,7 +20,7 @@ ENV PATH="${PY_PATH}/bin:${PATH}"
 
 # dependency
 RUN dnf install -y ninja-build cmake git ccache gcc-c++ lld zip binutils patchelf chrpath && dnf clean all
-RUN pip install --no-cache-dir numpy pybind11 nanobind setuptools wheel auditwheel
+RUN pip install --no-cache-dir numpy nanobind setuptools wheel auditwheel
 
 COPY cmake/LinuxHardeningCache.cmake /tmp/LinuxHardeningCache.cmake
 
@@ -31,13 +32,23 @@ ENV LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
 ENV PTO_SOURCE_DIR=$WORKSPACE_DIR/PTOAS
 ENV PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
+# Build the reviewed checkout supplied as the Docker build context. This keeps
+# PTOAS source identity coupled to the caller's exact checkout instead of an
+# unrelated fork's mutable default branch.
+COPY . ${PTO_SOURCE_DIR}
+
 # build LLVM
 WORKDIR $WORKSPACE_DIR
-RUN git clone --depth 1 --branch ${LLVM_TAG} https://github.com/llvm/llvm-project.git
+RUN git clone --no-checkout ${LLVM_REPOSITORY} ${LLVM_SOURCE_DIR} \
+    && git -C ${LLVM_SOURCE_DIR} fetch --depth 1 origin ${LLVM_COMMIT} \
+    && git -C ${LLVM_SOURCE_DIR} checkout --detach ${LLVM_COMMIT} \
+    && test "$(git -C ${LLVM_SOURCE_DIR} rev-parse HEAD)" = "${LLVM_COMMIT}"
 
 WORKDIR $LLVM_SOURCE_DIR
 RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+    -DMLIR_ENABLE_LINXISA_PTO=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
@@ -45,11 +56,6 @@ RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR 
     -DLLVM_TARGETS_TO_BUILD="host"
 
 RUN ninja -C $LLVM_BUILD_DIR
-
-# build ptoas
-WORKDIR $WORKSPACE_DIR
-RUN git clone https://github.com/zhangstevenunity/PTOAS.git
-# TODO: tag git commit of PTOAS repo
 
 WORKDIR $PTO_SOURCE_DIR
 RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja \
@@ -59,8 +65,9 @@ RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja \
     -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
     -DPython3_ROOT_DIR=${PY_PATH} \
     -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
+    -DPython_EXECUTABLE=${PY_PATH}/bin/python \
     -DPython3_FIND_STRATEGY=LOCATION \
-    -Dpybind11_DIR=$(python -m pybind11 --cmakedir) \
+    -Dnanobind_DIR=$(python -m nanobind --cmake_dir) \
     -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
     -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR}
 
@@ -72,7 +79,7 @@ ENV PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core/
 # copy pto.py, _pto_ops_gen.py 
 RUN cp $PTO_INSTALL_DIR/mlir/dialects/*.py $PY_PACKAGE_DIR/mlir/dialects/
 
-COPY ./setup.py $PY_PACKAGE_DIR/
+COPY docker/setup.py $PY_PACKAGE_DIR/
 
 WORKDIR $PY_PACKAGE_DIR
 RUN python setup.py bdist_wheel
@@ -103,7 +110,7 @@ RUN ptoas --enable-insert-sync ./abs.pto -o ./abs.cpp
 # collect only *.so actually needed by ptoas (transitive closure under build dirs)
 # it is smaller (<200 MB) than copying the full $LLVM_BUILD_DIR/lib (>700 MB)
 ENV PTOAS_DEPS_DIR=/ptoas-deps
-COPY copy_ptoas_deps.sh /tmp/copy_ptoas_deps.sh
+COPY docker/copy_ptoas_deps.sh /tmp/copy_ptoas_deps.sh
 RUN mkdir -p $PTOAS_DEPS_DIR && bash /tmp/copy_ptoas_deps.sh
 
 # -----------------------------------------------------------------------------
@@ -150,8 +157,10 @@ ARG PTO_ISA_COMMIT=662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
 # pinned: https://gitcode.com/cann/pto-isa/commit/662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
 
 WORKDIR /sources
-RUN git clone https://gitcode.com/cann/pto-isa.git \
-    && cd pto-isa && git checkout $PTO_ISA_COMMIT
+RUN git clone --no-checkout https://gitcode.com/cann/pto-isa.git pto-isa \
+    && git -C pto-isa fetch --depth 1 origin ${PTO_ISA_COMMIT} \
+    && git -C pto-isa checkout --detach ${PTO_ISA_COMMIT} \
+    && test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"
 ENV PTO_LIB_PATH=/sources/pto-isa
 ENV BISHENG_OPTS="-I${PTO_LIB_PATH}/include/pto \
     -fPIC -shared -O2 -std=c++17 \

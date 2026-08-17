@@ -1,12 +1,15 @@
 Build:
 
+Run these commands from the PTOAS repository root so that every `COPY` source
+is resolved against the reviewed checkout.
+
 ```bash
-docker build . -t ptoas:py3.11
+docker build -f docker/Dockerfile . -t ptoas:py3.11
 # default to py3.11 to be compatible with readily-availble CANN images at
 # https://quay.io/repository/ascend/cann?tab=tags & https://github.com/Ascend/cann-container-image/tree/main/cann
 
 # optional, to change python version
-docker build . -t ptoas:py3.12 --build-arg PY_VER=cp312-cp312
+docker build -f docker/Dockerfile . -t ptoas:py3.12 --build-arg PY_VER=cp312-cp312
 ```
 
 To test compiler:

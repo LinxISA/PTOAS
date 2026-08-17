@@ -1,0 +1,6 @@
+.git
+build
+install
+wheelhouse
+__pycache__
+*.pyc

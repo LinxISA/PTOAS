@@ -1,0 +1,22 @@
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_tstore_fp_bind_tile_must_not_bypass() {
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c32 = arith.constant 32 : index
+    %src_storage = memref.alloc() : memref<16x32xf32, #pto.address_space<acc>>
+    %src = pto.bind_tile %src_storage, %c16, %c32
+      {config = #pto.tile_buf_config<blayout=2 : i32, slayout=2 : i32, s_fractal_size=1024, pad=0 : i32>}
+      : memref<16x32xf32, #pto.address_space<acc>> -> memref<16x32xf32, #pto.address_space<acc>>
+    %fp_storage = memref.alloc() : memref<1x16xui64, #pto.address_space<scaling>>
+    %fp = pto.bind_tile %fp_storage, %c1, %c16
+      {config = #pto.tile_buf_config<blayout=1 : i32, slayout=1 : i32, s_fractal_size=512, pad=0 : i32>}
+      : memref<1x16xui64, #pto.address_space<scaling>> -> memref<1x16xui64, #pto.address_space<scaling>>
+    %dst = memref.alloc() : memref<32x32xi8, #pto.address_space<gm>>
+    pto.tstore_fp ins(%src, %fp : memref<16x32xf32, #pto.address_space<acc>>, memref<1x16xui64, #pto.address_space<scaling>>) outs(%dst : memref<32x32xi8, #pto.address_space<gm>>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tstore_fp' op Linx legality is not implemented for this operation

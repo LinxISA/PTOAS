@@ -39,6 +39,7 @@
 #include "llvm/Support/ErrorHandling.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -90,9 +91,11 @@ static std::optional<pto::AddressSpace> getPTOMemorySpaceEnum(Type ty);
 enum class VerifierTargetArch {
   A2A3,
   A5,
+  Linx,
 };
 static VerifierTargetArch getVerifierTargetArch(Operation *op);
 static std::optional<StringRef> getVerifierArchName(Operation *op);
+static bool isVerifierTargetLinx(Operation *op);
 static bool isSupportedVecElemType(Type ty, bool allowBf16 = true,
                                    bool allowInt8 = true);
 static bool isSupportedLoadStoreElemTypeA2A3(Type ty);
@@ -247,6 +250,8 @@ PTOArch mlir::pto::getTargetArch(ModuleOp module) {
     return PTOArch::A3;
 
   auto arch = module->getAttrOfType<StringAttr>(kPTOTargetArchAttrName);
+  if (arch && arch.getValue().equals_insensitive("linx"))
+    return PTOArch::Linx;
   if (arch && arch.getValue().equals_insensitive("a5"))
     return PTOArch::A5;
   return PTOArch::A3;
@@ -266,12 +271,20 @@ bool mlir::pto::isTargetArchA5(ModuleOp module) {
   return getTargetArch(module) == PTOArch::A5;
 }
 
+bool mlir::pto::isTargetArchLinx(ModuleOp module) {
+  return getTargetArch(module) == PTOArch::Linx;
+}
+
 bool mlir::pto::isTargetArchA3(Operation *op) {
   return getTargetArch(op) == PTOArch::A3;
 }
 
 bool mlir::pto::isTargetArchA5(Operation *op) {
   return getTargetArch(op) == PTOArch::A5;
+}
+
+bool mlir::pto::isTargetArchLinx(Operation *op) {
+  return getTargetArch(op) == PTOArch::Linx;
 }
 
 static llvm::TypeSize getOneByteTypeSize() {
@@ -325,13 +338,17 @@ uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
 
 static VerifierTargetArch getVerifierTargetArch(Operation *op) {
   if (auto archName = getVerifierArchName(op)) {
+    if (archName->equals_insensitive("linx"))
+      return VerifierTargetArch::Linx;
     return archName->equals_insensitive("a5") ? VerifierTargetArch::A5
-                            : VerifierTargetArch::A2A3;
+                                               : VerifierTargetArch::A2A3;
   }
 
   switch (getPTOParserTargetArch(op ? op->getContext() : nullptr)) {
   case PTOParserTargetArch::A5:
     return VerifierTargetArch::A5;
+  case PTOParserTargetArch::Linx:
+    return VerifierTargetArch::Linx;
   case PTOParserTargetArch::A3:
   case PTOParserTargetArch::Unspecified:
     return VerifierTargetArch::A2A3;
@@ -349,13 +366,34 @@ static std::optional<StringRef> getVerifierArchName(Operation *op) {
   return std::nullopt;
 }
 
+static bool isVerifierTargetLinx(Operation *op) {
+  return getVerifierTargetArch(op) == VerifierTargetArch::Linx;
+}
+
 static bool shouldBypassDecodedMemrefVerifier(Operation *op) {
   if (!op)
+    return false;
+  // Decoded memrefs and bind_tile aliases are a legacy A2/A3/A5
+  // representation. Linx must verify the effective operation explicitly;
+  // never use representation alone as an architecture-wide success path.
+  if (isVerifierTargetLinx(op))
     return false;
   for (Value operand : op->getOperands()) {
     if (isa<MemRefType>(operand.getType()))
       return true;
     if (operand.getDefiningOp<pto::BindTileOp>())
+      return true;
+  }
+  return false;
+}
+
+static bool shouldBypassDecodedTileInputsVerifier(Operation *op, Value src,
+                                                  Value aux) {
+  if (!op || isVerifierTargetLinx(op))
+    return false;
+  for (Value operand : {src, aux}) {
+    if (isa<MemRefType>(operand.getType()) ||
+        operand.getDefiningOp<pto::BindTileOp>())
       return true;
   }
   return false;
@@ -369,9 +407,10 @@ static SmallVector<int64_t, 4> canonicalizeTileBufValidShape(ArrayRef<int64_t> v
   return canonical;
 }
 
-template <typename FnA2A3, typename FnA5>
+template <typename FnA2A3, typename FnA5, typename FnLinx>
 static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
-                                            FnA5 &&verifyA5) {
+                                            FnA5 &&verifyA5,
+                                            FnLinx &&verifyLinx) {
   if (shouldBypassDecodedMemrefVerifier(op))
     return success();
   switch (getVerifierTargetArch(op)) {
@@ -379,8 +418,21 @@ static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
     return verifyA2A3();
   case VerifierTargetArch::A5:
     return verifyA5();
+  case VerifierTargetArch::Linx:
+    return verifyLinx();
   }
   return failure();
+}
+
+template <typename FnA2A3, typename FnA5>
+static LogicalResult dispatchVerifierByArch(Operation *op, FnA2A3 &&verifyA2A3,
+                                            FnA5 &&verifyA5) {
+  return dispatchVerifierByArch(
+      op, std::forward<FnA2A3>(verifyA2A3), std::forward<FnA5>(verifyA5),
+      [&]() -> LogicalResult {
+        return op->emitOpError(
+            "Linx legality is not implemented for this operation");
+      });
 }
 
 static ParseResult parseSyncEventOpCommon(OpAsmParser &parser,
@@ -1567,8 +1619,30 @@ static std::optional<pto::Layout> getTileBufLogicalLayout(pto::TileBufType type)
 }
 
 static bool isRowMajorTileBuf(Type ty) {
-  auto tb = mlir::dyn_cast<pto::TileBufType>(ty);
-  return tb && tb.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
+  if (auto tb = mlir::dyn_cast<pto::TileBufType>(ty))
+    return tb.getBLayoutValueI32() ==
+           static_cast<int32_t>(pto::BLayout::RowMajor);
+  // Decoded ND tiles use row-major strides and may carry padding or a dynamic
+  // base offset while materialize-tile-handles introduces bind_tile aliases.
+  if (auto memref = mlir::dyn_cast<MemRefType>(ty)) {
+    SmallVector<int64_t> strides;
+    int64_t offset = 0;
+    if (failed(memref.getStridesAndOffset(strides, offset)) ||
+        strides.empty() || strides.back() != 1)
+      return false;
+    ArrayRef<int64_t> shape = memref.getShape();
+    for (int64_t index = static_cast<int64_t>(strides.size()) - 2; index >= 0;
+         --index) {
+      int64_t innerExtent = shape[index + 1];
+      if (ShapedType::isDynamic(strides[index]) ||
+          ShapedType::isDynamic(strides[index + 1]) ||
+          ShapedType::isDynamic(innerExtent) ||
+          strides[index] < strides[index + 1] * innerExtent)
+        return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 static LogicalResult verifyRowReductionSrcLayout(Operation *op, Type ty,
@@ -2300,16 +2374,76 @@ LogicalResult TLoadOp::verify() {
     return success();
   };
 
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+    if (!isa<MemRefType, pto::PartitionTensorViewType>(srcTy) ||
+        !isa<MemRefType, pto::TileBufType>(dstTy))
+      return emitOpError(
+          "expects Linx tload src to be a memref/partition tensor view and "
+          "dst to be a memref/tile buffer");
+    if (failed(verifyTileBufCommon(*this, dstTy, "dst")))
+      return failure();
+
+    auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+    auto dstSpace = getPTOMemorySpaceEnum(dstTy);
+    if (!srcSpace || *srcSpace != pto::AddressSpace::GM)
+      return emitOpError("expects Linx tload src to use loc=gm");
+    if (!dstSpace || *dstSpace != pto::AddressSpace::VEC)
+      return emitOpError("expects Linx tload dst to use loc=vec");
+    if (getElemByteSize(getElemTy(srcTy)) != getElemByteSize(getElemTy(dstTy)))
+      return emitOpError(
+          "expects Linx tload src and dst element sizes to match");
+    for (auto [name, shape] :
+         {std::pair<StringRef, SmallVector<int64_t>>{"src", getShapeVec(srcTy)},
+          std::pair<StringRef, SmallVector<int64_t>>{
+              "dst", getValidShapeVec(dstTy)}}) {
+      for (auto [index, dim] : llvm::enumerate(shape)) {
+        if (dim != ShapedType::kDynamic && dim <= 0)
+          return emitOpError() << "expects Linx tload " << name << " shape["
+                               << index << "] to be positive";
+      }
+    }
+    return success();
+  };
+
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 LogicalResult TPrefetchOp::verify() {
   if (!getAddress().getType().isInteger(64))
     return emitOpError("expects address to have type i64");
-  if (auto byteCount = getConstantIntegerValue(getByteCount());
-      byteCount && (*byteCount < 0 || *byteCount > 262144))
-    return emitOpError(
-        "expects a static byte_count in the inclusive range 0..262144");
+  if (auto rowStride = getConstantIntegerValue(getRowStride());
+      rowStride && *rowStride < 0)
+    return emitOpError("expects row_stride to be nonnegative");
+  auto verifyU16Positive = [&](StringRef name, Value value) -> LogicalResult {
+    if (auto constant = getConstantIntegerValue(value);
+        constant && (*constant < 1 || *constant > 65535))
+      return emitOpError() << "expects " << name << " in range [1, 65535]";
+    return success();
+  };
+  if (failed(verifyU16Positive("valid_cols", getValidCols())) ||
+      failed(verifyU16Positive("valid_rows", getValidRows())) ||
+      failed(verifyU16Positive("physical_cols", getPhysicalCols())))
+    return failure();
+  auto physicalCols = getConstantIntegerValue(getPhysicalCols());
+  if (physicalCols && !llvm::isPowerOf2_64(static_cast<uint64_t>(*physicalCols)))
+    return emitOpError("expects physical_cols to be a power of two");
+  auto validCols = getConstantIntegerValue(getValidCols());
+  if (physicalCols && validCols && *physicalCols < *validCols)
+    return emitOpError("expects physical_cols to be at least valid_cols");
+  return success();
+}
+
+LogicalResult TImg2ColOp::verify() {
+  for (auto [name, value] :
+       llvm::zip_equal(std::array<StringLiteral, 2>{"posM", "posK"},
+                       std::array<Value, 2>{getPosM(), getPosK()})) {
+    if (auto constant = getConstantIntegerValue(value);
+        constant && (*constant < 0 || *constant > 65535))
+      return emitOpError() << "expects " << name << " in range [0, 65535]";
+  }
   return success();
 }
 
@@ -3473,6 +3607,8 @@ static LogicalResult verifyVecTileCommon(Operation *op, Type ty, StringRef name)
     return verifyVecTileCommonA2A3(op, ty, name);
   case VerifierTargetArch::A5:
     return verifyVecTileCommonA5(op, ty, name);
+  case VerifierTargetArch::Linx:
+    return verifyVecTileCommonA2A3(op, ty, name);
   }
   return failure();
 }
@@ -3513,6 +3649,8 @@ static LogicalResult verifyAccTileCommon(Operation *op, Type ty, StringRef name)
     return verifyAccTileCommonA2A3(op, ty, name);
   case VerifierTargetArch::A5:
     return verifyAccTileCommonA5(op, ty, name);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx ACC tile legality is not implemented");
   }
   return failure();
 }
@@ -3592,6 +3730,8 @@ static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy
   case VerifierTargetArch::A5:
     return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy,
                                    allowLowPrecisionInputs);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx CUBE operand legality is not implemented");
   }
   return failure();
 }
@@ -3653,6 +3793,8 @@ static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsT
   case VerifierTargetArch::A5:
     return verifyGemvTileOperandsA5(op, lhsTy, rhsTy, dstTy,
                                     allowLowPrecisionInputs);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx CUBE GEMV legality is not implemented");
   }
   return failure();
 }
@@ -3694,6 +3836,8 @@ static LogicalResult verifyMatBiasTile(Operation *op, Type biasTy, Type dstTy,
     return verifyMatBiasTileA2A3(op, biasTy, dstTy, requireFloatBias);
   case VerifierTargetArch::A5:
     return verifyMatBiasTileA5(op, biasTy, dstTy, requireFloatBias);
+  case VerifierTargetArch::Linx:
+    return op->emitOpError("Linx CUBE bias legality is not implemented");
   }
   return failure();
 }
@@ -3733,6 +3877,44 @@ LogicalResult pto::TAddOp::verify() {
       /*allowInt8OnA5=*/true, /*allowBf16OnA5=*/true,
       "expects A2/A3 tadd element type to be i32/i16/f16/f32",
       "expects A5 tadd element type to be i32/i16/i8/f16/bf16/f32");
+}
+
+LogicalResult pto::TFmaOp::verify() {
+  if (!isVerifierTargetLinx(getOperation()))
+    return emitOpError("is only available for --pto-arch=linx");
+  Type src0Ty = getSrc0().getType();
+  Type src1Ty = getSrc1().getType();
+  Type src2Ty = getSrc2().getType();
+  Type dstTy = getDst().getType();
+  if (failed(verifyVecTileCommon(*this, src0Ty, "src0")) ||
+      failed(verifyVecTileCommon(*this, src1Ty, "src1")) ||
+      failed(verifyVecTileCommon(*this, src2Ty, "src2")) ||
+      failed(verifyVecTileCommon(*this, dstTy, "dst")))
+    return failure();
+  if (getShapeVec(src0Ty) != getShapeVec(src1Ty) ||
+      getShapeVec(src0Ty) != getShapeVec(src2Ty) ||
+      getShapeVec(src0Ty) != getShapeVec(dstTy))
+    return emitOpError("expects src0, src1, src2, and dst to have the same shape");
+  if (getElemTy(src0Ty) != getElemTy(src1Ty) ||
+      getElemTy(src0Ty) != getElemTy(src2Ty) ||
+      getElemTy(src0Ty) != getElemTy(dstTy))
+    return emitOpError("expects src0, src1, src2, and dst element types to match");
+  return success();
+}
+
+LogicalResult pto::GMovOp::verify() {
+  if (!isVerifierTargetLinx(getOperation()))
+    return emitOpError("is only available for --pto-arch=linx");
+  Type srcTy = getSrc().getType();
+  Type dstTy = getDst().getType();
+  if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
+      failed(verifyTileBufCommon(*this, dstTy, "dst")))
+    return failure();
+  if (getShapeVec(srcTy) != getShapeVec(dstTy))
+    return emitOpError("expects src and dst to have the same shape");
+  if (getElemTy(srcTy) != getElemTy(dstTy))
+    return emitOpError("expects src and dst element types to match");
+  return success();
 }
 
 LogicalResult pto::TAddSOp::verify() {
@@ -4669,7 +4851,18 @@ LogicalResult mlir::pto::TDivOp::verify() {
       return emitOpError("expects A5 tdiv element type to be i32/i16/f16/f32");
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    FailureOr<Type> elemOr = verifyMatchingRowMajorBinaryTileOpCommon(
+        getOperation(), getSrc0().getType(), getSrc1().getType(),
+        getDst().getType());
+    if (failed(elemOr))
+      return failure();
+    if (!elemOr->isF16() && !elemOr->isF32())
+      return emitOpError("expects Linx SFU tdiv element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 mlir::LogicalResult mlir::pto::TDivSOp::verify() {
@@ -4716,7 +4909,18 @@ mlir::LogicalResult mlir::pto::TDivSOp::verify() {
   };
   auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
   auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    if (failed(verifyByArch(PTOArch::Linx)))
+      return failure();
+    Type tileTy = isTileLike(getSrc().getType()) ? getSrc().getType()
+                                                 : getScalar().getType();
+    Type elem = getElemTy(tileTy);
+    if (!elem.isF16() && !elem.isF32())
+      return emitOpError("expects Linx SFU tdivs element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 mlir::LogicalResult mlir::pto::TExpOp::verify() {
@@ -5061,7 +5265,43 @@ mlir::LogicalResult mlir::pto::TInsertOp::verify() {
         "expects A5 tinsert to use a supported src/dst loc pair: "
         "acc->mat, vec->mat, or vec->vec");
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+    if (!isa<pto::TileBufType, MemRefType>(srcTy) ||
+        !isa<pto::TileBufType, MemRefType>(dstTy))
+      return emitOpError(
+          "expects Linx tinsert src/dst to be tile buffers or decoded memrefs");
+    if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
+        failed(verifyTileBufCommon(*this, dstTy, "dst")) ||
+        failed(verifyNonNegativeIndexRowCol(
+            *getOperation(), getIndexRow(), getIndexCol(),
+            /*includeIndexAndIntOpsInConstFold=*/true)) ||
+        failed(verifyInsertStaticBoundsCommon(
+            *getOperation(), getIndexRow(), getIndexCol(), srcTy, dstTy,
+            /*includeIndexAndIntOpsInConstFold=*/true)))
+      return failure();
+    Type srcElem = getElemTy(srcTy);
+    Type dstElem = getElemTy(dstTy);
+    auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+    auto dstSpace = getPTOMemorySpaceEnum(dstTy);
+    if (!srcSpace || !dstSpace || *srcSpace != pto::AddressSpace::VEC ||
+        *dstSpace != pto::AddressSpace::VEC)
+      return emitOpError("expects Linx VEC tinsert to use vec->vec");
+    auto isLinxND = [&](Type type) {
+      if (auto tile = dyn_cast<pto::TileBufType>(type))
+        return isRowMajorNoneBoxND(tile);
+      return isRowMajorTileBuf(type);
+    };
+    if (!isLinxND(srcTy) || !isLinxND(dstTy))
+      return emitOpError("expects Linx VEC tinsert src/dst to use ND layout");
+    if (srcElem != dstElem || !isA2A3VecInsertElemType(srcElem))
+      return emitOpError(
+          "expects Linx VEC tinsert src/dst to have matching i8/f16/bf16/f32 dtype");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 static bool isColMajorRowMajorNZTileBuf(pto::TileBufType ty) {
@@ -7539,7 +7779,13 @@ mlir::LogicalResult mlir::pto::TRemOp::verify() {
       return emitOpError("expects A5 trem element type to be i32/i16/f16/f32");
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    if (!elem.isF16() && !elem.isF32())
+      return emitOpError("expects Linx SFU trem element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 mlir::LogicalResult mlir::pto::TRemSOp::verify() {
@@ -7582,7 +7828,13 @@ mlir::LogicalResult mlir::pto::TRemSOp::verify() {
       return emitOpError("expects A5 trems element type to be i32/i16/f16/f32");
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  auto verifyLinx = [&]() -> LogicalResult {
+    if (!elem.isF16() && !elem.isF32())
+      return emitOpError("expects Linx SFU trems element type to be f16/f32");
+    return success();
+  };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyLinx);
 }
 
 static std::optional<int64_t> getStaticNumElements(ArrayRef<int64_t> shape) {
@@ -8749,17 +9001,7 @@ mlir::LogicalResult mlir::pto::TSqrtOp::verify() {
   return mlir::success();
 }
 
-
-
 mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
-  auto shouldBypassDecoded = [&]() -> bool {
-    Value src = getSrc();
-    Value fp = getFp();
-    return isa<MemRefType>(src.getType()) || isa<MemRefType>(fp.getType()) ||
-           src.getDefiningOp<pto::BindTileOp>() ||
-           fp.getDefiningOp<pto::BindTileOp>();
-  };
-
   auto verifyDstType = [&]() -> LogicalResult {
     Type dstTy = getDst().getType();
     if (!isa<MemRefType, pto::PartitionTensorViewType>(dstTy))
@@ -8828,17 +9070,21 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
       return emitOpError() << "expects src to be in the acc address space";
     return mlir::success();
   };
-  if (shouldBypassDecoded())
+  // The GM destination is always a memref and must not disable verification.
+  // Only legacy decoded source/fp representations bypass A2/A3/A5 tile-form
+  // checks; Linx remains fail-closed.
+  if (shouldBypassDecodedTileInputsVerifier(getOperation(), getSrc(), getFp()))
     return success();
   switch (getVerifierTargetArch(getOperation())) {
   case VerifierTargetArch::A2A3:
     return verifyA2A3();
   case VerifierTargetArch::A5:
     return verifyA5();
+  case VerifierTargetArch::Linx:
+    return emitOpError("Linx legality is not implemented for this operation");
   }
   return failure();
 }
-
 
 mlir::LogicalResult mlir::pto::TSubOp::verify() {
   return verifyArithmeticBinaryTileOpWithArchDispatch(
@@ -10001,12 +10247,15 @@ void TLoadOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffec
 
 void TPrefetchOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  // Model the architectural cache-state mutation, not just reads of the two
+  // Model the architectural cache-state mutation, not just reads of the five
   // scalar operands.  The conservative unbound write keeps generic DCE from
   // erasing a destination-free prefetch hint.
   effects.emplace_back(MemoryEffects::Write::get());
   addEffect(effects, &getAddressMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getByteCountMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getRowStrideMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getValidColsMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getValidRowsMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getPhysicalColsMutable(), MemoryEffects::Read::get());
 }
 
 // === TAbsOp ===
@@ -10164,6 +10413,13 @@ void SetValidShapeOp::getEffects(
 
 // Elementwise + reductions: mostly PIPE_V tilebuf ops
 PTO_DEFINE_BINARY_EFFECTS(TAddOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
+PTO_DEFINE_TERNARY_EFFECTS(TFmaOp, getSrc0Mutable(), getSrc1Mutable(), getSrc2Mutable(), getDstMutable())
+void GMovOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  PTO_ADD_READ(getSrcMutable());
+  PTO_ADD_READ(getPeerTidMutable());
+  PTO_ADD_WRITE(getDstMutable());
+}
 PTO_DEFINE_UNARY_EFFECTS(TAddSOp, getSrcMutable(), getDstMutable())
 void TAxpyOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
@@ -10266,10 +10522,11 @@ void TExtractOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// TINSERT: Read(src) -> Write(dst)
+// TINSERT: Read(old dst), Read(src) -> Write(dst)
 void TInsertOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
+  PTO_ADD_READ(getDstMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 

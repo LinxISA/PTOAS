@@ -72,7 +72,7 @@ def build():
                 #   MTE2(TLOAD) -> V(TADD, conditional) -> MTE3(TSTORE)
                 pto.TLoadOp(None, sv_in, ub)
 
-                if_op = scf.IfOp(cond, [], hasElse=False)
+                if_op = scf.IfOp(cond, [], has_else=False)
                 with InsertionPoint(if_op.then_block):
                     pto.TAddOp(ub, ub, ub)
                     scf.YieldOp([])

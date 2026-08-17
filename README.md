@@ -2,7 +2,10 @@
 
 ## 1. 项目简介 (Introduction)
 
-**ptoas** (`ptoas`) 是一个基于 **LLVM/MLIR (llvmorg-19.1.7)***(Commit cd708029e0b2869e80abe31ddb175f7c35361f90)* 框架构建的专用编译器工具链，专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
+**ptoas** (`ptoas`) 是一个基于 LinxISA 受控 **LLVM/MLIR**
+（ISA release `linxisa-v0.58.1`，LLVM commit
+`1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`）构建的专用编译器工具链，
+专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
 
 作为连接上层 AI 框架与底层各类NPU/GPGPU/CPU硬件，`ptoas` 采用 **Out-of-Tree** 架构构建，提供了完整的 C++ 与 Python 接口，主要职责包括：
 
@@ -37,7 +40,9 @@ PTOAS/
 
 ## 3. 构建指南 (Build Instructions)
 
-⚠️ **重要提示**：本项目严格依赖 **LLVM llvmorg-19.1.7** 版本。
+⚠️ **重要提示**：本项目严格依赖 LinxISA LLVM
+`1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`。`linxisa-v0.58.1`
+是 ISA release tag，不是 PTOAS 产品版本；不要替换为同名上游 LLVM tag。
 
 
 ### 3.0 环境变量配置 (Configuration)
@@ -69,32 +74,27 @@ mkdir -p $WORKSPACE_DIR
 * **Compiler**: GCC >= 9 或 Clang (支持 C++17)
 * **Build System**: CMake >= 3.20, Ninja
 * **Python**: 3.8+
-* **Python Packages**: `pybind11`, `numpy`
+* **Python Packages**: `nanobind`, `numpy`
 ```bash
-python3 -m pip install pybind11==2.12.0 numpy
+python3 -m pip install nanobind numpy
 
 ```
-
-> 说明：当前 LLVM/MLIR Python 绑定与 `pybind11` 3.x 不兼容。
-> 如果编译 LLVM 时遇到 `def_property family does not currently support keep_alive` 等报错，
-> 请先执行上面的降级命令。
 
 
 
 ### 3.2 第一步：构建 LLVM/MLIR (Dependency)
 
-我们需要下载 LLVM 源码，切换到 `llvmorg-19.1.7` 标签，并以**动态库 (Shared Libs)** 模式编译，以确保 Python Binding 的正确链接。
+我们需要下载受控 LinxISA LLVM 源码，切换到上文的精确 SHA，并以
+**动态库 (Shared Libs)** 模式编译，以确保 Python Binding 的正确链接。
 
 ```bash
 # 1. 下载 LLVM 源码
 cd $WORKSPACE_DIR
-git clone https://github.com/llvm/llvm-project.git
+git clone https://github.com/LinxISA/llvm-project.git
 cd $LLVM_SOURCE_DIR
+git checkout --detach 1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
 
-# 2. [关键] 切换到 llvmorg-19.1.7
-git checkout llvmorg-19.1.7
-
-# 3. 配置 CMake (构建动态库并启用 Python 绑定)
+# 2. 配置 CMake (构建动态库并启用 Python 绑定)
 cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DLLVM_ENABLE_PROJECTS="mlir;clang" \
     -DBUILD_SHARED_LIBS=ON \
@@ -103,14 +103,14 @@ cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD="host"
 
-# 4. 编译 LLVM (这一步耗时较长)
+# 3. 编译 LLVM (这一步耗时较长)
 ninja -C $LLVM_BUILD_DIR
 
 ```
 
 ### 3.3 第二步：构建 PTOAS (Out-of-Tree)
 
-下载 PTOAS 源码并基于刚刚编译好的 LLVM 19 进行构建。
+下载 PTOAS 源码并基于刚刚编译好的受控 LinxISA LLVM 进行构建。
 
 ```bash
 # 1. 下载 PTOAS 源码
@@ -118,8 +118,8 @@ cd $WORKSPACE_DIR
 git clone https://gitcode.com/cann/pto-as.git PTOAS
 cd $PTO_SOURCE_DIR
 
-# 2. 获取 pybind11 的 CMake 路径
-export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
+# 2. 获取 nanobind 的 CMake 路径
+export NANOBIND_CMAKE_DIR=$(python3 -m nanobind --cmake_dir)
 
 # 3. 配置 CMake
 # 注意：此处直接使用了 3.0 章节中定义的变量，无需手动修改
@@ -129,10 +129,12 @@ cmake -G Ninja \
     -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
     -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
     -DPython3_EXECUTABLE=$(which python3) \
+    -DPython_EXECUTABLE=$(which python3) \
     -DPython3_FIND_STRATEGY=LOCATION \
-    -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+    -Dnanobind_DIR="${NANOBIND_CMAKE_DIR}" \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
+    -DPTOAS_ENABLE_WERROR=OFF \
     -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
 
 # 4. 编译并安装
@@ -207,13 +209,22 @@ ptoas test/lit/pto/empty_func.pto --enable-insert-sync -o outputfile.cpp
 # 指定目标硬件架构（A3 / A5）
 ptoas test/lit/pto/empty_func.pto --pto-arch=a5 -o outputfile.cpp
 
+# LinxISA v0.58 必须使用独立 Linx target，不得借用 A3/A5 target
+ptoas test/lit/pto/v058_linx_target.pto --pto-arch=linx -o outputfile.cpp
+
 # 指定构建 Level（level3 会禁用 PlanMemory/InsertSync）
 ptoas test/lit/pto/empty_func.pto --pto-level=level3 -o outputfile.cpp
 
-# 查看当前 ptoas release 版本号
+# 查看 PTOAS 产品版本及其 PTO ISA contract 版本
 ptoas --version
 
 ```
+
+`ptoas --version` 中的 `0.41` 是 PTOAS 产品版本；括号中的 `PTO ISA
+0.58.1` 是独立的 ISA contract 版本。`linx` target 对齐受管的
+`Linx-TileOP-API`：生成代码包含
+`jcore/template_asm.hpp`，只接受 v0.58 公共 PTO 操作目录，并在 lowering
+前拒绝仅属于 A3/A5 方言面的操作。
 
 ### 5.2 Python 接口 (Python API)
 

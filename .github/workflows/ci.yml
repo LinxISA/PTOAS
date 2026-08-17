@@ -43,7 +43,7 @@ on:
         type: string
         default: https://gitcode.com/cann/pto-isa.git
       pto_isa_commit:
-        description: "pto-isa ref (commit/tag/branch; empty = repo-pinned weekly commit)"
+        description: "Reviewed GitCode pto-isa implementation-header commit"
         type: string
         # NOTE: Pin a known-good GitCode commit for deterministic runs.
         default: 662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
@@ -93,7 +93,8 @@ jobs:
   build-and-test:
     runs-on: ubuntu-22.04
     env:
-      LLVM_COMMIT: cd708029e0b2869e80abe31ddb175f7c35361f90
+      LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
+      LLVM_COMMIT: 1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-shared
       PTO_INSTALL_DIR: ${{ github.workspace }}/install
       MLIR_PYTHONPATH: ${{ github.workspace }}/llvm-project/llvm/build-shared/tools/mlir/python_packages/mlir_core
@@ -106,6 +107,9 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Validate Python binding link contract
+        run: python3 tools/check_python_binding_link_contract.py --ptoas-root .
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -115,8 +119,7 @@ jobs:
             clang lld \
             libedit-dev zlib1g-dev libxml2-dev libzstd-dev
           python3 -m pip install --upgrade pip
-          # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x.
-          python3 -m pip install 'pybind11<3' numpy
+          python3 -m pip install nanobind typing_extensions numpy
 
       - name: Define payload paths
         shell: bash
@@ -144,7 +147,7 @@ jobs:
         with:
           path: |
             llvm-project/llvm/build-shared
-          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-hardening-v2
+          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-pto-off-v2
 
       - name: Prepare LLVM source (no rebuild)
         run: |
@@ -154,11 +157,13 @@ jobs:
           # 如果 restore 只带来了 build-shared，这里补一个 git repo
           if [ ! -d .git ]; then
             git init
-            git remote add origin https://github.com/llvm/llvm-project.git
+            git remote add origin "${LLVM_REPOSITORY}"
           fi
 
-          git fetch --depth 1 origin tag llvmorg-19.1.7
-          git checkout "${LLVM_COMMIT}"
+          git remote set-url origin "${LLVM_REPOSITORY}"
+          git fetch --depth 1 origin "${LLVM_COMMIT}"
+          git checkout --detach "${LLVM_COMMIT}"
+          test "$(git rev-parse HEAD)" = "${LLVM_COMMIT}"
 
       - name: Build LLVM/MLIR (only if cache miss)
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -166,6 +171,10 @@ jobs:
           cd llvm-project
           cmake -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" -G Ninja -S llvm -B llvm/build-shared \
             -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+            -DMLIR_ENABLE_LINXISA_PTO=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DPython3_EXECUTABLE=python3 \
@@ -182,19 +191,20 @@ jobs:
         with:
           path: |
             llvm-project/llvm/build-shared
-          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-hardening-v2
+          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-shared-mlirpy-pto-off-v2
 
       - name: Build PTOAS
         run: |
-          export PYBIND11_CMAKE_DIR="$(python3 -m pybind11 --cmakedir)"
+          export NANOBIND_CMAKE_DIR="$(python3 -m nanobind --cmake_dir)"
           cmake -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" -G Ninja -S . -B build \
             -DLLVM_DIR="${LLVM_DIR}/lib/cmake/llvm" \
             -DMLIR_DIR="${LLVM_DIR}/lib/cmake/mlir" \
             -DPython3_EXECUTABLE=python3 \
             -DPython3_FIND_STRATEGY=LOCATION \
-            -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+            -Dnanobind_DIR="${NANOBIND_CMAKE_DIR}" \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DMLIR_PYTHON_PACKAGE_DIR="${LLVM_DIR}/tools/mlir/python_packages/mlir_core" \
+            -DPTOAS_ENABLE_WERROR=OFF \
             -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release
           ninja -C build ptoas
@@ -212,6 +222,17 @@ jobs:
           export LD_LIBRARY_PATH="${LLVM_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRARY_PATH:-}"
           export PYTHONPATH="${MLIR_PYTHONPATH}:${PTO_INSTALL_DIR}:${PYTHONPATH:-}"
           ninja -C build check-pto
+
+      - name: Run PTO ISA v0.58 contract gates
+        shell: bash
+        run: |
+          python3 tools/check_python_binding_link_contract.py --ptoas-root .
+          python3 tools/check_v058_pto_manifest.py --ptoas-root .
+          python3 tools/ptobc/tests/opcode_coverage_check.py \
+            include/PTO/IR/PTOOps.td \
+            tools/ptobc/generated/ptobc_opcodes_v0.h
+          ctest --test-dir build --output-on-failure \
+            -R 'pto_isa_v0581_contract_check|ptobc_v0580_ops_v0_encode|ptobc_v0581_contract_encode|ptobc_tpartarg_v0_encode'
 
       - name: Run sample tests (py -> pto -> cpp)
         shell: bash
@@ -295,7 +316,7 @@ jobs:
           SKIP_CASES: ${{ github.event.inputs.skip_cases || '' }}
           RUN_ONLY_CASES: ${{ github.event.inputs.run_only_cases || '' }}
           PTO_ISA_REPO: ${{ github.event.inputs.pto_isa_repo || 'https://gitcode.com/cann/pto-isa.git' }}
-          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '5dbf1b2f6b8ea934f03e62367c2f540ece21134e' }}
+          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '662d7f2a916d6bbde3109ce4a16ed5c28f5d900a' }}
           REMOTE_HOST: ${{ github.event.inputs.remote_host || '101.245.68.6' }}
           REMOTE_USER: ${{ github.event.inputs.remote_user || 'zhongxuan' }}
           REMOTE_PORT: ${{ github.event.inputs.remote_port || '22' }}
@@ -381,11 +402,8 @@ jobs:
 
           rm -rf "${work}/pto-isa"
           git clone "${PTO_ISA_REPO}" "${work}/pto-isa"
-          if [[ -n "${PTO_ISA_COMMIT}" ]]; then
-            git -C "${work}/pto-isa" checkout -f "${PTO_ISA_COMMIT}"
-          else
-            git -C "${work}/pto-isa" checkout -f origin/HEAD || true
-          fi
+          test -n "${PTO_ISA_COMMIT}"
+          git -C "${work}/pto-isa" checkout -f "${PTO_ISA_COMMIT}"
           # Ship a working tree only; remote should not need outbound network.
           rm -rf "${work}/pto-isa/.git"
 

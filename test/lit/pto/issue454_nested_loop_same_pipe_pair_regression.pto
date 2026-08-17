@@ -5,9 +5,9 @@
 // - Inner-loop and outer-loop event chains must both keep their set/wait handshake.
 //
 // CHECK-LABEL: __global__ AICORE void nested_loop_same_pipe_pair()
-// CHECK: for (size_t
+// CHECK: for (int32_t
 // CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[OUT:[0-9]+]]);
-// CHECK: for (size_t
+// CHECK: for (int32_t
 // CHECK: wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[IN:[0-9]+]]);
 // CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[IN]]);
 // CHECK: set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID[[OUT]]);

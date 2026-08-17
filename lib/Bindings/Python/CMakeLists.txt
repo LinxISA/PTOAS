@@ -13,15 +13,38 @@
 
 # lib/Bindings/Python/CMakeLists.txt
 
-find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
-find_package(pybind11 CONFIG REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(nanobind CONFIG REQUIRED)
 
 include(TableGen)
 include(AddMLIR)
 
 # ---- 1) Python native extension: mlir._mlir_libs._pto ----
-pybind11_add_module(_pto MODULE
+nanobind_add_module(_pto
+  NB_DOMAIN mlir
+  FREE_THREADED
+  NB_SHARED
   PTOModule.cpp
+)
+
+# CPython extension runtimes intentionally resolve Python ABI symbols from the
+# interpreter at module-load time. The project hardening cache enables
+# ``-z defs`` globally, so restore the standard extension-module behavior only
+# for nanobind's shared runtime on ELF platforms. RELRO/NOW and the remaining
+# hardening flags stay enabled.
+if(UNIX AND NOT APPLE)
+  target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
+  # NB_SHARED creates libnanobind-mlir.so outside LLVM's library directory.
+  # Install it into the directory exported to auditwheel so every architecture
+  # can resolve and vendor the runtime into the repaired wheel.
+  install(TARGETS nanobind-mlir
+    LIBRARY DESTINATION lib
+    COMPONENT PTOASPythonRuntime
+  )
+endif()
+
+target_compile_definitions(_pto PRIVATE
+  MLIR_BINDINGS_PYTHON_DOMAIN=mlir
 )
 
 target_include_directories(_pto PRIVATE
@@ -101,4 +124,3 @@ add_custom_command(TARGET _pto POST_BUILD
           "${CMAKE_BINARY_DIR}/python/mlir/_mlir_libs"
   VERBATIM
 )
-

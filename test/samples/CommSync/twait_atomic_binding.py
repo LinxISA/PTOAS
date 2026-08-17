@@ -46,7 +46,7 @@ def build():
                 ).result
 
                 is_non_root = arith.CmpIOp(arith.CmpIPredicate.ne, my_rank, c0_i32).result
-                branch = scf.IfOp(is_non_root, [], hasElse=True)
+                branch = scf.IfOp(is_non_root, [], has_else=True)
 
                 with InsertionPoint(branch.then_block):
                     iters_idx = arith.IndexCastOp(idx, iters).result

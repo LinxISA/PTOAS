@@ -62,6 +62,8 @@ static llvm::StringRef getPipelineName(PipelineType pipe) {
     return "VIRTUAL_PIPE_MTE2_L1A";
   case PipelineType::VIRTUAL_PIPE_MTE2_L1B:
     return "VIRTUAL_PIPE_MTE2_L1B";
+  case PipelineType::LINX_SFU:
+    return "LINX_SFU";
   case PipelineType::PIPE_NUM:
     return "PIPE_NUM";
   case PipelineType::PIPE_UNASSIGNED:

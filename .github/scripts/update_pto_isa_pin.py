@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
 
 import argparse
 import pathlib
 import re
-import subprocess
 import sys
-
-
-DEFAULT_REPO_URL = "https://gitcode.com/cann/pto-isa.git"
 
 
 def parse_args() -> argparse.Namespace:
@@ -15,13 +18,9 @@ def parse_args() -> argparse.Namespace:
         description="Update the pinned pto-isa commit used by CI and Docker."
     )
     parser.add_argument(
-        "--repo-url",
-        default=DEFAULT_REPO_URL,
-        help="pto-isa git repository URL.",
-    )
-    parser.add_argument(
         "--commit",
-        help="Commit SHA to pin. If omitted, resolves the current remote HEAD.",
+        required=True,
+        help="Explicit reviewed implementation-header commit SHA to pin.",
     )
     parser.add_argument(
         "--ci-workflow",
@@ -39,17 +38,6 @@ def parse_args() -> argparse.Namespace:
         help="Verify that all pinned locations already match the target commit.",
     )
     return parser.parse_args()
-
-
-def resolve_head_commit(repo_url: str) -> str:
-    out = subprocess.check_output(
-        ["git", "ls-remote", repo_url, "HEAD"],
-        text=True,
-    ).strip()
-    sha = out.split()[0] if out else ""
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise RuntimeError(f"failed to resolve HEAD for {repo_url!r}: {out!r}")
-    return sha
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -159,7 +147,9 @@ def verify(ci_path: pathlib.Path, docker_path: pathlib.Path, commit: str) -> Non
 
 def main() -> int:
     args = parse_args()
-    commit = args.commit or resolve_head_commit(args.repo_url)
+    commit = args.commit
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise RuntimeError("--commit must be a full 40-character lowercase SHA")
     ci_path = pathlib.Path(args.ci_workflow)
     docker_path = pathlib.Path(args.dockerfile)
 

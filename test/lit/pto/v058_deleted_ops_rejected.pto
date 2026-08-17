@@ -1,0 +1,11 @@
+// RUN: not ptoas --pto-arch=linx %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @v058_reject_acccvt() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.acccvt outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.acccvt' op is dialect-only and not part of the active Linx PTO ISA v0.58.1 target

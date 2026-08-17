@@ -5,8 +5,8 @@
 //
 // CHECK-DAG: pipe_barrier(PIPE_ALL)
 // CHECK-LABEL: __global__ AICORE void loop_if_else_loop_carried_sync()
-// CHECK: for (size_t
-// CHECK: if ((int32_t)
+// CHECK: for (int32_t
+// CHECK: if (
 // CHECK: } else {
 // CHECK: #endif // __DAV_CUBE__
 

@@ -1,0 +1,13 @@
+// RUN: not ptoas --pto-arch=linx %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_tstore_fp_memref_must_not_bypass() {
+    %src = memref.alloc() : memref<16x32xf32, #pto.address_space<acc>>
+    %fp = memref.alloc() : memref<1x16xui64, #pto.address_space<scaling>>
+    %dst = memref.alloc() : memref<32x32xi8, #pto.address_space<gm>>
+    pto.tstore_fp ins(%src, %fp : memref<16x32xf32, #pto.address_space<acc>>, memref<1x16xui64, #pto.address_space<scaling>>) outs(%dst : memref<32x32xi8, #pto.address_space<gm>>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tstore_fp' op Linx legality is not implemented for this operation

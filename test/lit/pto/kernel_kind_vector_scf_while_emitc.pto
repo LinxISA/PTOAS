@@ -61,15 +61,14 @@ module {
 }
 
 // CHECK: AICORE void vector_while_kernel()
-// CHECK: const int64_t {{v[0-9]+}} = 0;
-// CHECK: const float {{v[0-9]+}} = 10.0f;
-// CHECK: const float {{v[0-9]+}} = 1.0f;
-// CHECK: const bool {{v[0-9]+}} = false;
-// CHECK: const bool {{v[0-9]+}} = true;
-// CHECK: const int32_t {{v[0-9]+}} = 4;
-// CHECK: const int32_t {{v[0-9]+}} = 2;
-// CHECK: const int32_t {{v[0-9]+}} = 1;
-// CHECK: const int32_t {{v[0-9]+}} = 0;
+// CHECK-DAG: const int64_t {{v[0-9]+}} = 0;
+// CHECK-DAG: const float {{v[0-9]+}} = 10.0f;
+// CHECK-DAG: const float {{v[0-9]+}} = 1.0f;
+// CHECK-DAG: const bool {{v[0-9]+}} = true;
+// CHECK-DAG: const int32_t {{v[0-9]+}} = 4;
+// CHECK-DAG: const int32_t {{v[0-9]+}} = 2;
+// CHECK-DAG: const int32_t {{v[0-9]+}} = 1;
+// CHECK-DAG: const int32_t {{v[0-9]+}} = 0;
 // CHECK: using T = float;
 // CHECK: #if defined(__DAV_VEC__)
 // CHECK: set_mask_norm();

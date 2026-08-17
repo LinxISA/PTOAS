@@ -39,7 +39,7 @@ endif()
 message(STATUS "PTOAS CLI version: ${PTOAS_CLI_VERSION}")
 
 # =========================================================
-# [新增] 强制设置 C++17 标准 (LLVM 19 必需)
+# PTOAS uses the C++17 surface required by the governed LinxISA LLVM toolchain.
 # =========================================================
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,7 +76,10 @@ include(AddMLIR)
 # =========================================================
 # Keep warning policy in CMake so CI, wheel, and external build entrypoints
 # all enforce the same diagnostics contract.
-option(PTOAS_ENABLE_WERROR "Treat PTOAS warnings as errors" ON)
+# LLVM 23 deprecates the generic builder surface used across the existing
+# lowering code. Keep warnings visible, but do not make downstream LLVM API
+# deprecations fatal while the migration is completed incrementally.
+option(PTOAS_ENABLE_WERROR "Treat PTOAS warnings as errors" OFF)
 if(PTOAS_ENABLE_WERROR)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror>)
@@ -106,7 +109,10 @@ option(PTO_ENABLE_PYTHON_BINDING "Enable Python bindings" ON)
 
 if(PTO_ENABLE_PYTHON_BINDING)
   find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
-  find_package(pybind11 CONFIG REQUIRED)
+  set(Python_EXECUTABLE "${Python3_EXECUTABLE}" CACHE FILEPATH
+      "Python interpreter used by nanobind")
+  find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+  find_package(nanobind CONFIG REQUIRED)
 
   # 设置 Python 扩展的输出目录，方便调试
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/python/pto)
@@ -129,10 +135,44 @@ if(BUILD_TESTING)
   enable_testing()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
-    NAME pto_isa_v0571_contract_check
+    NAME pto_isa_v0581_contract_check
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v057_pto_manifest.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v058_pto_manifest.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME pto_isa_v0581_contract_check_negative
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_v058_pto_manifest.py)
+  add_test(
+    NAME python_binding_link_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_python_binding_link_contract.py
+            --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME python_binding_link_contract_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_python_binding_link_contract.py)
+  add_test(
+    NAME release_delivery_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_release_delivery_contract.py
+            --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME release_delivery_contract_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_release_delivery_contract.py)
+  add_test(
+    NAME linx_decoded_verifier_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_linx_verifier_contract.py)
+  add_test(
+    NAME linx_decoded_verifier_contract_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_linx_verifier_contract.py)
+  add_test(
+    NAME emitc_lvalue_contract_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)
   add_subdirectory(tools/ptobc/tests)
 endif()
 

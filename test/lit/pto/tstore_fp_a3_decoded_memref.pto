@@ -1,0 +1,11 @@
+// RUN: ptoas --pto-arch=a3 %s -o /dev/null
+
+module attributes {pto.target_arch = "a3"} {
+  func.func @tstore_fp_decoded_memrefs(
+      %src: memref<16x32xf32, #pto.address_space<acc>>,
+      %fp: memref<1x16xui64, #pto.address_space<scaling>>,
+      %dst: memref<16x32xi8, #pto.address_space<gm>>) {
+    pto.tstore_fp ins(%src, %fp : memref<16x32xf32, #pto.address_space<acc>>, memref<1x16xui64, #pto.address_space<scaling>>) outs(%dst : memref<16x32xi8, #pto.address_space<gm>>)
+    return
+  }
+}

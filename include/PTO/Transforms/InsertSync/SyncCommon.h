@@ -62,8 +62,11 @@ enum class PipelineType : uint32_t {
   // 虚拟 Pipe (如果有)
   VIRTUAL_PIPE_MTE2_L1A = 11,
   VIRTUAL_PIPE_MTE2_L1B = 12,
-  
-  PIPE_NUM = 13,
+
+  // Linx architectural engines. Keep these distinct from the Ascend PIPE ABI.
+  LINX_SFU = 13,
+
+  PIPE_NUM = 14,
   PIPE_UNASSIGNED = 99,
   PIPE_LAST = PIPE_UNASSIGNED
 };

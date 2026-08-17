@@ -522,16 +522,18 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Prefetch a byte range from a global address.";
+  let summary = "Prefetch a rectangular tile region from a global address.";
   let description = [{
-    PTO ISA 0.57.1 models TPREFETCH as a destination-free TMA operation over
-    a base address and byte count. Unlike most PTO intrinsics, TPREFETCH does
-    not carry implicit TSYNC(wait_events...) semantics in PTO-ISA.
+    PTO ISA 0.58.1 models TPREFETCH as a destination-free TLSU operation over
+    a base address, element row stride, valid shape, and physical row width.
   }];
 
   let arguments = (ins
     I64:$address,
-    Index:$byte_count
+    Index:$row_stride,
+    Index:$valid_cols,
+    Index:$valid_rows,
+    Index:$physical_cols
   );
 
   let results = (outs);
@@ -539,7 +541,9 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $address `,` $byte_count `:` type($address) `,` type($byte_count) `)`
+    `ins` `(` $address `,` $row_stride `,` $valid_cols `,` $valid_rows `,` $physical_cols
+    `:` type($address) `,` type($row_stride) `,` type($valid_cols) `,`
+    type($valid_rows) `,` type($physical_cols) `)`
     attr-dict
   }];
 
@@ -1175,6 +1179,34 @@ def TMovOp  : PTO_TOp<"tmov", [
       // Fallback: treat as vector pipe (safe default for most intra-domain moves).
       return ::mlir::pto::PIPE::PIPE_V;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def GMovOp : PTO_TOp<"gmov", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Move data from a peer thread into a destination tile.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    I64:$peer_tid,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $peer_tid `:` qualified(type($src)) `,` type($peer_tid) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)` attr-dict
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE2; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -2877,6 +2909,36 @@ def TAddOp : PTO_TOp<"tadd", [
   }];
 }
 
+def TFmaOp : PTO_TOp<"tfma", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Elementwise fused multiply-add of three tiles.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$src2,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `,` $src2 `:` qualified(type($src0)) `,`
+      qualified(type($src1)) `,` qualified(type($src2)) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)` attr-dict
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TAddSOp : PTO_TOp<"tadds", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -3663,6 +3725,7 @@ def TDivOp : PTO_TOp<"tdiv", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
@@ -3695,6 +3758,7 @@ def TDivSOp : PTO_TOp<"tdivs", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
@@ -4143,17 +4207,21 @@ def TImg2ColOp : PTO_TOp<"timg2col", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TIMG2COL(src, dst) image-to-column tile transform";
+  let summary = "TIMG2COL(src, posM, posK, dst) image-to-column tile transform";
 
   let arguments = (ins
     PTODpsType:$src,
+    Index:$posM,
+    Index:$posK,
     PTODpsType:$dst
   );
 
   let results = (outs);
 
+  let hasVerifier = 1;
+
   let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
+    `ins` `(` $src `,` $posM `,` $posK `:` qualified(type($src)) `,` type($posM) `,` type($posK) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -5042,6 +5110,7 @@ def TRemOp: PTO_TOp<"trem", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -5075,6 +5144,7 @@ def TRemSOp: PTO_TOp<"trems", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::pto::LinxEngine getLinxEngine() { return ::mlir::pto::LinxEngine::SFU; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }

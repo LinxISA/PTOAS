@@ -80,7 +80,7 @@ def build():
                 single_rank = arith.CmpIOp(
                     arith.CmpIPredicate.sle, nranks, c1_i32
                 ).result
-                guarded = scf.IfOp(single_rank, [], hasElse=True)
+                guarded = scf.IfOp(single_rank, [], has_else=True)
 
                 with InsertionPoint(guarded.then_block):
                     scf.YieldOp([])

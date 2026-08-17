@@ -563,6 +563,10 @@ void PTOIRTranslator::UpdatePTOOpInfo(Operation *op) {
 // 6. [P0 修改] 获取 Op 的 Pipeline 类型
 // ============================================================================
 pto::PipelineType PTOIRTranslator::getOpPipeline(Operation *op) {
+  if (pto::isTargetArchLinx(op) &&
+      isa<pto::TDivOp, pto::TDivSOp, pto::TRemOp, pto::TRemSOp>(op))
+    return pto::PipelineType::LINX_SFU;
+
   // 1. 优先尝试通过接口获取
   if (auto pipeOp = dyn_cast<pto::OpPipeInterface>(op)) {
     // 注意：假设 pto::Pipe (ODS Enum) 和 pto::PipelineType (C++ Enum) 的数值定义是一致的
@@ -937,6 +941,7 @@ std::string PTOIRTranslator::getPipelineName(pto::PipelineType pipe) {
   case pto::PipelineType::PIPE_V:    return "VECTOR";
   case pto::PipelineType::PIPE_S:    return "SCALAR";
   case pto::PipelineType::PIPE_ALL:  return "BARRIER";
+  case pto::PipelineType::LINX_SFU:  return "LINX_SFU";
   default: return "UNKNOWN";
   }
 }

@@ -53,12 +53,31 @@ NEW_V0571_OPCODE_ASSIGNMENTS = {
     "pto.tsort": (0x10A0, 3),
 }
 
+NEW_V0580_OPCODE_ASSIGNMENTS = {
+    "pto.gmov": (0x10A1, 3),
+    "pto.tfma": (0x10A2, 4),
+}
+
+# PTO-BC serializes MLIR SSA operands, not duplicated architectural roles.
+# TINSERT therefore has four bytecode operands (src, row, col, dst), while its
+# five-role Linx contract and emitted call are dst, dst, src, row, col.
+V0581_EXACT_BYTECODE_SSA_ARITY = {
+    "pto.trowexpand": 2,
+    "pto.tcolexpand": 2,
+    "pto.tconcat": 3,
+    "pto.timg2col": 4,
+    "pto.tinsert": 4,
+    "pto.tprefetch": 5,
+}
+
 EXACT_ARITY = {
-    "pto.tprefetch": 2,
     **{name: arity for name, (_, arity) in NEW_V0571_OPCODE_ASSIGNMENTS.items()},
+    **{name: arity for name, (_, arity) in NEW_V0580_OPCODE_ASSIGNMENTS.items()},
+    **V0581_EXACT_BYTECODE_SSA_ARITY,
 }
 
 PRE_V0571_MAX_PTO_OPCODE = 0x109B
+PRE_V0580_MAX_PTO_OPCODE = 0x10A0
 
 
 def parse_td_mnemonics(td_path: Path):
@@ -169,6 +188,15 @@ def check_header_contract(h_path: Path):
 
     for name, (opcode, arity) in NEW_V0571_OPCODE_ASSIGNMENTS.items():
         if opcode <= PRE_V0571_MAX_PTO_OPCODE:
+            errors.append(f"new operation {name} does not use a fresh opcode")
+        if table_by_name.get(name) != (opcode, arity):
+            errors.append(
+                f"{name}: expected opcode/arity {(opcode, arity)}, "
+                f"got {table_by_name.get(name)}"
+            )
+
+    for name, (opcode, arity) in NEW_V0580_OPCODE_ASSIGNMENTS.items():
+        if opcode <= PRE_V0580_MAX_PTO_OPCODE:
             errors.append(f"new operation {name} does not use a fresh opcode")
         if table_by_name.get(name) != (opcode, arity):
             errors.append(

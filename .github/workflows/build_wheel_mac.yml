@@ -23,7 +23,8 @@ permissions:
   contents: write
 
 env:
-  LLVM_TAG: llvmorg-19.1.7
+  LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
+  LLVM_COMMIT: 1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
 
 jobs:
   build_wheel:
@@ -82,9 +83,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x
-          # (see pybind11 static_assert on def_property + keep_alive).
-          pip install --no-cache-dir numpy 'pybind11<3' nanobind setuptools wheel delocate
+          pip install --no-cache-dir numpy nanobind typing_extensions setuptools wheel delocate
 
       - name: Set build directories
         run: |
@@ -99,7 +98,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_TAG }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-v1
+          key: llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v2
 
       - name: Prepare LLVM source
         run: |
@@ -107,10 +106,12 @@ jobs:
           cd $LLVM_SOURCE_DIR
           if [ ! -d .git ]; then
             git init
-            git remote add origin https://github.com/llvm/llvm-project.git
+            git remote add origin ${{ env.LLVM_REPOSITORY }}
           fi
-          git fetch --depth 1 origin tag ${{ env.LLVM_TAG }}
-          git checkout ${{ env.LLVM_TAG }}
+          git remote set-url origin ${{ env.LLVM_REPOSITORY }}
+          git fetch --depth 1 origin ${{ env.LLVM_COMMIT }}
+          git checkout --detach ${{ env.LLVM_COMMIT }}
+          test "$(git rev-parse HEAD)" = "${{ env.LLVM_COMMIT }}"
 
       - name: Warn when default-branch cache is missing for PR/release runs
         if: steps.cache-llvm.outputs.cache-hit != 'true' && (github.event_name == 'pull_request' || github.event_name == 'release')
@@ -118,7 +119,7 @@ jobs:
           echo "LLVM cache miss while running on PR/release."
           echo "PR/release runs are cache-consumers only and should reuse cache generated on the default branch."
           echo "Please run this workflow on the default branch first to populate cache key:"
-          echo "llvm-${{ env.LLVM_TAG }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-v1"
+          echo "llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v2"
 
       - name: Build LLVM/MLIR
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -126,6 +127,10 @@ jobs:
           cd $LLVM_SOURCE_DIR
           cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
             -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+            -DMLIR_ENABLE_LINXISA_PTO=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DPython3_EXECUTABLE=$(which python) \
@@ -140,7 +145,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/llvm-workspace/llvm-project/build-shared
-          key: llvm-${{ env.LLVM_TAG }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-v1
+          key: llvm-${{ env.LLVM_COMMIT }}-${{ steps.runner-meta.outputs.label }}-${{ matrix.arch }}-${{ matrix.python }}-pto-off-v2
 
       - name: Build PTOAS
         run: |
@@ -152,10 +157,12 @@ jobs:
             -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
             -DPython3_ROOT_DIR=${PY_PATH} \
             -DPython3_EXECUTABLE=$(which python) \
+            -DPython_EXECUTABLE=$(which python) \
             -DPython3_FIND_STRATEGY=LOCATION \
-            -Dpybind11_DIR=$(python -m pybind11 --cmakedir) \
+            -Dnanobind_DIR=$(python -m nanobind --cmake_dir) \
             -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
             -DPTOAS_RELEASE_VERSION_OVERRIDE=${PTOAS_VERSION} \
+            -DPTOAS_ENABLE_WERROR=OFF \
             -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR} \
             -DCMAKE_BUILD_TYPE=Release
           ninja -C build

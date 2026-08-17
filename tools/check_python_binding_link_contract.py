@@ -38,6 +38,25 @@ def main() -> int:
     cmake_path = args.ptoas_root / "lib" / "Bindings" / "Python" / "CMakeLists.txt"
     source = cmake_path.read_text(encoding="utf-8")
 
+    dialect_path = args.ptoas_root / "python" / "pto" / "dialects" / "pto.py"
+    dialect = dialect_path.read_text(encoding="utf-8")
+    stable_operand_import = (
+        "from ._ods_common import get_op_result_or_value as _ods_get_op_result_or_value"
+    )
+    if stable_operand_import not in dialect:
+        raise SystemExit(
+            "error: the PTO Python dialect must import the stable MLIR operand "
+            "conversion helper from _ods_common"
+        )
+    if (
+        "_pto_ops_gen._get_op_result_or_value" in dialect
+        or 'getattr(_pto_ops_gen, "_get_op_result_or_value")' in dialect
+    ):
+        raise SystemExit(
+            "error: LLVM 23 generated dialect modules do not export the singular "
+            "_get_op_result_or_value helper"
+        )
+
     contract = re.compile(
         r"if\s*\(UNIX\s+AND\s+NOT\s+APPLE\).*?"
         r"target_link_options\s*\(nanobind-mlir\s+PRIVATE\s+"
@@ -83,9 +102,7 @@ def main() -> int:
             "error: Repair wheel with auditwheel must export LD_LIBRARY_PATH "
             "including $PTO_INSTALL_DIR/lib"
         )
-    if not re.search(
-        r"(?m)^\s*auditwheel\s+repair(?:\s|$)", active_repair_lines
-    ):
+    if not re.search(r"(?m)^\s*auditwheel\s+repair(?:\s|$)", active_repair_lines):
         raise SystemExit(
             "error: Repair wheel with auditwheel must invoke auditwheel repair "
             "in the same step that exports LD_LIBRARY_PATH"

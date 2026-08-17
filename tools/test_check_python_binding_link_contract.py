@@ -26,11 +26,17 @@ if(UNIX AND NOT APPLE)
   )
 endif()
 """
+VALID_DIALECT = """
+from ._ods_common import get_op_result_or_value as _ods_get_op_result_or_value
+
+def get_op_result_or_value(value):
+    return _ods_get_op_result_or_value(value)
+"""
 
 
 class PythonBindingLinkContractTest(unittest.TestCase):
     def run_checker(
-        self, cmake_source: str, workflow: str
+        self, cmake_source: str, workflow: str, dialect_source: str = VALID_DIALECT
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -40,6 +46,9 @@ class PythonBindingLinkContractTest(unittest.TestCase):
             workflow_path = root / ".github/workflows/build_wheel.yml"
             workflow_path.parent.mkdir(parents=True)
             workflow_path.write_text(workflow)
+            dialect_path = root / "python/pto/dialects/pto.py"
+            dialect_path.parent.mkdir(parents=True)
+            dialect_path.write_text(dialect_source)
             return subprocess.run(
                 ["python3", str(CHECKER), "--ptoas-root", str(root)],
                 text=True,
@@ -115,6 +124,26 @@ jobs:
         workflow = (CHECKER.parents[1] / ".github/workflows/ci.yml").read_text()
         self.assertIn("-DPython3_EXECUTABLE=python3", workflow)
         self.assertNotIn("-DPython_EXECUTABLE=python3", workflow)
+
+    def test_rejects_removed_llvm23_generated_operand_helper(self) -> None:
+        result = self.run_checker(
+            VALID_PRODUCER,
+            """
+jobs:
+  build:
+    steps:
+      - name: Repair wheel with auditwheel
+        run: |
+          export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH
+          auditwheel repair dist/ptoas.whl -w wheelhouse
+""",
+            """
+def get_op_result_or_value(value):
+    return _pto_ops_gen._get_op_result_or_value(value)
+""",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("stable MLIR operand conversion helper", result.stderr)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,9 @@ class PythonBindingLinkContractTest(unittest.TestCase):
                 check=False,
             )
 
-    def test_rejects_shared_runtime_not_installed_in_auditwheel_search_path(self) -> None:
+    def test_rejects_shared_runtime_not_installed_in_auditwheel_search_path(
+        self,
+    ) -> None:
         result = self.run_checker(
             """
 if(UNIX AND NOT APPLE)
@@ -59,7 +61,9 @@ endif()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("install nanobind-mlir into lib", result.stderr)
 
-    def test_accepts_installed_runtime_and_matching_auditwheel_search_path(self) -> None:
+    def test_accepts_installed_runtime_and_matching_auditwheel_search_path(
+        self,
+    ) -> None:
         result = self.run_checker(
             VALID_PRODUCER,
             """
@@ -104,6 +108,13 @@ jobs:
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Repair wheel with auditwheel", result.stderr)
+
+    def test_ci_does_not_override_nanobind_python_with_relative_executable(
+        self,
+    ) -> None:
+        workflow = (CHECKER.parents[1] / ".github/workflows/ci.yml").read_text()
+        self.assertIn("-DPython3_EXECUTABLE=python3", workflow)
+        self.assertNotIn("-DPython_EXECUTABLE=python3", workflow)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -69,75 +68,35 @@ def validate_local_copy_sources(root: Path, dockerfile: str) -> None:
                 ) from error
 
 
-def top_level_shell_lines(script: str) -> list[str]:
-    """Return executable top-level shell lines, excluding heredoc bodies."""
-    result: list[str] = []
-    depth = 0
-    heredoc_delimiter: str | None = None
-    heredoc_pattern = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-    function_pattern = re.compile(
-        r"^(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{\s*$"
-    )
-
-    for raw_line in script.splitlines():
-        stripped = raw_line.strip()
-        if heredoc_delimiter is not None:
-            if stripped == heredoc_delimiter:
-                heredoc_delimiter = None
-            continue
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        if depth == 0:
-            result.append(stripped)
-
-        heredoc_match = heredoc_pattern.search(stripped)
-        if heredoc_match:
-            heredoc_delimiter = heredoc_match.group(2)
-
-        if re.match(r"^(fi|done|esac)\b", stripped) or stripped.startswith("}"):
-            depth = max(0, depth - 1)
-        if (
-            re.match(r"^(if|for|while|until|select)\b", stripped)
-            or re.match(r"^case\b.*\bin\s*$", stripped)
-            or function_pattern.match(stripped)
-        ):
-            depth += 1
-
-    return result
-
-
-def has_top_level_identity_invocation(script: str, invocation: str) -> bool:
-    """Require the identity validator immediately after version output at top level."""
-    lines = top_level_shell_lines(script)
-    return any(
-        line == invocation
-        and index > 0
-        and lines[index - 1] == 'echo "$VERSION_OUTPUT"'
-        for index, line in enumerate(lines)
+def run_packaging_identity_mode(
+    script: Path, output: str, product_version: str = ""
+) -> subprocess.CompletedProcess[str]:
+    """Run one packaging script's executable identity-only path."""
+    return subprocess.run(
+        [
+            "bash",
+            str(script),
+            "--check-ptoas-cli-identity",
+            output,
+            product_version,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
     )
 
 
-def validate_cli_identity_helper(root: Path) -> None:
-    """Exercise the packaged CLI identity validator with positive and negative inputs."""
-    helper = root / "docker/check_ptoas_cli_identity.sh"
-
-    def run(output: str, product_version: str = "") -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["bash", str(helper), output, product_version],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+def validate_packaging_identity_mode(script: Path) -> None:
+    """Exercise a packaging script with valid and adversarial identity outputs."""
 
     for output, product_version in (
         ("ptoas 0.41 (PTO ISA 0.58.1)", "0.41"),
         ("ptoas 0.41 (PTO ISA 0.58.1)", ""),
     ):
-        result = run(output, product_version)
+        result = run_packaging_identity_mode(script, output, product_version)
         if result.returncode != 0:
             raise SystemExit(
-                f"packaged CLI identity validator rejected valid input: {output}"
+                f"{script.name} rejected valid packaged CLI identity: {output}"
             )
 
     invalid_outputs = (
@@ -149,9 +108,12 @@ def validate_cli_identity_helper(root: Path) -> None:
     )
     for product_version in ("0.41", ""):
         for output in invalid_outputs:
-            if run(output, product_version).returncode == 0:
+            if (
+                run_packaging_identity_mode(script, output, product_version).returncode
+                == 0
+            ):
                 raise SystemExit(
-                    "packaged CLI identity validator accepted invalid input "
+                    f"{script.name} accepted invalid packaged CLI identity "
                     f"in product mode {product_version!r}: {output!r}"
                 )
 
@@ -204,22 +166,12 @@ def main() -> int:
                 f"{name} conflates ISA identity with PTOAS product version"
             )
 
-    validate_cli_identity_helper(root)
-    identity_invocation = (
-        'bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" '
-        '"${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"'
-    )
     for name in (
         "docker/test_ptoas_cli.sh",
         "docker/collect_ptoas_dist.sh",
         "docker/collect_ptoas_dist_mac.sh",
     ):
-        text = (root / name).read_text()
-        if not has_top_level_identity_invocation(text, identity_invocation):
-            raise SystemExit(
-                f"{name} does not execute the exact PTO ISA 0.58.1 CLI identity "
-                "validator immediately after displaying the version"
-            )
+        validate_packaging_identity_mode(root / name)
 
     print("release delivery contract OK")
     return 0

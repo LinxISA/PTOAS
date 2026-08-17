@@ -24,6 +24,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--check-ptoas-cli-identity" ]]; then
+  if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "Usage: $0 --check-ptoas-cli-identity <version-output> [product-version]" >&2
+    exit 2
+  fi
+  exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check_ptoas_cli_identity.sh" \
+    "$2" "${3:-}"
+fi
+
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <output_directory>" >&2
   exit 1
@@ -163,7 +172,7 @@ echo "Smoke testing packaged ptoas dist..."
 VERSION_OUTPUT="$(env -u PYTHONPATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
   "${PTOAS_DIST_DIR}/ptoas" --version | tr -d '\r')"
 echo "$VERSION_OUTPUT"
-bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" "${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"
+bash "$0" --check-ptoas-cli-identity "${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"
 
 # Show collected files
 echo ""

@@ -18,6 +18,15 @@
 
 set -e
 
+if [[ "${1:-}" == "--check-ptoas-cli-identity" ]]; then
+  if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "Usage: $0 --check-ptoas-cli-identity <version-output> [product-version]" >&2
+    exit 2
+  fi
+  exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check_ptoas_cli_identity.sh" \
+    "$2" "${3:-}"
+fi
+
 # Validate required environment variables
 for var in PTO_SOURCE_DIR LLVM_BUILD_DIR PTO_INSTALL_DIR; do
   if [ -z "${!var}" ]; then
@@ -38,7 +47,7 @@ which ptoas
 echo "Checking ptoas version..."
 VERSION_OUTPUT="$(ptoas --version | tr -d '\r')"
 echo "$VERSION_OUTPUT"
-bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" "${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"
+bash "$0" --check-ptoas-cli-identity "${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"
 
 # Test MatMul sample
 echo "Testing MatMul sample..."

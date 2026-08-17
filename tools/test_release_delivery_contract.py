@@ -18,10 +18,10 @@ import unittest
 from pathlib import Path
 
 from check_release_delivery_contract import (
-    has_top_level_identity_invocation,
     local_copy_sources,
-    top_level_shell_lines,
+    run_packaging_identity_mode,
     validate_local_copy_sources,
+    validate_packaging_identity_mode,
 )
 
 
@@ -67,20 +67,17 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         self.assertRegex(workflow, r"(?m)^\s+push:\s+false\s*$")
 
     def test_packaged_cli_identity_validator_is_fail_closed(self) -> None:
-        helper = ROOT / "docker/check_ptoas_cli_identity.sh"
+        scripts = (
+            ROOT / "docker/test_ptoas_cli.sh",
+            ROOT / "docker/collect_ptoas_dist.sh",
+            ROOT / "docker/collect_ptoas_dist_mac.sh",
+        )
 
         def run(
-            output: str, product_version: str = ""
+            script: Path, output: str, product_version: str = ""
         ) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                ["bash", str(helper), output, product_version],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            return run_packaging_identity_mode(script, output, product_version)
 
-        self.assertEqual(run("ptoas 0.41 (PTO ISA 0.58.1)", "0.41").returncode, 0)
-        self.assertEqual(run("ptoas 0.41 (PTO ISA 0.58.1)").returncode, 0)
         invalid_outputs = (
             "ptoas 0.41",
             "ptoas 0.40 (PTO ISA 0.58.1)",
@@ -88,46 +85,42 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
             "warning\nptoas 0.41 (PTO ISA 0.58.1)",
             "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
         )
-        for product_version in ("0.41", ""):
-            for invalid in invalid_outputs:
-                with self.subTest(output=invalid, product_version=product_version):
-                    self.assertNotEqual(run(invalid, product_version).returncode, 0)
+        for script in scripts:
+            with self.subTest(
+                script=script.name, output="valid", product_version="0.41"
+            ):
+                self.assertEqual(
+                    run(script, "ptoas 0.41 (PTO ISA 0.58.1)", "0.41").returncode,
+                    0,
+                )
+            with self.subTest(script=script.name, output="valid", product_version=""):
+                self.assertEqual(
+                    run(script, "ptoas 0.41 (PTO ISA 0.58.1)").returncode, 0
+                )
+            for product_version in ("0.41", ""):
+                for invalid in invalid_outputs:
+                    with self.subTest(
+                        script=script.name,
+                        output=invalid,
+                        product_version=product_version,
+                    ):
+                        self.assertNotEqual(
+                            run(script, invalid, product_version).returncode, 0
+                        )
 
-    def test_packaging_scripts_execute_identity_validator(self) -> None:
-        invocation = (
-            'bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" '
-            '"${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"'
+    def test_dead_identity_entrypoints_fail_dynamic_validation(self) -> None:
+        dead_scripts = (
+            "function dead_check { exit 0; }; exit 1",
+            "false && { exit 0; }; exit 1",
+            "cat <<'DEAD-TEXT'\nexit 0\nDEAD-TEXT\nexit 1",
+            "cat <<\\DEAD\nexit 0\nDEAD\nexit 1",
         )
-        for relative in (
-            "docker/test_ptoas_cli.sh",
-            "docker/collect_ptoas_dist.sh",
-            "docker/collect_ptoas_dist_mac.sh",
-        ):
-            with self.subTest(script=relative):
-                script = (ROOT / relative).read_text()
-                self.assertTrue(has_top_level_identity_invocation(script, invocation))
-
-        dead_branch = "\n".join(
-            ('echo "$VERSION_OUTPUT"', "if false; then", invocation, "fi")
-        )
-        heredoc = "\n".join(
-            ('echo "$VERSION_OUTPUT"', "cat <<'DEAD'", invocation, "DEAD")
-        )
-        dead_function = "\n".join(
-            (
-                'echo "$VERSION_OUTPUT"',
-                "dead_check() {",
-                invocation,
-                "}",
-            )
-        )
-        for script in (f"# {invocation}", dead_branch, heredoc, dead_function):
-            with self.subTest(script=script):
-                self.assertFalse(has_top_level_identity_invocation(script, invocation))
-
-    def test_top_level_shell_parser_preserves_live_lines_after_heredocs(self) -> None:
-        script = "\n".join(("cat <<'PY'", "if false; then", "PY", "echo live"))
-        self.assertEqual(top_level_shell_lines(script), ["cat <<'PY'", "echo live"])
+        with tempfile.TemporaryDirectory() as directory:
+            for index, body in enumerate(dead_scripts):
+                script = Path(directory) / f"dead-{index}.sh"
+                script.write_text(f"#!/usr/bin/env bash\n{body}\n")
+                with self.subTest(body=body), self.assertRaises(SystemExit):
+                    validate_packaging_identity_mode(script)
 
 
 if __name__ == "__main__":

@@ -387,6 +387,18 @@ static bool shouldBypassDecodedMemrefVerifier(Operation *op) {
   return false;
 }
 
+static bool shouldBypassDecodedTileInputsVerifier(Operation *op, Value src,
+                                                  Value aux) {
+  if (!op || isVerifierTargetLinx(op))
+    return false;
+  for (Value operand : {src, aux}) {
+    if (isa<MemRefType>(operand.getType()) ||
+        operand.getDefiningOp<pto::BindTileOp>())
+      return true;
+  }
+  return false;
+}
+
 static SmallVector<int64_t, 4> canonicalizeTileBufValidShape(ArrayRef<int64_t> validShape) {
   SmallVector<int64_t, 4> canonical;
   canonical.reserve(validShape.size());
@@ -9058,9 +9070,11 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
       return emitOpError() << "expects src to be in the acc address space";
     return mlir::success();
   };
-  // TSTORE_FP's architectural form always includes a GM destination memref,
-  // so the legacy decoded-memref bypass would disable its verifier entirely.
-  // Dispatch explicitly and retain the fail-closed Linx boundary.
+  // The GM destination is always a memref and must not disable verification.
+  // Only legacy decoded source/fp representations bypass A2/A3/A5 tile-form
+  // checks; Linx remains fail-closed.
+  if (shouldBypassDecodedTileInputsVerifier(getOperation(), getSrc(), getFp()))
+    return success();
   switch (getVerifierTargetArch(getOperation())) {
   case VerifierTargetArch::A2A3:
     return verifyA2A3();

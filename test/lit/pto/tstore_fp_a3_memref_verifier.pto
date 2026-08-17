@@ -1,0 +1,13 @@
+// RUN: not ptoas --pto-arch=a3 %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a3"} {
+  func.func @tstore_fp_vec_source_must_not_bypass(
+      %src: !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+      %fp: !pto.tile_buf<loc=scaling, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+      %dst: memref<16x32xi8, #pto.address_space<gm>>) {
+    pto.tstore_fp ins(%src, %fp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=scaling, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : memref<16x32xi8, #pto.address_space<gm>>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tstore_fp' op expects src to be in the acc address space

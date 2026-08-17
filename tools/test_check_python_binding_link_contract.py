@@ -36,7 +36,11 @@ def get_op_result_or_value(value):
 
 class PythonBindingLinkContractTest(unittest.TestCase):
     def run_checker(
-        self, cmake_source: str, workflow: str, dialect_source: str = VALID_DIALECT
+        self,
+        cmake_source: str,
+        workflow: str,
+        dialect_source: str = VALID_DIALECT,
+        sample_source: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -49,6 +53,10 @@ class PythonBindingLinkContractTest(unittest.TestCase):
             dialect_path = root / "python/pto/dialects/pto.py"
             dialect_path.parent.mkdir(parents=True)
             dialect_path.write_text(dialect_source)
+            if sample_source is not None:
+                sample_path = root / "test/samples/Example/example.py"
+                sample_path.parent.mkdir(parents=True)
+                sample_path.write_text(sample_source)
             return subprocess.run(
                 ["python3", str(CHECKER), "--ptoas-root", str(root)],
                 text=True,
@@ -144,6 +152,23 @@ def get_op_result_or_value(value):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("stable MLIR operand conversion helper", result.stderr)
+
+    def test_rejects_legacy_scf_if_keyword(self) -> None:
+        result = self.run_checker(
+            VALID_PRODUCER,
+            """
+jobs:
+  build:
+    steps:
+      - name: Repair wheel with auditwheel
+        run: |
+          export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH
+          auditwheel repair dist/ptoas.whl -w wheelhouse
+""",
+            sample_source="branch = scf.IfOp(cond, [], hasElse = True)\n",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SCF IfOp uses has_else, not hasElse", result.stderr)
 
 
 if __name__ == "__main__":

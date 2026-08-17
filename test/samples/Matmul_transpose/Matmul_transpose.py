@@ -200,7 +200,7 @@ def build(
             c_tile = pto.AllocTileOp(tile_buf_c_tile).result
 
             # ---- TLOAD: 按 isAtranspose / isBtranspose 选 view 与 MAT tile ----
-            if_a = scf.IfOp(is_a_transpose, [], hasElse=True)
+            if_a = scf.IfOp(is_a_transpose, [], has_else=True)
             with InsertionPoint(if_a.then_block):
                 pto.TLoadOp(None, sv_a_dn, a_mat_dn)
                 scf.YieldOp([])
@@ -208,7 +208,7 @@ def build(
                 pto.TLoadOp(None, sv_a_nd, a_mat_nd)
                 scf.YieldOp([])
 
-            if_b = scf.IfOp(is_b_transpose, [], hasElse=True)
+            if_b = scf.IfOp(is_b_transpose, [], has_else=True)
             with InsertionPoint(if_b.then_block):
                 pto.TLoadOp(None, sv_b_nd, b_mat_nd)
                 scf.YieldOp([])
@@ -220,7 +220,7 @@ def build(
             pto.wait_event(TLOAD, TMOV_M2L, EVENT_ID0)
 
             # ---- TEXTRACT: 按 isAtranspose / isBtranspose 从对应 MAT 取到 L0 ----
-            if_a_ext = scf.IfOp(is_a_transpose, [], hasElse=True)
+            if_a_ext = scf.IfOp(is_a_transpose, [], has_else=True)
             with InsertionPoint(if_a_ext.then_block):
                 pto.TExtractOp(a_mat_dn, cIndexM, cIndexK, a_tile)
                 scf.YieldOp([])
@@ -228,7 +228,7 @@ def build(
                 pto.TExtractOp(a_mat_nd, cIndexM, cIndexK, a_tile)
                 scf.YieldOp([])
 
-            if_b_ext = scf.IfOp(is_b_transpose, [], hasElse=True)
+            if_b_ext = scf.IfOp(is_b_transpose, [], has_else=True)
             with InsertionPoint(if_b_ext.then_block):
                 pto.TExtractOp(b_mat_nd, cIndexK, cIndexN, b_tile)
                 scf.YieldOp([])

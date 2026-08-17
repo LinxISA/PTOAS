@@ -77,7 +77,7 @@ def build():
                         pto.TLoadOp(None, sv_in, ub)
 
                         is_j0 = arith.CmpIOp(CmpIPredicate.eq, j, c0).result
-                        if_op = scf.IfOp(is_j0, [], hasElse=False)
+                        if_op = scf.IfOp(is_j0, [], has_else=False)
                         with InsertionPoint(if_op.then_block):
                             pto.TAddOp(ub, ub, ub)
                             scf.YieldOp([])

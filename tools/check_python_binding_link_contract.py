@@ -57,6 +57,17 @@ def main() -> int:
             "_get_op_result_or_value helper"
         )
 
+    legacy_scf_samples = sorted(
+        path.relative_to(args.ptoas_root)
+        for path in (args.ptoas_root / "test" / "samples").rglob("*.py")
+        if re.search(r"\bhasElse\s*=", path.read_text(encoding="utf-8"))
+    )
+    if legacy_scf_samples:
+        raise SystemExit(
+            "error: LLVM 23 SCF IfOp uses has_else, not hasElse: "
+            + ", ".join(map(str, legacy_scf_samples))
+        )
+
     contract = re.compile(
         r"if\s*\(UNIX\s+AND\s+NOT\s+APPLE\).*?"
         r"target_link_options\s*\(nanobind-mlir\s+PRIVATE\s+"

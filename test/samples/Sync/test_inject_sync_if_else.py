@@ -70,7 +70,7 @@ def build():
 
                 pto.TLoadOp(None, sv_in, ub)
 
-                if_op = scf.IfOp(cond, [], hasElse=True)
+                if_op = scf.IfOp(cond, [], has_else=True)
                 with InsertionPoint(if_op.then_block):
                     pto.TAddOp(ub, ub, ub)
                     scf.YieldOp([])

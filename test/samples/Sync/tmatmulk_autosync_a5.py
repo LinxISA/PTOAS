@@ -191,7 +191,7 @@ def build(
                 pto.TLoadOp(None, svA, aMatTile)
                 pto.TLoadOp(None, svB, bMatTile)
 
-                if_load_bias = scf.IfOp(isBias, [], hasElse=True)
+                if_load_bias = scf.IfOp(isBias, [], has_else=True)
                 with InsertionPoint(if_load_bias.then_block):
                     pto.TLoadOp(None, svBias, biasDataTile)
                     scf.YieldOp([])
@@ -202,7 +202,7 @@ def build(
                 pto.TMovOp(None, aMatTile, aTile)
                 pto.TMovOp(None, bMatTile, bTile)
 
-                if_mov_bias = scf.IfOp(isBias, [], hasElse=True)
+                if_mov_bias = scf.IfOp(isBias, [], has_else=True)
                 with InsertionPoint(if_mov_bias.then_block):
                     pto.TMovOp(None, biasDataTile, biasTile)
                     scf.YieldOp([])
@@ -211,10 +211,10 @@ def build(
 
                 # ---- i == 0 ? (bias? TMATMUL_BIAS : TMATMUL) : TMATMUL_ACC ----
                 is_i0 = arith.CmpIOp(CmpIPredicate.eq, i, c0).result
-                if_i0 = scf.IfOp(is_i0, [], hasElse=True)
+                if_i0 = scf.IfOp(is_i0, [], has_else=True)
 
                 with InsertionPoint(if_i0.then_block):
-                    if_bias0 = scf.IfOp(isBias, [], hasElse=True)
+                    if_bias0 = scf.IfOp(isBias, [], has_else=True)
                     with InsertionPoint(if_bias0.then_block):
                         pto.TMatmulBiasOp(None, aTile, bTile, biasTile, cTile)
                         scf.YieldOp([])

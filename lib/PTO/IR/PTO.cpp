@@ -9058,7 +9058,18 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
       return emitOpError() << "expects src to be in the acc address space";
     return mlir::success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  // TSTORE_FP's architectural form always includes a GM destination memref,
+  // so the legacy decoded-memref bypass would disable its verifier entirely.
+  // Dispatch explicitly and retain the fail-closed Linx boundary.
+  switch (getVerifierTargetArch(getOperation())) {
+  case VerifierTargetArch::A2A3:
+    return verifyA2A3();
+  case VerifierTargetArch::A5:
+    return verifyA5();
+  case VerifierTargetArch::Linx:
+    return emitOpError("Linx legality is not implemented for this operation");
+  }
+  return failure();
 }
 
 mlir::LogicalResult mlir::pto::TSubOp::verify() {

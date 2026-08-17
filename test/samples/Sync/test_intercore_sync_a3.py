@@ -52,7 +52,7 @@ def build():
                 should_wait = arith.CmpIOp(
                     arith.CmpIPredicate.eq, entry.arguments[2], c0_i32
                 ).result
-                if_op = scf.IfOp(should_wait, [], hasElse=False)
+                if_op = scf.IfOp(should_wait, [], has_else=False)
                 with InsertionPoint(if_op.then_block):
                     pto.sync_wait(pipe_v, 3)
                     scf.YieldOp([])

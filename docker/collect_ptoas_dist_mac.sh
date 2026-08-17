@@ -319,15 +319,7 @@ echo "Smoke testing packaged ptoas dist..."
 VERSION_OUTPUT="$(env -u PYTHONPATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
   "${PTOAS_DIST_DIR}/ptoas" --version | tr -d '\r')"
 echo "$VERSION_OUTPUT"
-if [ -n "${PTOAS_VERSION:-}" ]; then
-  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"
-  if [ "${VERSION_OUTPUT}" != "${EXPECTED_VERSION_OUTPUT}" ]; then
-    echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${VERSION_OUTPUT}'" >&2
-    exit 1
-  fi
-else
-  echo "$VERSION_OUTPUT" | grep -Eq '^ptoas [0-9]+\.[0-9]+ \(PTO ISA 0\.58\.1\)$'
-fi
+bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" "${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"
 env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
   "${PTOAS_DIST_DIR}/ptoas" \
   "${PTO_SOURCE_DIR}/test/lit/pto/kernel_kind_vector_scf_while_emitc.pto" \

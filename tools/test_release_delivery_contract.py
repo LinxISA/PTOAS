@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from check_release_delivery_contract import (
+    active_shell_lines,
     local_copy_sources,
     validate_local_copy_sources,
 )
@@ -63,9 +65,36 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         self.assertRegex(workflow, r"(?m)^\s+target:\s+builder\s*$")
         self.assertRegex(workflow, r"(?m)^\s+push:\s+false\s*$")
 
-    def test_packaged_cli_checks_exact_pto_isa_identity(self) -> None:
-        expected = 'EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"'
-        fallback = "grep -Eq '^ptoas [0-9]+\\.[0-9]+ \\(PTO ISA 0\\.58\\.1\\)$'"
+    def test_packaged_cli_identity_validator_is_fail_closed(self) -> None:
+        helper = ROOT / "docker/check_ptoas_cli_identity.sh"
+
+        def run(
+            output: str, product_version: str = ""
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["bash", str(helper), output, product_version],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(run("ptoas 0.41 (PTO ISA 0.58.1)", "0.41").returncode, 0)
+        self.assertEqual(run("ptoas 0.41 (PTO ISA 0.58.1)").returncode, 0)
+        for invalid in (
+            "ptoas 0.41",
+            "ptoas 0.40 (PTO ISA 0.58.1)",
+            "ptoas 0.41 (PTO ISA 0.58.0)",
+            "warning\nptoas 0.41 (PTO ISA 0.58.1)",
+            "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
+        ):
+            with self.subTest(output=invalid):
+                self.assertNotEqual(run(invalid, "0.41").returncode, 0)
+
+    def test_packaging_scripts_execute_identity_validator(self) -> None:
+        invocation = (
+            'bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" '
+            '"${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"'
+        )
         for relative in (
             "docker/test_ptoas_cli.sh",
             "docker/collect_ptoas_dist.sh",
@@ -73,8 +102,8 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         ):
             with self.subTest(script=relative):
                 script = (ROOT / relative).read_text()
-                self.assertIn(expected, script)
-                self.assertIn(fallback, script)
+                self.assertIn(invocation, active_shell_lines(script))
+                self.assertNotIn(invocation, active_shell_lines(f"# {invocation}"))
 
 
 if __name__ == "__main__":

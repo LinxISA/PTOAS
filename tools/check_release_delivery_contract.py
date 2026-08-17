@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import glob
 import shlex
+import subprocess
 from pathlib import Path
 
 
@@ -67,9 +68,55 @@ def validate_local_copy_sources(root: Path, dockerfile: str) -> None:
                 ) from error
 
 
+def active_shell_lines(script: str) -> set[str]:
+    """Return executable, non-comment shell lines for structural checks."""
+    return {
+        line.strip()
+        for line in script.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
+def validate_cli_identity_helper(root: Path) -> None:
+    """Exercise the packaged CLI identity validator with positive and negative inputs."""
+    helper = root / "docker/check_ptoas_cli_identity.sh"
+
+    def run(output: str, product_version: str = "") -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(helper), output, product_version],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    for output, product_version in (
+        ("ptoas 0.41 (PTO ISA 0.58.1)", "0.41"),
+        ("ptoas 0.41 (PTO ISA 0.58.1)", ""),
+    ):
+        result = run(output, product_version)
+        if result.returncode != 0:
+            raise SystemExit(
+                f"packaged CLI identity validator rejected valid input: {output}"
+            )
+
+    for output in (
+        "ptoas 0.41",
+        "ptoas 0.40 (PTO ISA 0.58.1)",
+        "ptoas 0.41 (PTO ISA 0.58.0)",
+        "warning\nptoas 0.41 (PTO ISA 0.58.1)",
+        "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
+    ):
+        if run(output, "0.41").returncode == 0:
+            raise SystemExit(
+                f"packaged CLI identity validator accepted invalid input: {output!r}"
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ptoas-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--ptoas-root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     args = parser.parse_args()
     root = args.ptoas_root.resolve()
 
@@ -79,7 +126,10 @@ def main() -> int:
         raise SystemExit("Docker build must COPY the reviewed PTOAS checkout")
     if "git clone https://github.com/zhangstevenunity/PTOAS.git" in dockerfile:
         raise SystemExit("Docker build must not clone an unpinned PTOAS fork")
-    if 'test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"' not in dockerfile:
+    if (
+        'test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"'
+        not in dockerfile
+    ):
         raise SystemExit("Docker build must assert the exact PTO ISA checkout")
 
     readme = (root / "docker/README.md").read_text()
@@ -106,18 +156,25 @@ def main() -> int:
     for name in ("build_wheel.yml", "build_wheel_mac.yml"):
         text = (root / ".github/workflows" / name).read_text()
         if 'GITHUB_REF_NAME}" = "linxisa-v0.58.1"' in text:
-            raise SystemExit(f"{name} conflates ISA identity with PTOAS product version")
+            raise SystemExit(
+                f"{name} conflates ISA identity with PTOAS product version"
+            )
 
-    expected_version = 'EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"'
-    fallback_version = "grep -Eq '^ptoas [0-9]+\\.[0-9]+ \\(PTO ISA 0\\.58\\.1\\)$'"
+    validate_cli_identity_helper(root)
+    identity_invocation = (
+        'bash "${PTO_SOURCE_DIR}/docker/check_ptoas_cli_identity.sh" '
+        '"${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"'
+    )
     for name in (
         "docker/test_ptoas_cli.sh",
         "docker/collect_ptoas_dist.sh",
         "docker/collect_ptoas_dist_mac.sh",
     ):
         text = (root / name).read_text()
-        if expected_version not in text or fallback_version not in text:
-            raise SystemExit(f"{name} does not verify the exact PTO ISA 0.58.1 CLI identity")
+        if identity_invocation not in active_shell_lines(text):
+            raise SystemExit(
+                f"{name} does not execute the exact PTO ISA 0.58.1 CLI identity validator"
+            )
 
     print("release delivery contract OK")
     return 0

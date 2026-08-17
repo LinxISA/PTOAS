@@ -122,6 +122,36 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
                 with self.subTest(body=body), self.assertRaises(SystemExit):
                     validate_packaging_identity_mode(script)
 
+    def test_shared_production_identity_call_cannot_be_removed_or_bypassed(
+        self,
+    ) -> None:
+        shared_call = (
+            'bash "${SCRIPT_DIR}/check_ptoas_cli_identity.sh" '
+            '"${VERSION_OUTPUT}" "${PTOAS_VERSION:-}"'
+        )
+        helper_text = (ROOT / "docker/check_ptoas_cli_identity.sh").read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            temp_root = Path(directory)
+            (temp_root / "check_ptoas_cli_identity.sh").write_text(helper_text)
+            for source in (
+                ROOT / "docker/test_ptoas_cli.sh",
+                ROOT / "docker/collect_ptoas_dist.sh",
+                ROOT / "docker/collect_ptoas_dist_mac.sh",
+            ):
+                original = source.read_text()
+                self.assertEqual(original.count(shared_call), 1)
+                for label, replacement in (
+                    ("removed", ": # identity validation removed"),
+                    ("bypassed", f"false && {shared_call}"),
+                ):
+                    mutated = temp_root / f"{source.stem}-{label}.sh"
+                    mutated.write_text(original.replace(shared_call, replacement, 1))
+                    with (
+                        self.subTest(script=source.name, mutation=label),
+                        self.assertRaises(SystemExit),
+                    ):
+                        validate_packaging_identity_mode(mutated)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -68,13 +69,53 @@ def validate_local_copy_sources(root: Path, dockerfile: str) -> None:
                 ) from error
 
 
-def active_shell_lines(script: str) -> set[str]:
-    """Return executable, non-comment shell lines for structural checks."""
-    return {
-        line.strip()
-        for line in script.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    }
+def top_level_shell_lines(script: str) -> list[str]:
+    """Return executable top-level shell lines, excluding heredoc bodies."""
+    result: list[str] = []
+    depth = 0
+    heredoc_delimiter: str | None = None
+    heredoc_pattern = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+    function_pattern = re.compile(
+        r"^(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{\s*$"
+    )
+
+    for raw_line in script.splitlines():
+        stripped = raw_line.strip()
+        if heredoc_delimiter is not None:
+            if stripped == heredoc_delimiter:
+                heredoc_delimiter = None
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if depth == 0:
+            result.append(stripped)
+
+        heredoc_match = heredoc_pattern.search(stripped)
+        if heredoc_match:
+            heredoc_delimiter = heredoc_match.group(2)
+
+        if re.match(r"^(fi|done|esac)\b", stripped) or stripped.startswith("}"):
+            depth = max(0, depth - 1)
+        if (
+            re.match(r"^(if|for|while|until|select)\b", stripped)
+            or re.match(r"^case\b.*\bin\s*$", stripped)
+            or function_pattern.match(stripped)
+        ):
+            depth += 1
+
+    return result
+
+
+def has_top_level_identity_invocation(script: str, invocation: str) -> bool:
+    """Require the identity validator immediately after version output at top level."""
+    lines = top_level_shell_lines(script)
+    return any(
+        line == invocation
+        and index > 0
+        and lines[index - 1] == 'echo "$VERSION_OUTPUT"'
+        for index, line in enumerate(lines)
+    )
 
 
 def validate_cli_identity_helper(root: Path) -> None:
@@ -99,17 +140,20 @@ def validate_cli_identity_helper(root: Path) -> None:
                 f"packaged CLI identity validator rejected valid input: {output}"
             )
 
-    for output in (
+    invalid_outputs = (
         "ptoas 0.41",
         "ptoas 0.40 (PTO ISA 0.58.1)",
         "ptoas 0.41 (PTO ISA 0.58.0)",
         "warning\nptoas 0.41 (PTO ISA 0.58.1)",
         "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
-    ):
-        if run(output, "0.41").returncode == 0:
-            raise SystemExit(
-                f"packaged CLI identity validator accepted invalid input: {output!r}"
-            )
+    )
+    for product_version in ("0.41", ""):
+        for output in invalid_outputs:
+            if run(output, product_version).returncode == 0:
+                raise SystemExit(
+                    "packaged CLI identity validator accepted invalid input "
+                    f"in product mode {product_version!r}: {output!r}"
+                )
 
 
 def main() -> int:
@@ -171,9 +215,10 @@ def main() -> int:
         "docker/collect_ptoas_dist_mac.sh",
     ):
         text = (root / name).read_text()
-        if identity_invocation not in active_shell_lines(text):
+        if not has_top_level_identity_invocation(text, identity_invocation):
             raise SystemExit(
-                f"{name} does not execute the exact PTO ISA 0.58.1 CLI identity validator"
+                f"{name} does not execute the exact PTO ISA 0.58.1 CLI identity "
+                "validator immediately after displaying the version"
             )
 
     print("release delivery contract OK")

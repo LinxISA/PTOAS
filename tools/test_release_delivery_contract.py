@@ -18,8 +18,9 @@ import unittest
 from pathlib import Path
 
 from check_release_delivery_contract import (
-    active_shell_lines,
+    has_top_level_identity_invocation,
     local_copy_sources,
+    top_level_shell_lines,
     validate_local_copy_sources,
 )
 
@@ -80,15 +81,17 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
 
         self.assertEqual(run("ptoas 0.41 (PTO ISA 0.58.1)", "0.41").returncode, 0)
         self.assertEqual(run("ptoas 0.41 (PTO ISA 0.58.1)").returncode, 0)
-        for invalid in (
+        invalid_outputs = (
             "ptoas 0.41",
             "ptoas 0.40 (PTO ISA 0.58.1)",
             "ptoas 0.41 (PTO ISA 0.58.0)",
             "warning\nptoas 0.41 (PTO ISA 0.58.1)",
             "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
-        ):
-            with self.subTest(output=invalid):
-                self.assertNotEqual(run(invalid, "0.41").returncode, 0)
+        )
+        for product_version in ("0.41", ""):
+            for invalid in invalid_outputs:
+                with self.subTest(output=invalid, product_version=product_version):
+                    self.assertNotEqual(run(invalid, product_version).returncode, 0)
 
     def test_packaging_scripts_execute_identity_validator(self) -> None:
         invocation = (
@@ -102,8 +105,29 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         ):
             with self.subTest(script=relative):
                 script = (ROOT / relative).read_text()
-                self.assertIn(invocation, active_shell_lines(script))
-                self.assertNotIn(invocation, active_shell_lines(f"# {invocation}"))
+                self.assertTrue(has_top_level_identity_invocation(script, invocation))
+
+        dead_branch = "\n".join(
+            ('echo "$VERSION_OUTPUT"', "if false; then", invocation, "fi")
+        )
+        heredoc = "\n".join(
+            ('echo "$VERSION_OUTPUT"', "cat <<'DEAD'", invocation, "DEAD")
+        )
+        dead_function = "\n".join(
+            (
+                'echo "$VERSION_OUTPUT"',
+                "dead_check() {",
+                invocation,
+                "}",
+            )
+        )
+        for script in (f"# {invocation}", dead_branch, heredoc, dead_function):
+            with self.subTest(script=script):
+                self.assertFalse(has_top_level_identity_invocation(script, invocation))
+
+    def test_top_level_shell_parser_preserves_live_lines_after_heredocs(self) -> None:
+        script = "\n".join(("cat <<'PY'", "if false; then", "PY", "echo live"))
+        self.assertEqual(top_level_shell_lines(script), ["cat <<'PY'", "echo live"])
 
 
 if __name__ == "__main__":

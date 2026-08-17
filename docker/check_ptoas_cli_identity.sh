@@ -16,6 +16,7 @@ fi
 
 VERSION_OUTPUT=$1
 PTOAS_VERSION=${2:-}
+PTOAS_RELEASE_VERSION=0.41
 
 if [[ "$VERSION_OUTPUT" == *$'\n'* || "$VERSION_OUTPUT" == *$'\r'* ]]; then
   echo "Error: ptoas --version must emit exactly one line" >&2
@@ -29,8 +30,8 @@ if [[ -n "$PTOAS_VERSION" ]]; then
     exit 1
   fi
 else
-  VERSION_PATTERN='^ptoas [0-9]+\.[0-9]+ \(PTO ISA 0\.58\.1\)$'
-  if [[ ! "$VERSION_OUTPUT" =~ $VERSION_PATTERN ]]; then
+  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_RELEASE_VERSION} (PTO ISA 0.58.1)"
+  if [[ "$VERSION_OUTPUT" != "$EXPECTED_VERSION_OUTPUT" ]]; then
     echo "Error: invalid packaged ptoas identity '${VERSION_OUTPUT}'" >&2
     exit 1
   fi

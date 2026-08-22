@@ -33,11 +33,28 @@ nanobind_add_module(_pto
 # for nanobind's shared runtime on ELF platforms. RELRO/NOW and the remaining
 # hardening flags stay enabled.
 if(UNIX AND NOT APPLE)
-  target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
-  # NB_SHARED creates libnanobind-mlir.so outside LLVM's library directory.
+  # nanobind 2.x names the shared domain runtime nanobind-mlir. nanobind 3.x
+  # names it from the selected ABI/features (normally nanobind, with optional
+  # -abi3/-ft suffixes). Resolve the target created by nanobind_add_module
+  # rather than assuming one nanobind release's private target spelling.
+  set(PTOAS_NANOBIND_RUNTIME_TARGET "")
+  foreach(_candidate
+      nanobind-mlir nanobind-abi3-ft nanobind-ft nanobind-abi3 nanobind)
+    if(TARGET ${_candidate})
+      set(PTOAS_NANOBIND_RUNTIME_TARGET ${_candidate})
+      break()
+    endif()
+  endforeach()
+  if(NOT PTOAS_NANOBIND_RUNTIME_TARGET)
+    message(FATAL_ERROR "nanobind_add_module did not create a shared runtime target")
+  endif()
+
+  target_link_options(${PTOAS_NANOBIND_RUNTIME_TARGET} PRIVATE
+    "LINKER:-z,undefs")
+  # NB_SHARED creates the runtime outside LLVM's library directory.
   # Install it into the directory exported to auditwheel so every architecture
   # can resolve and vendor the runtime into the repaired wheel.
-  install(TARGETS nanobind-mlir
+  install(TARGETS ${PTOAS_NANOBIND_RUNTIME_TARGET}
     LIBRARY DESTINATION lib
     COMPONENT PTOASPythonRuntime
   )

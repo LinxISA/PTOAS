@@ -92,6 +92,24 @@ class LinxIdentityTest(unittest.TestCase):
                 ("a_scale", "b_scale"),
             )
 
+    def test_linx_mx_compile_gate_uses_real_target_inputs(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        gate = (ptoas_root / "tools/check_linx_mx_tileop_compile.sh").read_text()
+        self.assertNotIn("linx_host_type_shim", gate)
+        self.assertNotIn("linx_mx_tileop_overlay", gate)
+        for required in (
+            'LINX_CXX=${LINX_LLVM_BUILD}/bin/clang++',
+            '"${TILEOP_ROOT}/include/jcore/template_asm.hpp"',
+            '--target=linx64-unknown-linux-musl',
+            '-fsyntax-only',
+            '-c "${generated}"',
+            "EXPECTED_LLVM_COMMIT",
+            "EXPECTED_LLVM_TREE",
+            "EXPECTED_TILEOP_COMMIT",
+            "EXPECTED_TILEOP_TREE",
+        ):
+            self.assertIn(required, gate)
+
     def test_misrouted_matmul_mx_variant_fails_closed(self):
         ptoas_root = Path(__file__).resolve().parents[1]
         lowering = (ptoas_root / "lib/PTO/Transforms/PTOToEmitC.cpp").read_text()

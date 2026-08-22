@@ -173,15 +173,32 @@ if(BUILD_TESTING)
     NAME emitc_lvalue_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)
-  set(PTOAS_LINX_TILEOP_ROOT "" CACHE PATH
-      "Merged Linx TileOP checkout used for generated MX C++ compile gates")
-  if(PTOAS_LINX_TILEOP_ROOT)
+  option(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION
+         "Compile generated Linx MX C++ with the exact target toolchain and TileOP" OFF)
+  if(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION)
+    foreach(required_var IN ITEMS
+            PTOAS_LINX_LLVM_BUILD PTOAS_LINX_SYSROOT PTOAS_LINX_TILEOP_ROOT
+            PTOAS_EXPECTED_LLVM_COMMIT PTOAS_EXPECTED_LLVM_TREE
+            PTOAS_EXPECTED_TILEOP_COMMIT PTOAS_EXPECTED_TILEOP_TREE)
+      if(NOT DEFINED ${required_var} OR "${${required_var}}" STREQUAL "")
+        message(FATAL_ERROR
+                "${required_var} is required for the Linx TileOP integration gate")
+      endif()
+    endforeach()
     add_test(
       NAME linx_mx_tileop_compile_check
       COMMAND ${CMAKE_COMMAND} -E env
               PTOAS_BIN=$<TARGET_FILE:pto-opt>
+              LINX_LLVM_BUILD=${PTOAS_LINX_LLVM_BUILD}
+              LINX_SYSROOT=${PTOAS_LINX_SYSROOT}
               TILEOP_ROOT=${PTOAS_LINX_TILEOP_ROOT}
+              EXPECTED_LLVM_COMMIT=${PTOAS_EXPECTED_LLVM_COMMIT}
+              EXPECTED_LLVM_TREE=${PTOAS_EXPECTED_LLVM_TREE}
+              EXPECTED_TILEOP_COMMIT=${PTOAS_EXPECTED_TILEOP_COMMIT}
+              EXPECTED_TILEOP_TREE=${PTOAS_EXPECTED_TILEOP_TREE}
               bash ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_linx_mx_tileop_compile.sh)
+    set_tests_properties(linx_mx_tileop_compile_check PROPERTIES
+                         LABELS "linx-target-integration")
   endif()
   add_subdirectory(tools/ptobc/tests)
 endif()

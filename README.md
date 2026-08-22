@@ -253,6 +253,33 @@ python3 ./tmatmulk.py > ./tmatmulk.pto
 $PTO_SOURCE_DIR/build/tools/ptoas/ptoas ./tmatmulk.pto -o ./tmatmulk.cpp
 ```
 
+Linx MX 的真实 C++ 集成门禁默认不启用，因为它必须同时绑定精确的 Linx
+LLVM 构建、musl+libc++ sysroot 和 `Linx-TileOP-API` checkout。该门禁不会使用
+host shim 或替换 `jcore/template_asm.hpp` 的 stub。依赖准备好后，使用已审核并
+合并的 commit/tree 配置独立构建目录：
+
+```bash
+cmake -G Ninja -S . -B build-linx-integration \
+  -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
+  -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
+  -DPTOAS_ENABLE_LINX_TILEOP_INTEGRATION=ON \
+  -DPTOAS_LINX_LLVM_BUILD=$LINX_LLVM_BUILD \
+  -DPTOAS_LINX_SYSROOT=$LINX_SYSROOT \
+  -DPTOAS_LINX_TILEOP_ROOT=$TILEOP_ROOT \
+  -DPTOAS_EXPECTED_LLVM_COMMIT=$MERGED_LLVM_COMMIT \
+  -DPTOAS_EXPECTED_LLVM_TREE=$MERGED_LLVM_TREE \
+  -DPTOAS_EXPECTED_TILEOP_COMMIT=$MERGED_TILEOP_COMMIT \
+  -DPTOAS_EXPECTED_TILEOP_TREE=$MERGED_TILEOP_TREE
+ninja -C build-linx-integration ptoas
+ctest --test-dir build-linx-integration \
+  -L linx-target-integration --output-on-failure
+```
+
+门禁先核对两个 checkout 的 commit/tree，再由真实 Linx `clang++` 和指定
+sysroot 对 PTOAS 生成的 TMATMUL/TGEMV base、ACC、BIAS 的 zero/A-only/
+B-only/both 四种形式分别执行 `-fsyntax-only` 和目标对象编译。缺少路径、
+identity 不匹配或真实 TileOP 签名/约束不接受生成代码时，门禁都会失败。
+
 ### 5.4 上板验证
 
 该流程用于将 `test/samples` 下生成的 `.cpp`（ptoas 输出）自动生成 NPU 验证用例，并在 NPU 上运行。下面示例直接复用 5.3 里生成的 `MatMul/tmatmulk.cpp`。

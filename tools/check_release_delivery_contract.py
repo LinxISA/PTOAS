@@ -132,6 +132,11 @@ def main() -> int:
         raise SystemExit("Docker build must COPY the reviewed PTOAS checkout")
     if "git clone https://github.com/zhangstevenunity/PTOAS.git" in dockerfile:
         raise SystemExit("Docker build must not clone an unpinned PTOAS fork")
+    if "'nanobind>=2.9,<3'" not in dockerfile:
+        raise SystemExit(
+            "Docker LLVM source build must pin nanobind to the MLIR 23 "
+            "compatible >=2.9,<3 range"
+        )
     if (
         'test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"'
         not in dockerfile

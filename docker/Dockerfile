@@ -20,7 +20,10 @@ ENV PATH="${PY_PATH}/bin:${PATH}"
 
 # dependency
 RUN dnf install -y ninja-build cmake git ccache gcc-c++ lld zip binutils patchelf chrpath && dnf clean all
-RUN pip install --no-cache-dir numpy nanobind setuptools wheel auditwheel
+# LLVM 23's MLIR Python build requires the nanobind 2.9 CMake contract.
+# PTOAS itself also supports nanobind 3 in the hosted prebuilt-LLVM lanes, but
+# this source-build stage must stay below the nanobind 3 hard break.
+RUN pip install --no-cache-dir numpy 'nanobind>=2.9,<3' setuptools wheel auditwheel
 
 COPY cmake/LinuxHardeningCache.cmake /tmp/LinuxHardeningCache.cmake
 

@@ -57,6 +57,10 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         readme = (ROOT / "docker/README.md").read_text()
         self.assertIn("docker build -f docker/Dockerfile .", readme)
 
+    def test_docker_llvm_source_build_pins_nanobind_2_9(self) -> None:
+        dockerfile = (ROOT / "docker/Dockerfile").read_text()
+        self.assertIn("'nanobind>=2.9,<3'", dockerfile)
+
     def test_hosted_builder_stage_gate_uses_buildkit(self) -> None:
         workflow = (ROOT / ".github/workflows/isa_contract.yml").read_text()
         self.assertIn("docker/setup-buildx-action@", workflow)

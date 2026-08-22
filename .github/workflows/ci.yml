@@ -119,7 +119,7 @@ jobs:
             clang lld \
             libedit-dev zlib1g-dev libxml2-dev libzstd-dev
           python3 -m pip install --upgrade pip
-          python3 -m pip install nanobind typing_extensions numpy
+          python3 -m pip install 'nanobind>=2.9,<3' typing_extensions numpy
 
       - name: Define payload paths
         shell: bash

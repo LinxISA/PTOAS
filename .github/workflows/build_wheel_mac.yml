@@ -83,7 +83,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install --no-cache-dir numpy nanobind typing_extensions setuptools wheel delocate
+          pip install --no-cache-dir numpy 'nanobind>=2.9,<3' typing_extensions setuptools wheel delocate
 
       - name: Set build directories
         run: |

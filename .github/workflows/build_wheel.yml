@@ -82,7 +82,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
-          pip install --no-cache-dir numpy nanobind typing_extensions setuptools wheel auditwheel
+          pip install --no-cache-dir numpy 'nanobind>=2.9,<3' typing_extensions setuptools wheel auditwheel
 
       - name: Set build directories
         run: |

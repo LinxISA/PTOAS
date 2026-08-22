@@ -62,6 +62,17 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         dockerfile = (ROOT / "docker/Dockerfile").read_text()
         self.assertIn("'nanobind>=2.9,<3'", dockerfile)
 
+    def test_all_llvm_source_build_lanes_pin_nanobind_2_9(self) -> None:
+        paths = (
+            ROOT / "docker/Dockerfile",
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/build_wheel.yml",
+            ROOT / ".github/workflows/build_wheel_mac.yml",
+        )
+        for path in paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertIn("nanobind>=2.9,<3", path.read_text())
+
     def test_all_delivery_lanes_pin_merged_reviewed_llvm(self) -> None:
         paths = (
             ROOT / "README.md",

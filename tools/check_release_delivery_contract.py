@@ -149,10 +149,24 @@ def main() -> int:
         root / ".github/workflows/build_wheel_mac.yml",
     )
     for path in llvm_pin_paths:
-        if EXPECTED_LLVM_COMMIT not in path.read_text():
+        text = path.read_text()
+        if EXPECTED_LLVM_COMMIT not in text:
             raise SystemExit(
                 f"{path.relative_to(root)} does not pin reviewed merged LLVM "
                 f"commit {EXPECTED_LLVM_COMMIT}"
+            )
+
+    nanobind_pin_paths = (
+        root / "docker/Dockerfile",
+        root / ".github/workflows/ci.yml",
+        root / ".github/workflows/build_wheel.yml",
+        root / ".github/workflows/build_wheel_mac.yml",
+    )
+    for path in nanobind_pin_paths:
+        if "nanobind>=2.9,<3" not in path.read_text():
+            raise SystemExit(
+                f"{path.relative_to(root)} must pin nanobind >=2.9,<3 for "
+                "the LLVM 23 MLIR Python source build"
             )
     if (
         'test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"'

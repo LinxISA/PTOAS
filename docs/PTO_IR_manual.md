@@ -79,6 +79,7 @@ PTO IR currently recognizes the following low-precision element types:
 - `f8E5M2` (corresponding C++ type name: `float8_e5m2_t`)
 
 - `!pto.hif8`
+- `!pto.f8E8M0` (Linx MX scale type; emitted as `__fp8_e8m0`)
 - `!pto.f4E1M2x2`
 - `!pto.f4E2M1x2`
 
@@ -88,6 +89,7 @@ basic storage-size plumbing. Their storage size is currently modeled as:
 - `f8E4M3FN`: 1 byte per element
 - `f8E5M2`: 1 byte per element
 - `!pto.hif8`: 1 byte per element
+- `!pto.f8E8M0`: 1 byte per element
 - `!pto.f4E1M2x2`: 1 byte per packed pair of FP4 values
 - `!pto.f4E2M1x2`: 1 byte per packed pair of FP4 values
 
@@ -144,7 +146,7 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `loc` | keyword (`vec/mat/left/right/acc/bias`) | Local memory domain (`vec` maps to UB; use `vec` in textual IR) |
-| `dtype` | `element-type(i1/i8/i16/i32/f16/f32/bf16/!pto.hif8/!pto.f4E1M2x2/!pto.f4E2M1x2...)` | Element data type |
+| `dtype` | `element-type(i1/i8/i16/i32/f16/f32/bf16/!pto.hif8/!pto.f8E8M0/!pto.f4E1M2x2/!pto.f4E2M1x2...)` | Element data type |
 | `rows` | `int64` | Physical row count |
 | `cols` | `int64` | Physical column count |
 | `v_row` | `int64` or `?` | Valid row count |
@@ -1387,6 +1389,15 @@ For each (i, j):
 
 - **Implementation checks (A5)**
   - `m/k/n` are taken from `lhs valid row`, `lhs valid column`, and `rhs valid column`.
+- **Implementation checks (Linx PTO ISA 0.58.3)**
+  - A and B matrix inputs use FP8 CUBE CELL layouts; emitted C++ uses the
+    Linx scalar spellings `__fp8_e4m3` / `__fp8_e5m2`.
+  - Each present scale is independent and must use `!pto.f8E8M0`, emitted as
+    `__fp8_e8m0`, in the scaling address space with ordinary row-major layout.
+  - `lhs_scale.valid_shape = [M, ceil(K/32)]`.
+  - `rhs_scale.valid_shape = [ceil(K/32), N]`.
+  - Base, accumulation, and bias variants lower one-to-one to `TMATMUL_MX`,
+    `TMATMUL_MX_ACC`, and `TMATMUL_MX_BIAS` with no operand permutation.
 
 **Hardware Mapping:**
 

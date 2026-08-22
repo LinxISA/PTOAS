@@ -35,3 +35,14 @@ grep -F "blayout=cube_m16" "${cube_decoded}" >/dev/null
 grep -F "blayout=cube_n8" "${cube_decoded}" >/dev/null
 grep -F "pto.tmatmul ins(" "${cube_decoded}" >/dev/null
 grep -F "pto.tgemv ins(" "${cube_decoded}" >/dev/null
+
+mx_input="${TEST_INPUT_DIR}/v0583_linx_tmatmul_mx_variants.pto"
+mx_bytecode="${OUT_DIR}/v0583_linx_tmatmul_mx_variants.ptobc"
+mx_decoded="${OUT_DIR}/v0583_linx_tmatmul_mx_variants.roundtrip.pto"
+"${PTOBC_BIN}" encode "${mx_input}" -o "${mx_bytecode}"
+"${PTOBC_BIN}" decode "${mx_bytecode}" -o "${mx_decoded}"
+
+grep -F "!pto.f8E8M0" "${mx_decoded}" >/dev/null
+grep -F "pto.tmatmul.mx ins(" "${mx_decoded}" >/dev/null
+grep -F "pto.tmatmul.mx.acc ins(" "${mx_decoded}" >/dev/null
+grep -F "pto.tmatmul.mx.bias ins(" "${mx_decoded}" >/dev/null

@@ -287,12 +287,16 @@ static bool isEmitCTileLikeType(Type ty) {
 }
 
 static std::string getEmitCScalarTypeToken(Type elemTy) {
+  bool isLinx =
+      getPTOParserTargetArch(elemTy.getContext()) == PTOParserTargetArch::Linx;
   if (pto::isPTOFloat8E4M3FamilyType(elemTy))
-    return "float8_e4m3_t";
+    return isLinx ? "__fp8_e4m3" : "float8_e4m3_t";
   if (pto::isPTOFloat8E5M2FamilyType(elemTy))
-    return "float8_e5m2_t";
+    return isLinx ? "__fp8_e5m2" : "float8_e5m2_t";
   if (isa<pto::HiF8Type>(elemTy))
     return "hifloat8_t";
+  if (isa<pto::F8E8M0Type>(elemTy))
+    return "__fp8_e8m0";
   if (isa<pto::F4E1M2x2Type>(elemTy))
     return "float4_e1m2x2_t";
   if (isa<pto::F4E2M1x2Type>(elemTy))
@@ -434,11 +438,15 @@ public:
     // ---------------------------------------------------------
     // 1. 基本类型 (f32, i32, index)
     // ---------------------------------------------------------
-    addConversion([Ctx](FloatType type) -> Type {
+    addConversion([Ctx, targetArch](FloatType type) -> Type {
       if (pto::isPTOFloat8E4M3FamilyType(type))
-        return emitc::OpaqueType::get(Ctx, "float8_e4m3_t");
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__fp8_e4m3"
+                                              : "float8_e4m3_t");
       if (pto::isPTOFloat8E5M2FamilyType(type))
-        return emitc::OpaqueType::get(Ctx, "float8_e5m2_t");
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__fp8_e5m2"
+                                              : "float8_e5m2_t");
       if (type.isF32()) return emitc::OpaqueType::get(Ctx, "float");
       if (type.isF16()) return emitc::OpaqueType::get(Ctx, "half");
       if (type.isBF16()) return emitc::OpaqueType::get(Ctx, "bfloat16_t");
@@ -449,6 +457,9 @@ public:
 
     addConversion([Ctx](pto::HiF8Type) -> Type {
       return emitc::OpaqueType::get(Ctx, "hifloat8_t");
+    });
+    addConversion([Ctx](pto::F8E8M0Type) -> Type {
+      return emitc::OpaqueType::get(Ctx, "__fp8_e8m0");
     });
     addConversion([Ctx](pto::F4E1M2x2Type) -> Type {
       return emitc::OpaqueType::get(Ctx, "float4_e1m2x2_t");
@@ -3452,6 +3463,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 //===----------------------------------------------------------------------===//
 
 static std::string getElemTypeStringForGT(Type elemTy) {
+  if (isa<pto::F8E8M0Type>(elemTy)) return "__fp8_e8m0";
   if (elemTy.isF16()) return "half";
   if (elemTy.isBF16()) return "bfloat16_t";
   if (elemTy.isF32()) return "float";
@@ -12054,6 +12066,12 @@ struct EmitPTOManualPass
     LLVM_DEBUG(llvm::dbgs() << "DEBUG: Start PTOToEmitC Pass\n");
     MLIRContext *ctx = &getContext();
     ModuleOp mop = getOperation();
+    PTOParserTargetArch parserArch =
+        targetArch == PTOArch::Linx
+            ? PTOParserTargetArch::Linx
+            : targetArch == PTOArch::A5 ? PTOParserTargetArch::A5
+                                         : PTOParserTargetArch::A3;
+    ScopedPTOParserTargetArch parserArchScope(ctx, parserArch);
 
     if (failed(pto::validatePTOEntryFunctions(mop)))
       return signalPassFailure();

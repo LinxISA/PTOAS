@@ -306,6 +306,21 @@ uint64_t mlir::pto::HiF8Type::getPreferredAlignment(
   return 1;
 }
 
+llvm::TypeSize mlir::pto::F8E8M0Type::getTypeSizeInBits(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return getOneByteTypeSize();
+}
+
+uint64_t mlir::pto::F8E8M0Type::getABIAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
+}
+
+uint64_t mlir::pto::F8E8M0Type::getPreferredAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
+}
+
 llvm::TypeSize mlir::pto::F4E1M2x2Type::getTypeSizeInBits(
     const DataLayout &, DataLayoutEntryListRef) const {
   return getOneByteTypeSize();
@@ -2233,7 +2248,12 @@ LogicalResult AllocTileOp::verify() {
         (layout == static_cast<int32_t>(pto::BLayout::CubeM16) ||
          layout == static_cast<int32_t>(pto::BLayout::CubeM32) ||
          layout == static_cast<int32_t>(pto::BLayout::CubeN8));
-    if (!isLinxCubeLayout)
+    auto addressSpace = getPTOMemorySpaceEnum(ty);
+    bool isLinxE8M0Scale =
+        isVerifierTargetLinx(getOperation()) &&
+        isa<pto::F8E8M0Type>(elemTy) && addressSpace &&
+        *addressSpace == pto::AddressSpace::SCALING;
+    if (!isLinxCubeLayout && !isLinxE8M0Scale)
       return emitOpError() << "result dtype " << elemTy
                            << " is not supported by pto.alloc_tile yet";
   }
@@ -3265,12 +3285,43 @@ static LogicalResult verifyScaleTileMatchesOperand(Operation *op, Type scaleTy,
                                                    Type operandTy,
                                                    StringRef scaleName,
                                                    StringRef operandName) {
-  if (failed(verifyTileBufCommon(op, scaleTy, scaleName)))
+  if (failed(verifyTileBufCommon(op, scaleTy, scaleName,
+                                 /*allowLowPrecision=*/
+                                     isVerifierTargetLinx(op))))
     return failure();
   auto scaleSpace = getPTOMemorySpaceEnum(scaleTy);
   if (!scaleSpace || *scaleSpace != pto::AddressSpace::SCALING)
     return op->emitOpError() << "expects " << scaleName
                              << " to be in the scaling address space";
+  if (isVerifierTargetLinx(op)) {
+    if (!isa<pto::F8E8M0Type>(getElemTy(scaleTy)))
+      return op->emitOpError() << "expects Linx MX " << scaleName
+                               << " to use !pto.f8E8M0 elements";
+    auto scaleValid = getValidShapeVec(scaleTy);
+    auto operandValid = getValidShapeVec(operandTy);
+    if (scaleValid.size() != 2 || operandValid.size() != 2)
+      return op->emitOpError() << "expects Linx MX " << scaleName
+                               << " and " << operandName
+                               << " to have rank-2 valid_shape";
+    auto ceilDiv32 = [](int64_t value) {
+      return value == ShapedType::kDynamic ? value : (value + 31) / 32;
+    };
+    SmallVector<int64_t, 2> expected =
+        scaleName == "a_scale"
+            ? SmallVector<int64_t, 2>{operandValid[0],
+                                      ceilDiv32(operandValid[1])}
+            : SmallVector<int64_t, 2>{ceilDiv32(operandValid[0]),
+                                      operandValid[1]};
+    for (unsigned i = 0; i < 2; ++i) {
+      if (scaleValid[i] != ShapedType::kDynamic &&
+          expected[i] != ShapedType::kDynamic && scaleValid[i] != expected[i])
+        return op->emitOpError()
+               << "expects Linx MX " << scaleName << " valid_shape to be "
+               << (scaleName == "a_scale" ? "M x ceil(K/32)"
+                                            : "ceil(K/32) x N");
+    }
+    return success();
+  }
 
   auto scaleShape = getShapeVec(scaleTy);
   auto operandShape = getShapeVec(operandTy);
@@ -3296,6 +3347,50 @@ static LogicalResult verifyScaleTileMatchesOperand(Operation *op, Type scaleTy,
         scaleValid[i] != operandValid[i])
       return op->emitOpError() << "expects " << scaleName << " and " << operandName
                                << " to have the same valid_shape";
+  }
+  return success();
+}
+
+static LogicalResult verifyScaleTileValueMatchesOperand(
+    Operation *op, Value scale, Value operand, StringRef scaleName,
+    StringRef operandName) {
+  if (!isVerifierTargetLinx(op))
+    return verifyScaleTileMatchesOperand(op, scale.getType(), operand.getType(),
+                                         scaleName, operandName);
+
+  Type scaleTy = scale.getType();
+  if (failed(verifyTileBufCommon(op, scaleTy, scaleName,
+                                 /*allowLowPrecision=*/true)))
+    return failure();
+  auto scaleSpace = getPTOMemorySpaceEnum(scaleTy);
+  if (!scaleSpace || *scaleSpace != pto::AddressSpace::SCALING)
+    return op->emitOpError() << "expects " << scaleName
+                             << " to be in the scaling address space";
+  if (!isa<pto::F8E8M0Type>(getElemTy(scaleTy)))
+    return op->emitOpError() << "expects Linx MX " << scaleName
+                             << " to use !pto.f8E8M0 elements";
+
+  auto scaleValid = getValidShapeVec(scale);
+  auto operandValid = getValidShapeVec(operand);
+  if (scaleValid.size() != 2 || operandValid.size() != 2)
+    return op->emitOpError() << "expects Linx MX " << scaleName << " and "
+                             << operandName << " to have rank-2 valid_shape";
+  auto ceilDiv32 = [](int64_t value) {
+    return value == ShapedType::kDynamic ? value : (value + 31) / 32;
+  };
+  SmallVector<int64_t, 2> expected =
+      scaleName == "a_scale"
+          ? SmallVector<int64_t, 2>{operandValid[0],
+                                    ceilDiv32(operandValid[1])}
+          : SmallVector<int64_t, 2>{ceilDiv32(operandValid[0]),
+                                    operandValid[1]};
+  for (unsigned i = 0; i < 2; ++i) {
+    if (scaleValid[i] != ShapedType::kDynamic &&
+        expected[i] != ShapedType::kDynamic && scaleValid[i] != expected[i])
+      return op->emitOpError()
+             << "expects Linx MX " << scaleName << " valid_shape to be "
+             << (scaleName == "a_scale" ? "M x ceil(K/32)"
+                                          : "ceil(K/32) x N");
   }
   return success();
 }
@@ -6450,10 +6545,10 @@ LogicalResult TGemvMxOp::verify() {
     return emitOpError("tgemv.mx is only supported on A5 targets");
   };
   auto verifyA5 = [&]() -> LogicalResult {
-    if (failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
-                                             getA().getType(), "a_scale", "a")) ||
-        failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
-                                             getB().getType(), "b_scale", "b")) ||
+    if (failed(verifyScaleTileValueMatchesOperand(*this, getAScale(),
+                                                  getA(), "a_scale", "a")) ||
+        failed(verifyScaleTileValueMatchesOperand(*this, getBScale(),
+                                                  getB(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6478,10 +6573,10 @@ LogicalResult TGemvMxAccOp::verify() {
                                  : verifyAccTileCommon(
                                        *this, getCIn().getType(), "c_in");
     if (failed(accCheck) ||
-        failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
-                                             getA().getType(), "a_scale", "a")) ||
-        failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
-                                             getB().getType(), "b_scale", "b")) ||
+        failed(verifyScaleTileValueMatchesOperand(*this, getAScale(),
+                                                  getA(), "a_scale", "a")) ||
+        failed(verifyScaleTileValueMatchesOperand(*this, getBScale(),
+                                                  getB(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6505,10 +6600,10 @@ LogicalResult TGemvMxBiasOp::verify() {
     return emitOpError("tgemv.mx.bias is only supported on A5 targets");
   };
   auto verifyA5 = [&]() -> LogicalResult {
-    if (failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
-                                             getA().getType(), "a_scale", "a")) ||
-        failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
-                                             getB().getType(), "b_scale", "b")) ||
+    if (failed(verifyScaleTileValueMatchesOperand(*this, getAScale(),
+                                                  getA(), "a_scale", "a")) ||
+        failed(verifyScaleTileValueMatchesOperand(*this, getBScale(),
+                                                  getB(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)) ||
         failed(verifyMatBiasTile(*this, getBias(), getDst(),
@@ -6553,8 +6648,10 @@ LogicalResult TMatmulBiasOp::verify() {
 
 LogicalResult TMatmulMxOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+    if (failed(verifyScaleTileValueMatchesOperand(
+            *this, getAScale(), getA(), "a_scale", "a")) ||
+        failed(verifyScaleTileValueMatchesOperand(
+            *this, getBScale(), getB(), "b_scale", "b")) ||
         failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
                                      /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6579,8 +6676,10 @@ LogicalResult TMatmulMxAccOp::verify() {
                                  : verifyAccTileCommon(
                                        *this, getCIn().getType(), "c_in");
     if (failed(accCheck) ||
-        failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+        failed(verifyScaleTileValueMatchesOperand(
+            *this, getAScale(), getA(), "a_scale", "a")) ||
+        failed(verifyScaleTileValueMatchesOperand(
+            *this, getBScale(), getB(), "b_scale", "b")) ||
         failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
                                      /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6604,8 +6703,10 @@ LogicalResult TMatmulMxAccOp::verify() {
 }
 LogicalResult TMatmulMxBiasOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+    if (failed(verifyScaleTileValueMatchesOperand(
+            *this, getAScale(), getA(), "a_scale", "a")) ||
+        failed(verifyScaleTileValueMatchesOperand(
+            *this, getBScale(), getB(), "b_scale", "b")) ||
         failed(verifyMatTileOperands(*this, getA(), getB(), getDst())) ||
         failed(verifyMatBiasTile(*this, getBias(), getDst(),
                               /*requireFloatBias=*/true)))

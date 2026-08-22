@@ -18,6 +18,7 @@ bool isPTOFloat8Type(Type t);
 bool isPTOFloat8E4M3FamilyType(Type t);
 bool isPTOFloat8E5M2FamilyType(Type t);
 bool isPTOHiFloat8Type(Type t);
+bool isPTOFloat8E8M0Type(Type t);
 bool isPTOFloat4PackedType(Type t);
 bool isPTOLowPrecisionType(Type t);
 

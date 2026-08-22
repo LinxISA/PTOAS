@@ -9,9 +9,9 @@
 // RUN: ptoas --pto-arch=linx %s | FileCheck %s
 
 !a = !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
-!sa = !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=32, pad=0>
+!sa = !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=16, cols=32, v_row=16, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 !b = !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
-!sb = !pto.tile_buf<loc=scaling, dtype=f16, rows=32, cols=16, v_row=32, v_col=16, blayout=row_major, slayout=none_box, fractal=32, pad=0>
+!sb = !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=32, cols=32, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 !d = !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
 !bias = !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 module attributes {pto.target_arch = "linx"} {
@@ -32,6 +32,7 @@ module attributes {pto.target_arch = "linx"} {
   }
 }
 
+// CHECK-COUNT-2: Tile<TileType::Scaling, __fp8_e8m0
 // CHECK: TMATMUL_MX({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});
 // CHECK: TMATMUL_MX_ACC({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});
 // CHECK: TMATMUL_MX_BIAS({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});

@@ -281,6 +281,17 @@ def HiF8Type : TypeDef<PTO_Dialect, "HiF8", [
   let summary = "Ascend A5 HiFloat8 (8-bit, 1 byte per element).";
 }
 
+// ---- !pto.f8E8M0 ---- Corresponding Linx TileOP type: __fp8_e8m0 (1 byte)
+def F8E8M0Type : TypeDef<PTO_Dialect, "F8E8M0", [
+    MemRefElementTypeInterface,
+    DeclareTypeInterfaceMethods<DataLayoutTypeInterface,
+      ["getTypeSizeInBits", "getABIAlignment", "getPreferredAlignment"]>
+]> {
+  let mnemonic = "f8E8M0";
+  let summary =
+      "PTO ISA E8M0 scale element used independently by A and B MX inputs.";
+}
+
 // ---- !pto.f4E1M2x2 ---- Corresponding type name: float4_e1m2x2_t (1 byte = 2 FP4 packed)
 def F4E1M2x2Type : TypeDef<PTO_Dialect, "F4E1M2x2", [
     DeclareTypeInterfaceMethods<DataLayoutTypeInterface,

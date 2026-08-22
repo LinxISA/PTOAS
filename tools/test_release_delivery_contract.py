@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 
 from check_release_delivery_contract import (
+    EXPECTED_LLVM_COMMIT,
     local_copy_sources,
     run_packaging_identity_mode,
     validate_local_copy_sources,
@@ -60,6 +61,18 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
     def test_docker_llvm_source_build_pins_nanobind_2_9(self) -> None:
         dockerfile = (ROOT / "docker/Dockerfile").read_text()
         self.assertIn("'nanobind>=2.9,<3'", dockerfile)
+
+    def test_all_delivery_lanes_pin_merged_reviewed_llvm(self) -> None:
+        paths = (
+            ROOT / "README.md",
+            ROOT / "docker/Dockerfile",
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/build_wheel.yml",
+            ROOT / ".github/workflows/build_wheel_mac.yml",
+        )
+        for path in paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertIn(EXPECTED_LLVM_COMMIT, path.read_text())
 
     def test_hosted_builder_stage_gate_uses_buildkit(self) -> None:
         workflow = (ROOT / ".github/workflows/isa_contract.yml").read_text()

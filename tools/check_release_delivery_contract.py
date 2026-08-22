@@ -18,6 +18,9 @@ import subprocess
 from pathlib import Path
 
 
+EXPECTED_LLVM_COMMIT = "63c5c485b58a1e3fb9c9f35428108cee5c387a2a"
+
+
 def local_copy_sources(dockerfile: str) -> list[tuple[int, str]]:
     """Return local Docker COPY sources and reject unvalidated syntax."""
     sources: list[tuple[int, str]] = []
@@ -137,6 +140,20 @@ def main() -> int:
             "Docker LLVM source build must pin nanobind to the MLIR 23 "
             "compatible >=2.9,<3 range"
         )
+
+    llvm_pin_paths = (
+        root / "README.md",
+        root / "docker/Dockerfile",
+        root / ".github/workflows/ci.yml",
+        root / ".github/workflows/build_wheel.yml",
+        root / ".github/workflows/build_wheel_mac.yml",
+    )
+    for path in llvm_pin_paths:
+        if EXPECTED_LLVM_COMMIT not in path.read_text():
+            raise SystemExit(
+                f"{path.relative_to(root)} does not pin reviewed merged LLVM "
+                f"commit {EXPECTED_LLVM_COMMIT}"
+            )
     if (
         'test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"'
         not in dockerfile

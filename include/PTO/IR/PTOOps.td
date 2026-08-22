@@ -524,7 +524,7 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
 ]> {
   let summary = "Prefetch a rectangular tile region from a global address.";
   let description = [{
-    PTO ISA 0.58.1 models TPREFETCH as a destination-free TLSU operation over
+    PTO ISA 0.58.3 models TPREFETCH as a destination-free TLSU operation over
     a base address, element row stride, valid shape, and physical row width.
   }];
 

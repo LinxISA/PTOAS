@@ -22,9 +22,22 @@ SPEC.loader.exec_module(CHECKER)
 
 
 class LinxIdentityTest(unittest.TestCase):
+    def test_local_0583_identity_mismatch_fails_closed(self):
+        local_lock = json.loads(
+            Path(__file__).with_name("pto_isa_v0_58_3_lock.json").read_text()
+        )
+        local_lock["encoding_projection_sha256"] = "0" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            ptoas_root = Path(directory)
+            tools = ptoas_root / "tools"
+            tools.mkdir()
+            (tools / "pto_isa_v0_58_3_lock.json").write_text(json.dumps(local_lock))
+            with self.assertRaisesRegex(SystemExit, "unexpected PTO ISA 0.58.3 lock"):
+                CHECKER.load_lock(ptoas_root)
+
     def test_mismatched_release_fails_closed(self):
         local_lock = json.loads(
-            Path(__file__).with_name("pto_isa_v0_58_1_lock.json").read_text()
+            Path(__file__).with_name("pto_isa_v0_58_3_lock.json").read_text()
         )
         mismatched = json.loads(json.dumps(local_lock))
         mismatched["release"] = "0.58.0"
@@ -57,6 +70,10 @@ class LinxIdentityTest(unittest.TestCase):
             fake_ods.write_text(ods)
             operations = CHECKER.load_ptoas_ops(fake_root)
             self.assertIsNone(operations["TDIV"]["linx_engine"])
+
+    def test_linx_target_surface_has_0583_cube_call_contracts(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        CHECKER.validate_linx_target_surface(ptoas_root)
 
 
 if __name__ == "__main__":

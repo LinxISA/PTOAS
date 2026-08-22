@@ -135,8 +135,8 @@ static LogicalResult verifyAccTileCommonA2A3(Operation *op, Type ty,
                                              StringRef name);
 static LogicalResult verifyAccTileCommonA5(Operation *op, Type ty,
                                            StringRef name);
-static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                           Type dstTy,
+static LogicalResult verifyMatTileOperands(Operation *op, Value lhs, Value rhs,
+                                           Value dst,
                                            bool allowLowPrecisionInputs = false);
 static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
                                                Type rhsTy, Type dstTy,
@@ -144,8 +144,8 @@ static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
 static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
                                              Type rhsTy, Type dstTy,
                                              bool allowLowPrecisionInputs);
-static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                            Type dstTy,
+static LogicalResult verifyGemvTileOperands(Operation *op, Value lhs, Value rhs,
+                                            Value dst,
                                             bool allowLowPrecisionInputs = false);
 static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
                                                 Type rhsTy, Type dstTy,
@@ -153,7 +153,7 @@ static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
 static LogicalResult verifyGemvTileOperandsA5(Operation *op, Type lhsTy,
                                               Type rhsTy, Type dstTy,
                                               bool allowLowPrecisionInputs);
-static LogicalResult verifyMatBiasTile(Operation *op, Type biasTy, Type dstTy,
+static LogicalResult verifyMatBiasTile(Operation *op, Value bias, Value dst,
                                        bool requireFloatBias = false);
 static LogicalResult verifyMatBiasTileA2A3(Operation *op, Type biasTy, Type dstTy,
                                            bool requireFloatBias = false);
@@ -1436,6 +1436,20 @@ static LogicalResult verifyTileBufLayoutConstraints(Operation *op,
     return op->emitOpError() << "expects " << name
                              << " to have concrete tile layout attributes";
   constexpr int64_t kAlignedBytes = 32;
+
+  bool isCubeLayout =
+      blayout == static_cast<int32_t>(BLayout::CubeM16) ||
+      blayout == static_cast<int32_t>(BLayout::CubeM32) ||
+      blayout == static_cast<int32_t>(BLayout::CubeN8);
+  if (isCubeLayout) {
+    if (!isVerifierTargetLinx(op))
+      return op->emitOpError() << "expects " << name
+                               << " CUBE CELL layout only for Linx";
+    if (slayout != static_cast<int32_t>(SLayout::NoneBox))
+      return op->emitOpError() << "expects " << name
+                               << " CUBE CELL layout to use none_box";
+    return success();
+  }
 
   auto checkByteAlignment = [&](int64_t dim, StringRef layoutName,
                                 StringRef byteExpr) -> LogicalResult {
@@ -3649,8 +3663,22 @@ static LogicalResult verifyAccTileCommon(Operation *op, Type ty, StringRef name)
     return verifyAccTileCommonA2A3(op, ty, name);
   case VerifierTargetArch::A5:
     return verifyAccTileCommonA5(op, ty, name);
-  case VerifierTargetArch::Linx:
-    return op->emitOpError("Linx ACC tile legality is not implemented");
+  case VerifierTargetArch::Linx: {
+    if (failed(verifyTileBufCommon(op, ty, name,
+                                   /*allowLowPrecision=*/true)))
+      return failure();
+    auto tile = dyn_cast<pto::TileBufType>(ty);
+    auto addressSpace = getPTOMemorySpaceEnum(ty);
+    if (!tile || !addressSpace || *addressSpace != pto::AddressSpace::ACC)
+      return op->emitOpError() << "expects Linx " << name
+                               << " to be an explicit acc tile_buf";
+    int32_t layout = tile.getBLayoutValueI32();
+    if (layout != static_cast<int32_t>(pto::BLayout::CubeM16) &&
+        layout != static_cast<int32_t>(pto::BLayout::CubeM32))
+      return op->emitOpError() << "expects Linx " << name
+                               << " to use cube_m16 or cube_m32 blayout";
+    return success();
+  }
   }
   return failure();
 }
@@ -3720,9 +3748,126 @@ static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
   return success();
 }
 
-static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                           Type dstTy,
+static bool isLinxCubeElementType(Type type) {
+  if (isa<pto::F4E1M2x2Type, pto::F4E2M1x2Type>(type))
+    return true;
+  if (auto integer = dyn_cast<IntegerType>(type)) {
+    unsigned width = integer.getWidth();
+    return width == 4 || width == 8 || width == 16 || width == 32;
+  }
+  if (type.isBF16())
+    return true;
+  if (auto floating = dyn_cast<FloatType>(type)) {
+    unsigned width = floating.getWidth();
+    return width == 8 || width == 16 || width == 32;
+  }
+  return false;
+}
+
+static pto::TileBufConfigAttr getEffectiveTileConfig(Value value) {
+  if (auto tile = dyn_cast<pto::TileBufType>(value.getType()))
+    return tile.getConfigAttr();
+  if (auto bind = value.getDefiningOp<pto::BindTileOp>())
+    return bind.getConfigAttr();
+  return {};
+}
+
+static LogicalResult verifyLinxCubeTile(Operation *op, Value value,
+                                        StringRef name,
+                                        pto::AddressSpace addressSpace,
+                                        ArrayRef<pto::BLayout> layouts,
+                                        int32_t &acceptedLayout) {
+  Type type = value.getType();
+  if (failed(verifyTileBufCommon(op, type, name,
+                                 /*allowLowPrecision=*/true)))
+    return failure();
+  auto config = getEffectiveTileConfig(value);
+  if (!config)
+    return op->emitOpError() << "expects Linx CUBE " << name
+                             << " to be an explicit tile or governed bind_tile";
+  auto actualSpace = getPTOMemorySpaceEnum(type);
+  if (!actualSpace || *actualSpace != addressSpace)
+    return op->emitOpError() << "expects Linx CUBE " << name
+                             << " to use its architectural address space";
+  auto layoutAttr = dyn_cast_or_null<pto::BLayoutAttr>(config.getBLayout());
+  if (!layoutAttr)
+    return op->emitOpError() << "expects Linx CUBE " << name
+                             << " to carry a governed BLayout attribute";
+  auto layout = layoutAttr.getValue();
+  if (!llvm::is_contained(layouts, layout))
+    return op->emitOpError() << "expects Linx CUBE " << name
+                             << " to use its architectural CUBE CELL blayout";
+  auto sLayoutAttr = dyn_cast_or_null<pto::SLayoutAttr>(config.getSLayout());
+  if (!sLayoutAttr || sLayoutAttr.getValue() != pto::SLayout::NoneBox)
+    return op->emitOpError() << "expects Linx CUBE " << name
+                             << " to use none_box slayout";
+  if (!isLinxCubeElementType(getElemTy(type)))
+    return op->emitOpError() << "expects Linx CUBE " << name
+                             << " dtype width to be 4, 8, 16, or 32 bits";
+  auto shape = getShapeVec(type);
+  if (layout == pto::BLayout::CubeM16 && shape[0] != ShapedType::kDynamic &&
+      shape[0] > 16)
+    return op->emitOpError() << "expects cube_m16 " << name
+                             << " to have at most 16 rows";
+  if (layout == pto::BLayout::CubeM32 && shape[0] != ShapedType::kDynamic &&
+      shape[0] > 32)
+    return op->emitOpError() << "expects cube_m32 " << name
+                             << " to have at most 32 rows";
+  acceptedLayout = static_cast<int32_t>(layout);
+  return success();
+}
+
+static LogicalResult verifyLinxAccumulatorPair(Operation *op, Value acc,
+                                               Value dst) {
+  int32_t accLayout = 0;
+  int32_t dstLayout = 0;
+  if (failed(verifyLinxCubeTile(
+          op, acc, "acc_in", pto::AddressSpace::ACC,
+          {pto::BLayout::CubeM16, pto::BLayout::CubeM32}, accLayout)) ||
+      failed(verifyLinxCubeTile(
+          op, dst, "dst", pto::AddressSpace::ACC,
+          {pto::BLayout::CubeM16, pto::BLayout::CubeM32}, dstLayout)))
+    return failure();
+  if (accLayout != dstLayout)
+    return op->emitOpError(
+        "expects Linx CUBE acc_in and dst to use the same M16/M32 layout");
+  return success();
+}
+
+static LogicalResult verifyMatTileOperandsLinx(Operation *op, Value lhs,
+                                               Value rhs, Value dst) {
+  int32_t lhsLayout = 0;
+  int32_t rhsLayout = 0;
+  int32_t dstLayout = 0;
+  if (failed(verifyLinxCubeTile(
+          op, lhs, "lhs", pto::AddressSpace::LEFT,
+          {pto::BLayout::CubeM16, pto::BLayout::CubeM32}, lhsLayout)) ||
+      failed(verifyLinxCubeTile(op, rhs, "rhs", pto::AddressSpace::RIGHT,
+                                {pto::BLayout::CubeN8}, rhsLayout)) ||
+      failed(verifyLinxCubeTile(
+          op, dst, "dst", pto::AddressSpace::ACC,
+          {pto::BLayout::CubeM16, pto::BLayout::CubeM32}, dstLayout)))
+    return failure();
+  if (lhsLayout != dstLayout)
+    return op->emitOpError(
+        "expects Linx CUBE lhs and dst to use the same M16/M32 layout");
+  auto lhsShape = getValidShapeVec(lhs);
+  auto rhsShape = getValidShapeVec(rhs);
+  auto dstShape = getValidShapeVec(dst);
+  if (!hasCompatibleKnownExtent(lhsShape[0], dstShape[0]) ||
+      !hasCompatibleKnownExtent(lhsShape[1], rhsShape[0]) ||
+      !hasCompatibleKnownExtent(rhsShape[1], dstShape[1]))
+    return op->emitOpError(
+        "expects Linx CUBE shapes lhs[M,K], rhs[K,N], and dst[M,N]");
+  return success();
+}
+
+static LogicalResult verifyMatTileOperands(Operation *op, Value lhs, Value rhs,
+                                           Value dst,
                                            bool allowLowPrecisionInputs) {
+  Type lhsTy = lhs.getType();
+  Type rhsTy = rhs.getType();
+  Type dstTy = dst.getType();
   switch (getVerifierTargetArch(op)) {
   case VerifierTargetArch::A2A3:
     return verifyMatTileOperandsA2A3(op, lhsTy, rhsTy, dstTy,
@@ -3731,7 +3876,7 @@ static LogicalResult verifyMatTileOperands(Operation *op, Type lhsTy, Type rhsTy
     return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy,
                                    allowLowPrecisionInputs);
   case VerifierTargetArch::Linx:
-    return op->emitOpError("Linx CUBE operand legality is not implemented");
+    return verifyMatTileOperandsLinx(op, lhs, rhs, dst);
   }
   return failure();
 }
@@ -3783,9 +3928,12 @@ static LogicalResult verifyGemvTileOperandsA5(Operation *op, Type lhsTy,
                                  allowLowPrecisionInputs);
 }
 
-static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsTy,
-                                            Type dstTy,
+static LogicalResult verifyGemvTileOperands(Operation *op, Value lhs, Value rhs,
+                                            Value dst,
                                             bool allowLowPrecisionInputs) {
+  Type lhsTy = lhs.getType();
+  Type rhsTy = rhs.getType();
+  Type dstTy = dst.getType();
   switch (getVerifierTargetArch(op)) {
   case VerifierTargetArch::A2A3:
     return verifyGemvTileOperandsA2A3(op, lhsTy, rhsTy, dstTy,
@@ -3794,7 +3942,7 @@ static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsT
     return verifyGemvTileOperandsA5(op, lhsTy, rhsTy, dstTy,
                                     allowLowPrecisionInputs);
   case VerifierTargetArch::Linx:
-    return op->emitOpError("Linx CUBE GEMV legality is not implemented");
+    return verifyMatTileOperandsLinx(op, lhs, rhs, dst);
   }
   return failure();
 }
@@ -3829,22 +3977,47 @@ static LogicalResult verifyMatBiasTileA5(Operation *op, Type biasTy, Type dstTy,
   return success();
 }
 
-static LogicalResult verifyMatBiasTile(Operation *op, Type biasTy, Type dstTy,
+static LogicalResult verifyMatBiasTile(Operation *op, Value bias, Value dst,
                                        bool requireFloatBias) {
+  Type biasTy = bias.getType();
+  Type dstTy = dst.getType();
   switch (getVerifierTargetArch(op)) {
   case VerifierTargetArch::A2A3:
     return verifyMatBiasTileA2A3(op, biasTy, dstTy, requireFloatBias);
   case VerifierTargetArch::A5:
     return verifyMatBiasTileA5(op, biasTy, dstTy, requireFloatBias);
-  case VerifierTargetArch::Linx:
-    return op->emitOpError("Linx CUBE bias legality is not implemented");
+  case VerifierTargetArch::Linx: {
+    if (failed(verifyTileBufCommon(op, biasTy, "bias",
+                                   /*allowLowPrecision=*/true)))
+      return failure();
+    if (!getEffectiveTileConfig(bias))
+      return op->emitOpError(
+          "expects Linx CUBE bias to be an explicit tile or governed bind_tile");
+    if (requireFloatBias && !getElemTy(biasTy).isF32())
+      return op->emitOpError("expects Linx CUBE bias to have element type f32");
+    auto biasShape = getShapeVec(biasTy);
+    auto dstShape = getShapeVec(dstTy);
+    if (!hasCompatibleKnownExtent(biasShape[1], dstShape[1]))
+      return op->emitOpError(
+          "expects Linx CUBE bias and dst to have the same column shape");
+    return success();
+  }
   }
   return failure();
 }
 
 static LogicalResult verifyMatmulTypeTriple(Operation *op, Type lhsElemTy,
                                             Type rhsElemTy, Type dstElemTy) {
-  bool isA5 = getVerifierTargetArch(op) == VerifierTargetArch::A5;
+  VerifierTargetArch arch = getVerifierTargetArch(op);
+  bool isA5 = arch == VerifierTargetArch::A5;
+  if (arch == VerifierTargetArch::Linx) {
+    if (isLinxCubeElementType(lhsElemTy) &&
+        isLinxCubeElementType(rhsElemTy) &&
+        isLinxCubeElementType(dstElemTy))
+      return success();
+    return op->emitOpError(
+        "expects Linx CUBE element widths to be 4, 8, 16, or 32 bits");
+  }
   auto isInt8 = [](Type ty) {
     return ty.isInteger(8);
   };
@@ -6249,9 +6422,8 @@ LogicalResult RlsBufOp::verify() {
 // ---- TOp ----
 LogicalResult TGemvBiasOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())) ||
-        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType())))
+    if (failed(verifyGemvTileOperands(*this, getA(), getB(), getDst())) ||
+        failed(verifyMatBiasTile(*this, getBias(), getDst())))
       return failure();
     if (failed(verifyMatmulTypeTriple(*this, getElemTy(getA().getType()),
                                       getElemTy(getB().getType()),
@@ -6261,7 +6433,8 @@ LogicalResult TGemvBiasOp::verify() {
                             getDst().getType());
   };
   auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA2A3);
 }
 
 LogicalResult TGemvMxOp::verify() {
@@ -6273,8 +6446,7 @@ LogicalResult TGemvMxOp::verify() {
                                              getA().getType(), "a_scale", "a")) ||
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
                                              getB().getType(), "b_scale", "b")) ||
-        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType(),
+        failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)))
       return failure();
     if (failed(verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
@@ -6283,7 +6455,8 @@ LogicalResult TGemvMxOp::verify() {
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),
                             getDst().getType());
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA5);
 }
 
 LogicalResult TGemvMxAccOp::verify() {
@@ -6291,13 +6464,17 @@ LogicalResult TGemvMxAccOp::verify() {
     return emitOpError("tgemv.mx.acc is only supported on A5 targets");
   };
   auto verifyA5 = [&]() -> LogicalResult {
-    if (failed(verifyAccTileCommon(*this, getCIn().getType(), "c_in")) ||
+    LogicalResult accCheck = isVerifierTargetLinx(getOperation())
+                                 ? verifyLinxAccumulatorPair(*this, getCIn(),
+                                                             getDst())
+                                 : verifyAccTileCommon(
+                                       *this, getCIn().getType(), "c_in");
+    if (failed(accCheck) ||
         failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
                                              getA().getType(), "a_scale", "a")) ||
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
                                              getB().getType(), "b_scale", "b")) ||
-        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType(),
+        failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)))
       return failure();
     if (failed(verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
@@ -6311,7 +6488,8 @@ LogicalResult TGemvMxAccOp::verify() {
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),
                             getDst().getType());
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA5);
 }
 
 LogicalResult TGemvMxBiasOp::verify() {
@@ -6323,10 +6501,9 @@ LogicalResult TGemvMxBiasOp::verify() {
                                              getA().getType(), "a_scale", "a")) ||
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
                                              getB().getType(), "b_scale", "b")) ||
-        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType(),
+        failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)) ||
-        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType(),
+        failed(verifyMatBiasTile(*this, getBias(), getDst(),
                                  /*requireFloatBias=*/true)))
       return failure();
     if (failed(verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
@@ -6345,14 +6522,14 @@ LogicalResult TGemvMxBiasOp::verify() {
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),
                             getDst().getType());
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA5);
 }
 
 LogicalResult TMatmulBiasOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyMatTileOperands(*this, getA().getType(), getB().getType(),
-                                         getDst().getType())) ||
-        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType())))
+    if (failed(verifyMatTileOperands(*this, getA(), getB(), getDst())) ||
+        failed(verifyMatBiasTile(*this, getBias(), getDst())))
       return failure();
     if (failed(verifyMatmulTypeTriple(*this, getElemTy(getA().getType()),
                                       getElemTy(getB().getType()),
@@ -6362,13 +6539,16 @@ LogicalResult TMatmulBiasOp::verify() {
                             getDst().getType());
   };
   auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA2A3);
 }
 
 LogicalResult TMatmulMxOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
     if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")))
+        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+        failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
+                                     /*allowLowPrecisionInputs=*/true)))
       return failure();
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),
                             getDst().getType());
@@ -6379,14 +6559,22 @@ LogicalResult TMatmulMxOp::verify() {
     return verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
                                 getDst().getType(), "a", "b", "dst");
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA5);
 }
 
 LogicalResult TMatmulMxAccOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyAccTileCommon(*this, getCIn().getType(), "c_in")) ||
+    LogicalResult accCheck = isVerifierTargetLinx(getOperation())
+                                 ? verifyLinxAccumulatorPair(*this, getCIn(),
+                                                             getDst())
+                                 : verifyAccTileCommon(
+                                       *this, getCIn().getType(), "c_in");
+    if (failed(accCheck) ||
         failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")))
+        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+        failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
+                                     /*allowLowPrecisionInputs=*/true)))
       return failure();
     return success();
   };
@@ -6403,15 +6591,15 @@ LogicalResult TMatmulMxAccOp::verify() {
       return failure();
     return success();
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA5);
 }
 LogicalResult TMatmulMxBiasOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
     if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
         failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
-        failed(verifyMatTileOperands(*this, getA().getType(), getB().getType(),
-                                         getDst().getType())) ||
-        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType(),
+        failed(verifyMatTileOperands(*this, getA(), getB(), getDst())) ||
+        failed(verifyMatBiasTile(*this, getBias(), getDst(),
                               /*requireFloatBias=*/true)))
       return failure();
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),
@@ -6423,7 +6611,8 @@ LogicalResult TMatmulMxBiasOp::verify() {
     return verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
                                 getDst().getType(), "a", "b", "dst");
   };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA5);
 }
 // ---- TSetValOp ----
 LogicalResult TSetValOp::verify() {
@@ -9353,8 +9542,7 @@ mlir::LogicalResult mlir::pto::TPrintOp::verify() {
 
 LogicalResult mlir::pto::TMatmulOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyMatTileOperands(*this, getLhs().getType(), getRhs().getType(),
-                                     getDst().getType())))
+    if (failed(verifyMatTileOperands(*this, getLhs(), getRhs(), getDst())))
       return failure();
     if (failed(verifyMatmulTypeTriple(*this, getElemTy(getLhs().getType()),
                                       getElemTy(getRhs().getType()),
@@ -9364,13 +9552,13 @@ LogicalResult mlir::pto::TMatmulOp::verify() {
                             getDst().getType());
   };
   auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA2A3);
 }
 
 LogicalResult mlir::pto::TGemvOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyGemvTileOperands(*this, getLhs().getType(), getRhs().getType(),
-                                      getDst().getType())))
+    if (failed(verifyGemvTileOperands(*this, getLhs(), getRhs(), getDst())))
       return failure();
     if (failed(verifyMatmulTypeTriple(*this, getElemTy(getLhs().getType()),
                                       getElemTy(getRhs().getType()),
@@ -9380,15 +9568,24 @@ LogicalResult mlir::pto::TGemvOp::verify() {
                             getDst().getType());
   };
   auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5,
+                                verifyA2A3);
 }
 
 LogicalResult mlir::pto::TMatmulAccOp::verify() {
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
-  if (failed(verifyAccTileCommon(*this, getAccIn().getType(), "acc_in")) ||
-      failed(verifyMatTileOperands(*this, getLhs().getType(), getRhs().getType(),
-                                   getDst().getType())))
+  LogicalResult accCheck = isVerifierTargetLinx(getOperation())
+                               ? verifyLinxAccumulatorPair(*this, getAccIn(),
+                                                           getDst())
+                               : verifyAccTileCommon(
+                                     *this, getAccIn().getType(), "acc_in");
+  if (failed(accCheck) ||
+      failed(verifyMatTileOperands(*this, getLhs(), getRhs(), getDst())) ||
+      failed(verifyTileBufSameElemType(*this, getAccIn().getType(),
+                                       getDst().getType(), "acc_in", "dst")) ||
+      failed(verifyTileBufSameValidShape(*this, getAccIn().getType(),
+                                         getDst().getType(), "acc_in", "dst")))
     return failure();
   return success();
 }
@@ -9396,9 +9593,17 @@ LogicalResult mlir::pto::TMatmulAccOp::verify() {
 LogicalResult mlir::pto::TGemvAccOp::verify() {
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
-  if (failed(verifyAccTileCommon(*this, getAccIn().getType(), "acc_in")) ||
-      failed(verifyGemvTileOperands(*this, getLhs().getType(), getRhs().getType(),
-                                    getDst().getType())))
+  LogicalResult accCheck = isVerifierTargetLinx(getOperation())
+                               ? verifyLinxAccumulatorPair(*this, getAccIn(),
+                                                           getDst())
+                               : verifyAccTileCommon(
+                                     *this, getAccIn().getType(), "acc_in");
+  if (failed(accCheck) ||
+      failed(verifyGemvTileOperands(*this, getLhs(), getRhs(), getDst())) ||
+      failed(verifyTileBufSameElemType(*this, getAccIn().getType(),
+                                       getDst().getType(), "acc_in", "dst")) ||
+      failed(verifyTileBufSameValidShape(*this, getAccIn().getType(),
+                                         getDst().getType(), "acc_in", "dst")))
     return failure();
   return success();
 }

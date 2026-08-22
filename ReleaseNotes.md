@@ -1,5 +1,14 @@
 # PTOAS (PTO Assembler & Optimizer)
 
+## Unreleased: PTO ISA 0.58.3 alignment
+
+- Locks the exact PTO-SPEC v0.58.3 release identity and all four catalogs.
+- Adds Linx CUBE CELL layouts (`cube_m16`, `cube_m32`, `cube_n8`) and
+  fail-closed CUBE operand verification.
+- Updates TGEMV/TGEMVMX operand order and distinct ACC/BIAS TileOP calls.
+- Records TLOAD/TSTORE byte row-stride roles and verifies the 0.58.3
+  B.IOT/B.IOS/B.FPATR/DTYPE_NONE hard-break fields.
+
 ## 版本
 - 版本号：v0.1.0
 - 发布日期：2026-02-14

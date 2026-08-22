@@ -24,13 +24,13 @@ if [[ "$VERSION_OUTPUT" == *$'\n'* || "$VERSION_OUTPUT" == *$'\r'* ]]; then
 fi
 
 if [[ -n "$PTOAS_VERSION" ]]; then
-  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.1)"
+  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION} (PTO ISA 0.58.3)"
   if [[ "$VERSION_OUTPUT" != "$EXPECTED_VERSION_OUTPUT" ]]; then
     echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${VERSION_OUTPUT}'" >&2
     exit 1
   fi
 else
-  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_RELEASE_VERSION} (PTO ISA 0.58.1)"
+  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_RELEASE_VERSION} (PTO ISA 0.58.3)"
   if [[ "$VERSION_OUTPUT" != "$EXPECTED_VERSION_OUTPUT" ]]; then
     echo "Error: invalid packaged ptoas identity '${VERSION_OUTPUT}'" >&2
     exit 1

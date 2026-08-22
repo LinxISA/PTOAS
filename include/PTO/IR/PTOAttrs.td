@@ -547,7 +547,10 @@ def PTO_MaskPatternAttr : PTO_Attr<"MaskPattern", "mask_pattern"> {
 // ---------- BLayout / SLayout / PadValue (same style as AddressSpace via PTO_I32Enum) ----------
 def PTO_BLayout_Enum : PTO_I32Enum<"BLayout", "Base layout", [
   I32EnumAttrCase<"RowMajor", 0, "row_major">,
-  I32EnumAttrCase<"ColMajor", 1, "col_major">
+  I32EnumAttrCase<"ColMajor", 1, "col_major">,
+  I32EnumAttrCase<"CubeM16", 2, "cube_m16">,
+  I32EnumAttrCase<"CubeM32", 3, "cube_m32">,
+  I32EnumAttrCase<"CubeN8", 4, "cube_n8">
   ]>;
 
 def PTO_BLayoutAttr : PTO_Attr<"BLayout", "blayout"> {

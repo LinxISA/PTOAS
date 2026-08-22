@@ -3,7 +3,7 @@
 ## 1. 项目简介 (Introduction)
 
 **ptoas** (`ptoas`) 是一个基于 LinxISA 受控 **LLVM/MLIR**
-（ISA release `linxisa-v0.58.1`，LLVM commit
+（ISA release `linxisa-v0.58.3`，LLVM commit
 `1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`）构建的专用编译器工具链，
 专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
 
@@ -41,7 +41,7 @@ PTOAS/
 ## 3. 构建指南 (Build Instructions)
 
 ⚠️ **重要提示**：本项目严格依赖 LinxISA LLVM
-`1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`。`linxisa-v0.58.1`
+`1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`。`linxisa-v0.58.3`
 是 ISA release tag，不是 PTOAS 产品版本；不要替换为同名上游 LLVM tag。
 
 
@@ -221,7 +221,7 @@ ptoas --version
 ```
 
 `ptoas --version` 中的 `0.41` 是 PTOAS 产品版本；括号中的 `PTO ISA
-0.58.1` 是独立的 ISA contract 版本。`linx` target 对齐受管的
+0.58.3` 是独立的 ISA contract 版本。`linx` target 对齐受管的
 `Linx-TileOP-API`：生成代码包含
 `jcore/template_asm.hpp`，只接受 v0.58 公共 PTO 操作目录，并在 lowering
 前拒绝仅属于 A3/A5 方言面的操作。

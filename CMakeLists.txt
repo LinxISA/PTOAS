@@ -135,12 +135,12 @@ if(BUILD_TESTING)
   enable_testing()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
-    NAME pto_isa_v0581_contract_check
+    NAME pto_isa_v0583_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v058_pto_manifest.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(
-    NAME pto_isa_v0581_contract_check_negative
+    NAME pto_isa_v0583_contract_check_negative
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_v058_pto_manifest.py)
   add_test(

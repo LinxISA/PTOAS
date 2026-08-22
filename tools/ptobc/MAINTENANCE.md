@@ -23,12 +23,18 @@ python3 tools/ptobc/update_v0581_schema.py \
 The second command is the non-mutating CI audit. Historical 0.58.0 opcode
 assignments and their round-trip test remain release evidence.
 
+PTO ISA 0.58.3 keeps those operation opcodes and arities. Its PTO-BC v0 delta
+is the new `BLayout` enum values `cube_m16=2`, `cube_m32=3`, and `cube_n8=4`;
+the generic MLIR bytecode attribute codec preserves them without changing the
+opcode table. The Linx CUBE lit tests and the full PTO-BC round-trip gate cover
+their parse/print stability.
+
 ## Required gates
 Run (or rely on CI):
 - `ctest -R ptobc_stage9_e2e`
 - `ctest -R ptobc_to_ptoas_smoke`
 - `ctest -R ptobc_opcode_coverage_check`
-- `ctest -R ptobc_v0581_contract_encode`
+- `ctest -R ptobc_v0583_contract_encode`
 
 ## Notes
 - `ptobc_opcode_coverage_check` is a heuristic based on `mnemonic = "..."` occurrences.

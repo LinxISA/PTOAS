@@ -56,7 +56,7 @@ using namespace pto;
 #endif
 
 static void printPTOASVersion(llvm::raw_ostream &os) {
-  os << "ptoas " << PTOAS_RELEASE_VERSION << " (PTO ISA 0.58.1)\n";
+  os << "ptoas " << PTOAS_RELEASE_VERSION << " (PTO ISA 0.58.3)\n";
 }
 
 static LogicalResult reorderEmitCFunctions(ModuleOp module) {
@@ -263,7 +263,7 @@ static LogicalResult validateLinxOperationBoundary(ModuleOp module) {
     StringRef name = op->getName().getStringRef();
     op->emitError() << "'" << name
                     << "' op is dialect-only and not part of the active Linx "
-                       "PTO ISA v0.58.1 target";
+                       "PTO ISA v0.58.3 target";
   }
   return invalid.empty() ? success() : failure();
 }

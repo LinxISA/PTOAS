@@ -7,7 +7,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Check PTOAS PTO-op contracts against the LinxISA v0.58.1 PTO manifest.
+"""Check PTOAS PTO-op contracts against the LinxISA v0.58.3 PTO manifest.
 
 PTOAS is an MLIR PTO dialect-to-EmitC compiler, not a Linx scalar assembler.
 This check validates all 109 public operations' exact Linx operand roles/arity,
@@ -26,30 +26,30 @@ from pathlib import Path
 
 
 EXPECTED_LOCK = {
-    "release": "0.58.1",
-    "encoding_abi": "pto-isa-0.58.1-mode-function-v1",
-    "encoding_projection_sha256": "89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c",
-    "content_sha256": "693e8c0734b48598ac35ffe7fe6f2a01037788fba30ebe026895808d23139f2c",
-    "release_manifest_sha256": "acea87af67301173e6d1c6e04014a8dc6e2f658cd2992ed658ab2589cddc7841",
-    "source_commit": "c381465b2b8e457e162a4246ee58bb9a2c5b49fd",
-    "source_tree": "463a19db3d6ba70022f18bdbca0d4b2c6ed586e4",
+    "release": "0.58.3",
+    "encoding_abi": "pto-isa-0.58.3-mode-function-v1",
+    "encoding_projection_sha256": "8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",
+    "content_sha256": "f299fe3d256c5d071e57bb4aaa2be2de2e4a386ae090048df1f73ae92d392678",
+    "release_manifest_sha256": "ebe8c75e2f8159634e49a9bbf81aba7141e15b45e63b3a5606e758ed7bc22023",
+    "source_commit": "e599a3d36ebfad43362ff591ea5e128816c684c7",
+    "source_tree": "abb6899d2e664e378ac9c1b77062670daa4d31b4",
     "hardware_profile_path": "spec/hardware-conformance-profile.json",
-    "hardware_profile_id": "pto-hardware-numeric-0.58.1-ieee-v1",
-    "hardware_profile_sha256": "170deadacb174c933c287231fb67da1046d7989f84b6852bf353d68a495d1755",
-    "numeric_vectors_path": "spec/evidence/pto-isa-0581-hardware-numeric-vectors.json",
-    "numeric_vectors_sha256": "59c96cc2f45f8e8f3eebb8230338b21ec3a77a99e8fb5e1c7c7b391819a6aa81",
+    "hardware_profile_id": "pto-hardware-numeric-0.58.3-ieee-v1",
+    "hardware_profile_sha256": "117cd8e61f1e82001755cdb1ee98ef224fbd624ddf2adb8577c32d6acf833575",
+    "numeric_vectors_path": "spec/evidence/pto-isa-0583-hardware-numeric-vectors.json",
+    "numeric_vectors_sha256": "09d863e39e5fcd932353f4dc3bc5a7d2eed91ec9818c83886747aa69d28c3890",
     "command_forms_path": "spec/catalog/command-forms.json",
-    "command_forms_sha256": "300a3a57a8728e6c4770da6fff0202b372ec2830edb8dc978dc141d1c26424d0",
+    "command_forms_sha256": "fa3c8a6ca86d0fc273052b77d4f977ca69f3b8da6fe94bf6dd0dad44e0dd01e4",
     "command_forms_count": 74,
     "scalar_forms_path": "spec/catalog/scalar-forms.json",
-    "scalar_forms_sha256": "9f3841d568ffa73fcb43bf4fd365d3c4dba42d27acffa7e273e0f403c0f0c602",
-    "scalar_forms_count": 474,
+    "scalar_forms_sha256": "bdfcb4df19da4329c5ff0184b34daebf258d832992fa06fb3e0c34ca891c5923",
+    "scalar_forms_count": 466,
     "tile_operations_path": "spec/catalog/tile-operations.json",
-    "tile_operations_sha256": "f163dea8be281fd67173713d373b60f95a9c3c4e558adcdf8034cc213507a1a3",
+    "tile_operations_sha256": "07c5cf6f6e59916f3cbbecb0b83fe364704e1a79e1a43fa83f2997b6f7242207",
     "tile_operation_count": 109,
     "extension_encoding_reservations_path": "spec/catalog/extension-encoding-reservations.json",
-    "extension_encoding_reservations_sha256": "bdb82b839b98984779d9a1394f6b308f141052ef0b520e5bedb8e87dadd883d4",
-    "extension_encoding_reservations_count": 32,
+    "extension_encoding_reservations_sha256": "f1b424060d3aae9432934724ba66908eab0476dcc4880447eaaca44fd016be8b",
+    "extension_encoding_reservations_count": 40,
     "release_manifest_path": "spec/release-manifest.json",
     "source_repository": "https://github.com/PTO-ISA/pto-spec.git",
 }
@@ -79,6 +79,17 @@ DELETED_ACTIVE_NAMES = {
     "TSUBSC",
 }
 
+RETIRED_SCALAR_FORMS = {
+    "B.EQ",
+    "B.GE",
+    "B.GEU",
+    "B.LT",
+    "B.LTU",
+    "B.NE",
+    "B.NZ",
+    "B.Z",
+}
+
 def normalize(name: str) -> str:
     return name.replace(".", "").replace("_", "").upper()
 
@@ -88,7 +99,7 @@ def sha256(path: Path) -> str:
 
 
 def load_lock(ptoas_root: Path) -> dict:
-    lock_path = ptoas_root / "tools/pto_isa_v0_58_1_lock.json"
+    lock_path = ptoas_root / "tools/pto_isa_v0_58_3_lock.json"
     lock = json.loads(lock_path.read_text())
     errors = []
     for key in ("release", "encoding_abi", "encoding_projection_sha256", "content_sha256"):
@@ -152,7 +163,7 @@ def load_lock(ptoas_root: Path) -> dict:
             if entry.get(key) != EXPECTED_LOCK[expected_key]:
                 errors.append(f"catalogs.{catalog}.{key} mismatch")
     if errors:
-        raise SystemExit("unexpected PTO ISA 0.58.1 lock:\n  " + "\n  ".join(errors))
+        raise SystemExit("unexpected PTO ISA 0.58.3 lock:\n  " + "\n  ".join(errors))
     return lock
 
 
@@ -235,15 +246,135 @@ def validate_source_tree(source_root: Path, lock: dict) -> None:
     ):
         raise SystemExit("PTO ISA release manifest command form count mismatch")
 
+    validate_release_catalog_semantics(source_root)
+
+
+def _field(form: dict, name: str) -> dict:
+    for field in form.get("fields", []):
+        if field.get("name") == name:
+            return field
+    raise SystemExit(
+        f"PTO ISA 0.58.3 {form.get('mnemonic', '<unknown>')} missing {name} field"
+    )
+
+
+def _constraint_values(form: dict, name: str) -> list[int]:
+    for constraint in form.get("constraints", []):
+        if constraint.get("field") == name and constraint.get("operator") == "one-of":
+            return constraint.get("values", [])
+    raise SystemExit(
+        f"PTO ISA 0.58.3 {form.get('mnemonic', '<unknown>')} missing {name} constraint"
+    )
+
+
+def _require_contiguous_field(form: dict, name: str, lsb: int, width: int) -> None:
+    field = _field(form, name)
+    pieces = field.get("pieces", [])
+    expected = [{"instruction_lsb": lsb, "value_lsb": 0, "width": width}]
+    if field.get("width") != width or pieces != expected:
+        raise SystemExit(
+            f"PTO ISA 0.58.3 {form.get('mnemonic')} {name} encoding mismatch: "
+            f"expected lsb={lsb}/width={width}, got {field}"
+        )
+
+
+def validate_release_catalog_semantics(source_root: Path) -> None:
+    """Lock the 0.58.3 hard-break details PTOAS downstreams rely on."""
+
+    catalog_root = source_root / "spec/catalog"
+    command_forms = json.loads((catalog_root / "command-forms.json").read_text())["forms"]
+    scalar_forms = json.loads((catalog_root / "scalar-forms.json").read_text())["forms"]
+    reservations = json.loads(
+        (catalog_root / "extension-encoding-reservations.json").read_text()
+    )["reservations"]
+    tile_operations = json.loads(
+        (catalog_root / "tile-operations.json").read_text()
+    )["operations"]
+
+    active_scalar_names = {form["mnemonic"] for form in scalar_forms}
+    retired_active = sorted(RETIRED_SCALAR_FORMS & active_scalar_names)
+    if retired_active:
+        raise SystemExit(
+            "PTO ISA 0.58.3 retired scalar forms are still active: "
+            + ", ".join(retired_active)
+        )
+    reservation_names = {entry["mnemonic"] for entry in reservations}
+    missing_reservations = sorted(RETIRED_SCALAR_FORMS - reservation_names)
+    if missing_reservations:
+        raise SystemExit(
+            "PTO ISA 0.58.3 retired scalar reservations are missing: "
+            + ", ".join(missing_reservations)
+        )
+
+    by_mnemonic: dict[str, list[dict]] = {}
+    for form in command_forms:
+        by_mnemonic.setdefault(form["mnemonic"], []).append(form)
+
+    iot_forms = by_mnemonic.get("B.IOT", [])
+    if len(iot_forms) != 5:
+        raise SystemExit(f"PTO ISA 0.58.3 expected five B.IOT forms, got {len(iot_forms)}")
+    for form in iot_forms:
+        _require_contiguous_field(form, "PEMode", 9, 3)
+        if _constraint_values(form, "PEMode") != list(range(8)):
+            raise SystemExit("PTO ISA 0.58.3 B.IOT PEMode must accept codes 0..7")
+        if "SizeCode" in {field["name"] for field in form["fields"]}:
+            _require_contiguous_field(form, "SizeCode", 15, 4)
+            _require_contiguous_field(form, "DstTile", 7, 2)
+            if _constraint_values(form, "SizeCode") != list(range(1, 11)):
+                raise SystemExit("PTO ISA 0.58.3 B.IOT SizeCode must accept codes 1..10")
+
+    ios_forms = by_mnemonic.get("B.IOS", [])
+    if len(ios_forms) != 1:
+        raise SystemExit(f"PTO ISA 0.58.3 expected one B.IOS form, got {len(ios_forms)}")
+    ios = ios_forms[0]
+    _require_contiguous_field(ios, "SizeCode", 15, 4)
+    _require_contiguous_field(ios, "PEMode", 9, 3)
+    if _constraint_values(ios, "SizeCode") != list(range(13)):
+        raise SystemExit("PTO ISA 0.58.3 B.IOS SizeCode must accept codes 0..12")
+    if _constraint_values(ios, "PEMode") != list(range(8)):
+        raise SystemExit("PTO ISA 0.58.3 B.IOS PEMode must accept codes 0..7")
+
+    fpatr_forms = by_mnemonic.get("B.FPATR", [])
+    if len(fpatr_forms) != 1:
+        raise SystemExit(
+            f"PTO ISA 0.58.3 expected one B.FPATR form, got {len(fpatr_forms)}"
+        )
+    fpatr = fpatr_forms[0]
+    _require_contiguous_field(fpatr, "TransA", 7, 1)
+    _require_contiguous_field(fpatr, "TransB", 8, 1)
+    for name in ("TransA", "TransB"):
+        if _constraint_values(fpatr, name) != [0, 1]:
+            raise SystemExit(f"PTO ISA 0.58.3 B.FPATR {name} must be one bit")
+
+    datr_forms = by_mnemonic.get("B.DATR", [])
+    if len(datr_forms) != 1:
+        raise SystemExit(f"PTO ISA 0.58.3 expected one B.DATR form, got {len(datr_forms)}")
+    datr = datr_forms[0]
+    _require_contiguous_field(datr, "DataType", 20, 5)
+    if 31 not in _constraint_values(datr, "DataType"):
+        raise SystemExit("PTO ISA 0.58.3 B.DATR must admit DTYPE_NONE code 31")
+
+    tile_by_name = {operation["name"]: operation for operation in tile_operations}
+    for name in ("TLOAD", "TSTORE"):
+        operation = tile_by_name[name]
+        roles = {operand["field"]: operand["role"] for operand in operation["operands"]}
+        if roles.get("scalar0") != "row-stride-bytes":
+            raise SystemExit(f"PTO ISA 0.58.3 {name} scalar0 must be row-stride-bytes")
+        datr_contract = operation.get("datr_contract", {})
+        if datr_contract.get("allowed_nonzero_fields") != ["PadValueOrByteId", "Layout"]:
+            raise SystemExit(f"PTO ISA 0.58.3 {name} CUBE DATR contract mismatch")
+        if datr_contract.get("pad_union") != "pad-value":
+            raise SystemExit(f"PTO ISA 0.58.3 {name} CUBE padding contract mismatch")
+
 
 def load_manifest(linx_root: Path) -> dict[str, dict]:
     manifest_path = linx_root / "isa/v0.58/state/pto_ops.json"
     manifest = json.loads(manifest_path.read_text())
     if manifest["profile"] != "v0.58" or manifest["operation_count"] != 109:
-        raise SystemExit(f"unexpected v0.58.1 manifest header in {manifest_path}")
+        raise SystemExit(f"unexpected v0.58.3 manifest header in {manifest_path}")
     source_lock = manifest.get("source_lock")
     if source_lock != "isa/v0.58/pto-spec.lock.json":
-        raise SystemExit(f"unexpected v0.58.1 source_lock in {manifest_path}: {source_lock}")
+        raise SystemExit(f"unexpected v0.58.3 source_lock in {manifest_path}: {source_lock}")
     operations = manifest["operations"]
     names = [entry["name"] for entry in operations]
     if len(names) != len(set(names)):
@@ -285,7 +416,7 @@ def validate_linx_identity(linx_root: Path, lock: dict) -> None:
 
 
 def load_expected_contracts(ptoas_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
-    contract_path = ptoas_root / "tools/pto_isa_v0_58_1_operation_contracts.json"
+    contract_path = ptoas_root / "tools/pto_isa_v0_58_3_operation_contracts.json"
     contract_file = json.loads(contract_path.read_text())
     for field in (
         "release",
@@ -367,7 +498,7 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
         if token not in cli_text and token not in lowering_text:
             errors.append(f"missing Linx target implementation token: {token}")
     contracts = json.loads(
-        (ptoas_root / "tools/pto_isa_v0_58_1_operation_contracts.json").read_text()
+        (ptoas_root / "tools/pto_isa_v0_58_3_operation_contracts.json").read_text()
     )
     for mnemonic_name in contracts.get("linx_rejected_mnemonics", []):
         mnemonic = f'"pto.{mnemonic_name}"'
@@ -377,8 +508,22 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
         errors.append("GMOV lowering must match Linx-TileOP-API order (dst, peer_tid, src)")
     if 'ValueRange{dst, src0, src1, src2}' not in lowering_text:
         errors.append("TFMA lowering must match Linx-TileOP-API order (dst, src0, src1, src2)")
+    if 'ValueRange{dst, rhs, lhs}' not in lowering_text:
+        errors.append("TGEMV lowering must match TileOP order (dst, matrix-B, vector-A)")
+    if 'ValueRange{dst, accIn, rhs, lhs}' not in lowering_text:
+        errors.append(
+            "TGEMV_ACC lowering must match TileOP order (dst, acc, matrix-B, vector-A)"
+        )
+    for callee in (
+        '"TGEMV_MX_ACC"',
+        '"TGEMV_MX_BIAS"',
+        '"TMATMUL_MX_ACC"',
+        '"TMATMUL_MX_BIAS"',
+    ):
+        if callee not in lowering_text:
+            errors.append(f"missing distinct Linx CUBE TileOP lowering callee {callee}")
     if errors:
-        raise SystemExit("invalid PTOAS Linx v0.58.1 target surface:\n  " + "\n  ".join(errors))
+        raise SystemExit("invalid PTOAS Linx v0.58.3 target surface:\n  " + "\n  ".join(errors))
 
 
 def main() -> int:
@@ -407,7 +552,7 @@ def main() -> int:
     )
     boundary_error = bool(deleted_present)
     if deleted_present:
-        print("PTOAS has deleted PTO ISA 0.58.1 names active in the dialect:")
+        print("PTOAS has deleted PTO ISA 0.58.3 names active in the dialect:")
         for name in deleted_present:
             print(f"  - {name}")
 
@@ -442,7 +587,7 @@ def main() -> int:
                 f"expected PTOAS arguments {expected}, got {actual}"
             )
     if contract_errors:
-        print("PTOAS has incorrect PTO ISA 0.58.1 operation roles/arity:")
+        print("PTOAS has incorrect PTO ISA 0.58.3 operation roles/arity:")
         for error in contract_errors:
             print(f"  - {error}")
         return 1
@@ -463,7 +608,7 @@ def main() -> int:
 
     if args.linx_root is None:
         print(
-            "PTOAS v0.58.1 PTO lock/dialect check OK: all 109 public "
+            "PTOAS v0.58.3 PTO lock/dialect check OK: all 109 public "
             f"operation argument contracts and {len(expected_dialect_only)} explicit "
             "dialect-only contracts match; hardware numeric profile/vectors are "
             "identity metadata only (execution conformance not evaluated)"
@@ -476,7 +621,7 @@ def main() -> int:
     expected_names = set(expected_public)
     actual_names = set(manifest)
     if actual_names != expected_names:
-        print("LinxISA v0.58.1 public operation boundary mismatch:")
+        print("LinxISA v0.58.3 public operation boundary mismatch:")
         for name in sorted(expected_names - actual_names):
             print(f"  - missing manifest operation: {name}")
         for name in sorted(actual_names - expected_names):
@@ -503,13 +648,13 @@ def main() -> int:
                 f"{name}: expected ISA operands {expected}, got {actual}"
             )
     if role_errors:
-        print("LinxISA v0.58.1 manifest role/arity mismatch:")
+        print("LinxISA v0.58.3 manifest role/arity mismatch:")
         for error in role_errors:
             print(f"  - {error}")
         return 1
 
     print(
-        "PTOAS v0.58.1 PTO manifest contract check OK: "
+        "PTOAS v0.58.3 PTO manifest contract check OK: "
         f"all {len(manifest)} public operations match exact Linx roles/arity; "
         f"{len(expected_dialect_only)} dialect-only operations are explicitly bounded; "
         "hardware numeric profile/vectors are identity metadata only "

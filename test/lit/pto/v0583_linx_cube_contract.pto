@@ -1,0 +1,21 @@
+// RUN: ptoas --pto-arch=linx %s | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @matmul_and_gemv() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %v = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+    %d = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %g = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+
+    pto.tmatmul ins(%a, %b : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>) outs(%d : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    pto.tgemv ins(%v, %b : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>) outs(%g : !pto.tile_buf<loc=acc, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: Tile<TileType::Left, half, 16, 32, BLayout::CubeM16
+// CHECK: Tile<TileType::Right, bfloat16_t, 32, 16, BLayout::CubeN8
+// CHECK: Tile<TileType::Acc, float, 16, 16, BLayout::CubeM16
+// CHECK: TMATMUL([[D:v[0-9]+]], [[A:v[0-9]+]], [[B:v[0-9]+]]);
+// CHECK: TGEMV([[G:v[0-9]+]], [[B]], [[V:v[0-9]+]]);

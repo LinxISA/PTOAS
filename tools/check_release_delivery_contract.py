@@ -90,8 +90,8 @@ def validate_packaging_identity_mode(script: Path) -> None:
     """Exercise a packaging script with valid and adversarial identity outputs."""
 
     for output, product_version in (
-        ("ptoas 0.41 (PTO ISA 0.58.1)", "0.41"),
-        ("ptoas 0.41 (PTO ISA 0.58.1)", ""),
+        ("ptoas 0.41 (PTO ISA 0.58.3)", "0.41"),
+        ("ptoas 0.41 (PTO ISA 0.58.3)", ""),
     ):
         result = run_packaging_identity_mode(script, output, product_version)
         if result.returncode != 0:
@@ -101,10 +101,10 @@ def validate_packaging_identity_mode(script: Path) -> None:
 
     invalid_outputs = (
         "ptoas 0.41",
-        "ptoas 0.40 (PTO ISA 0.58.1)",
+        "ptoas 0.40 (PTO ISA 0.58.3)",
         "ptoas 0.41 (PTO ISA 0.58.0)",
-        "warning\nptoas 0.41 (PTO ISA 0.58.1)",
-        "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
+        "warning\nptoas 0.41 (PTO ISA 0.58.3)",
+        "ptoas 0.41 (PTO ISA 0.58.3)\nptoas 0.40",
     )
     for product_version in ("0.41", ""):
         for output in invalid_outputs:
@@ -143,8 +143,8 @@ def main() -> int:
         raise SystemExit("Docker README must document repository-root context")
 
     workflow = (root / ".github/workflows/isa_contract.yml").read_text()
-    if "linxisa-v0.58.1" not in workflow:
-        raise SystemExit("raw linxisa-v0.58.1 tag is not an ISA checker trigger")
+    if "linxisa-v0.58.3" not in workflow:
+        raise SystemExit("raw linxisa-v0.58.3 tag is not an ISA checker trigger")
     exact_command = "python3 tools/check_v058_pto_manifest.py --ptoas-root ."
     if exact_command not in workflow:
         raise SystemExit("ISA tag workflow does not run the exact contract checker")
@@ -161,7 +161,7 @@ def main() -> int:
 
     for name in ("build_wheel.yml", "build_wheel_mac.yml"):
         text = (root / ".github/workflows" / name).read_text()
-        if 'GITHUB_REF_NAME}" = "linxisa-v0.58.1"' in text:
+        if 'GITHUB_REF_NAME}" = "linxisa-v0.58.3"' in text:
             raise SystemExit(
                 f"{name} conflates ISA identity with PTOAS product version"
             )

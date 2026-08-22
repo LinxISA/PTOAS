@@ -80,22 +80,22 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
 
         invalid_outputs = (
             "ptoas 0.41",
-            "ptoas 0.40 (PTO ISA 0.58.1)",
+            "ptoas 0.40 (PTO ISA 0.58.3)",
             "ptoas 0.41 (PTO ISA 0.58.0)",
-            "warning\nptoas 0.41 (PTO ISA 0.58.1)",
-            "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
+            "warning\nptoas 0.41 (PTO ISA 0.58.3)",
+            "ptoas 0.41 (PTO ISA 0.58.3)\nptoas 0.40",
         )
         for script in scripts:
             with self.subTest(
                 script=script.name, output="valid", product_version="0.41"
             ):
                 self.assertEqual(
-                    run(script, "ptoas 0.41 (PTO ISA 0.58.1)", "0.41").returncode,
+                    run(script, "ptoas 0.41 (PTO ISA 0.58.3)", "0.41").returncode,
                     0,
                 )
             with self.subTest(script=script.name, output="valid", product_version=""):
                 self.assertEqual(
-                    run(script, "ptoas 0.41 (PTO ISA 0.58.1)").returncode, 0
+                    run(script, "ptoas 0.41 (PTO ISA 0.58.3)").returncode, 0
                 )
             for product_version in ("0.41", ""):
                 for invalid in invalid_outputs:

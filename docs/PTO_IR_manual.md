@@ -149,7 +149,7 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 | `cols` | `int64` | Physical column count |
 | `v_row` | `int64` or `?` | Valid row count |
 | `v_col` | `int64` or `?` | Valid column count |
-| `blayout` | `BLayout` mnemonic | Base layout (`row_major` / `col_major`) |
+| `blayout` | `BLayout` mnemonic | Base layout (`row_major`, `col_major`, or Linx CUBE `cube_m16` / `cube_m32` / `cube_n8`) |
 | `slayout` | `SLayout` mnemonic | Secondary layout (`none_box` / `row_major` / `col_major`) |
 | `fractal` | `int32` | Fractal size |
 | `pad` | `PadValue` mnemonic or integer literal | Padding policy/value selector (tests commonly use `pad=0`) |
@@ -266,7 +266,7 @@ Composite attribute and component enums for tile buffer configuration.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `bLayout` | `BLayoutAttr` | Base layout (RowMajor / ColMajor) |
+| `bLayout` | `BLayoutAttr` | Base layout (RowMajor / ColMajor / CubeM16 / CubeM32 / CubeN8) |
 | `sLayout` | `SLayoutAttr` | Secondary layout (NoneBox / RowMajor / ColMajor) |
 | `sFractalSize` | `IntegerAttr (i32)` | Secondary fractal size |
 | `pad` | `PadValueAttr` | Pad value policy |
@@ -279,6 +279,15 @@ Composite attribute and component enums for tile buffer configuration.
 |-------|-----|----------|
 | `RowMajor` | 0 | `row_major` |
 | `ColMajor` | 1 | `col_major` |
+| `CubeM16` | 2 | `cube_m16` |
+| `CubeM32` | 3 | `cube_m32` |
+| `CubeN8` | 4 | `cube_n8` |
+
+The three CUBE layouts are the PTO ISA 0.58.3 CELL layouts. Linx CUBE A and
+accumulator tiles use `cube_m16` or `cube_m32`; B tiles use `cube_n8`. They
+must use `none_box` secondary layout. Generated Linx TileOP types preserve
+these layouts and therefore select `B.DATR` CUBE conversion codes with
+`DTYPE_NONE` rather than treating encoded datatype zero as inheritance.
 
 **SLayout** (Secondary layout):
 
@@ -754,6 +763,10 @@ For each element (i, j) in the tile valid region:
 
 `partition_tensor_view` and `tile_buf` are both 2-D in this IR profile. `pto.tload` moves data from the global logical view into the local physical tile buffer.
 
+On Linx PTO ISA 0.58.3, the row stride carried by the lowered TLOAD scalar
+operand is measured in bytes. PTOAS derives that byte stride from the global
+tensor descriptor; it must not pass an element count to the TileOP API.
+
 **Arguments:**
 
 | Name | Type | Description |
@@ -797,7 +810,7 @@ pto.tload ins(%pv : !pto.partition_tensor_view<16x16xf16>)
 
 **Summary:** Probes and prefetches a rectangular global tile region with TLOAD-equivalent
 translation, permission, fault, restart, coherence, and ordering behavior. PTO
-ISA 0.58.1 makes this operation destination-free: it changes
+ISA 0.58.3 makes this operation destination-free: it changes
 target cache or data-movement state without publishing a tile result.
 
 **Semantics:**
@@ -810,7 +823,7 @@ The detailed cache placement is target-defined, but access faults are
 architectural rather than optional hint behavior. Unlike most generated PTO
 intrinsic wrappers, `TPREFETCH` does not add implicit wait-event synchronization.
 
-For Linx ISA 0.58.1, statically known `valid_cols`, `valid_rows`, and
+For Linx ISA 0.58.3, statically known `valid_cols`, `valid_rows`, and
 `physical_cols` values must be in `1..65535`. `physical_cols` must also be a
 power of two and at least `valid_cols`. Dynamic values are accepted by the IR;
 the producer must guarantee the same constraints at runtime before execution.
@@ -864,6 +877,10 @@ pto.tprefetch ins(%address, %stride, %cols, %rows, %physical_cols : i64, index, 
 ---
 
 ##### `pto.tstore` - Store Tile to Partition View
+
+On Linx PTO ISA 0.58.3, the row stride carried by the lowered TSTORE scalar
+operand is measured in bytes, matching TLOAD. CUBE CELL sources retain their
+explicit `cube_m16`, `cube_m32`, or `cube_n8` layout during lowering.
 
 **Summary:** Stores a 2-D tile buffer back to a 2-D partition view. Supports phase/atomic/relu/pre-quant controls that lower to the corresponding `TSTORE` template overload family.
 
@@ -1216,6 +1233,16 @@ For each (i, j):
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - Tile locations: `lhs.loc=left`, `rhs.loc=right`, `dst.loc=acc`.
   - Runtime: `m/k/n` (taken from `lhs valid row`, `lhs valid column`, `rhs valid column`) must be in `[1, 4095]`.
+- **Implementation checks (Linx PTO ISA 0.58.3)**
+  - `lhs.loc=left` with `blayout=cube_m16` or `cube_m32`.
+  - `rhs.loc=right` with `blayout=cube_n8`.
+  - `dst.loc=acc` with the same M16/M32 layout as `lhs`.
+  - All three operands use `slayout=none_box`; CUBE element widths are
+    limited to 4, 8, 16, or 32 bits.
+  - Mixed A/B input types are permitted when the selected TileOP overload
+    supports them. The generated call preserves architectural A/B order.
+  - `pto.tgemv*` keeps A/vector then B/matrix in PTO IR, but emits the public
+    TileOP order `TGEMV(dst, matrix_b, vector_a)`.
 - **Implementation checks (A5)**
   - The destination element type must be `i32` or `f32`.
     - If the destination element type is `i32`, the lhs and rhs element types must both be `i8`.

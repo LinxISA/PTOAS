@@ -3766,12 +3766,22 @@ static Value materializeTensorViewDataPointer(
 }
 
 static std::string tileBufBLayoutToken(pto::TileBufConfigAttr configAttr) {
-  std::string blTok = "BLayout::RowMajor";
-  if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
-    if (static_cast<int32_t>(blAttr.getValue()) == 1)
-      blTok = "BLayout::ColMajor";
+  auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout());
+  pto::BLayout layout =
+      blAttr ? blAttr.getValue() : pto::BLayout::RowMajor;
+  switch (layout) {
+  case pto::BLayout::RowMajor:
+    return "BLayout::RowMajor";
+  case pto::BLayout::ColMajor:
+    return "BLayout::ColMajor";
+  case pto::BLayout::CubeM16:
+    return "BLayout::CubeM16";
+  case pto::BLayout::CubeM32:
+    return "BLayout::CubeM32";
+  case pto::BLayout::CubeN8:
+    return "BLayout::CubeN8";
   }
-  return blTok;
+  llvm_unreachable("unknown PTO BLayout");
 }
 
 static std::string tileBufSLayoutToken(pto::TileBufConfigAttr configAttr) {
@@ -4022,8 +4032,28 @@ struct PointerCastConversion : public OpConversionPattern<pto::PointerCastOp> {
         if (auto attr = dyn_cast<BLayoutAttr>(config.getBLayout()))
             blVal = static_cast<int32_t>(attr.getValue());
  
-        if (blVal == 1) layoutParams = "BLayout::ColMajor";
-        blayout = blVal == 1 ? pto::BLayout::ColMajor : pto::BLayout::RowMajor;
+        switch (blVal) {
+        case 1:
+          layoutParams = "BLayout::ColMajor";
+          blayout = pto::BLayout::ColMajor;
+          break;
+        case 2:
+          layoutParams = "BLayout::CubeM16";
+          blayout = pto::BLayout::CubeM16;
+          break;
+        case 3:
+          layoutParams = "BLayout::CubeM32";
+          blayout = pto::BLayout::CubeM32;
+          break;
+        case 4:
+          layoutParams = "BLayout::CubeN8";
+          blayout = pto::BLayout::CubeN8;
+          break;
+        default:
+          layoutParams = "BLayout::RowMajor";
+          blayout = pto::BLayout::RowMajor;
+          break;
+        }
 
         int32_t slVal = 0;
         if (auto attr = dyn_cast<SLayoutAttr>(config.getSLayout()))
@@ -4485,15 +4515,16 @@ struct PTOTGemvToTGEMV : public OpConversionPattern<pto::TGemvOp> {
   LogicalResult matchAndRewrite(pto::TGemvOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     // 1. 获取操作数 (剥离 Cast)
-    Value lhs = peelUnrealized(adaptor.getLhs()); // A (Matrix)
-    Value rhs = peelUnrealized(adaptor.getRhs()); // B (Vector)
+    Value lhs = peelUnrealized(adaptor.getLhs()); // A (Vector)
+    Value rhs = peelUnrealized(adaptor.getRhs()); // B (Matrix)
     Value dst = peelUnrealized(adaptor.getDst()); // C (Result)
 
-    // 2. 直接生成函数调用 TGEMV(dst, lhs, rhs)
+    // TileOP API order is destination, matrix (architectural B), vector
+    // (architectural A). PTO IR keeps lhs=A/vector and rhs=B/matrix.
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TGEMV",
         ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, lhs, rhs});
+        ValueRange{dst, rhs, lhs});
 
     // 3. 处理 Op 替换/删除
     if (op->getNumResults() == 1) {
@@ -4518,15 +4549,15 @@ struct PTOTGemvAccToTGEMVACC : public OpConversionPattern<pto::TGemvAccOp> {
 
     // 1. 获取操作数
     Value accIn = peelUnrealized(adaptor.getAccIn()); // AccOld
-    Value lhs   = peelUnrealized(adaptor.getLhs());   // A (Matrix)
-    Value rhs   = peelUnrealized(adaptor.getRhs());   // B (Vector)
+    Value lhs   = peelUnrealized(adaptor.getLhs());   // A (Vector)
+    Value rhs   = peelUnrealized(adaptor.getRhs());   // B (Matrix)
     Value dst   = peelUnrealized(adaptor.getDst());   // AccNew
 
-    // 2. 直接生成函数调用 TGEMV_ACC(dst, accIn, lhs, rhs)
+    // Preserve the TileOP matrix-before-vector public API order.
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TGEMV_ACC",
         ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, accIn, lhs, rhs});
+        ValueRange{dst, accIn, rhs, lhs});
 
     // 3. 处理 Op 替换/删除
     if (op->getNumResults() == 1) {
@@ -9267,7 +9298,7 @@ struct PTOTGemvBiasToTGEMV_BIAS
     Value dst  = peelUnrealized(adaptor.getDst());
 
     replaceOrEraseWithOpaqueCall(op.getOperation(), "TGEMV_BIAS",
-                                {dst, a, b, bias}, rewriter);
+                                {dst, b, a, bias}, rewriter);
     return success();
   }
 };
@@ -9285,12 +9316,12 @@ struct PTOTGemvMXToTGEMV_MX
     Value dst     = peelUnrealized(adaptor.getDst());
 
     replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, a, aScale, b, bScale}, rewriter);
+                                             {dst, b, bScale, a, aScale}, rewriter);
     return success();
   }
 };
 
-struct PTOTGemvMXAccToTGEMV_MX
+struct PTOTGemvMXAccToTGEMV_MX_ACC
     : public OpConversionPattern<pto::TGemvMxAccOp> {
   using OpConversionPattern<pto::TGemvMxAccOp>::OpConversionPattern;
 
@@ -9303,13 +9334,14 @@ struct PTOTGemvMXAccToTGEMV_MX
     Value bScale  = peelUnrealized(adaptor.getBScale());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, cIn, a, aScale, b, bScale}, rewriter);
+    replaceOrEraseWithOpaqueCallAndReturnDst(
+        op.getOperation(), dst, "TGEMV_MX_ACC",
+        {dst, cIn, b, bScale, a, aScale}, rewriter);
     return success();
   }
 };
 
-struct PTOTGemvMXBiasToTGEMV_MX
+struct PTOTGemvMXBiasToTGEMV_MX_BIAS
     : public OpConversionPattern<pto::TGemvMxBiasOp> {
   using OpConversionPattern<pto::TGemvMxBiasOp>::OpConversionPattern;
 
@@ -9322,8 +9354,9 @@ struct PTOTGemvMXBiasToTGEMV_MX
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, a, aScale, b, bScale, bias}, rewriter);
+    replaceOrEraseWithOpaqueCallAndReturnDst(
+        op.getOperation(), dst, "TGEMV_MX_BIAS",
+        {dst, b, bScale, a, aScale, bias}, rewriter);
     return success();
   }
 };
@@ -9357,7 +9390,7 @@ struct PTOTMatmulMXToTMATMUL_MX
     Value bScale  = peelUnrealized(adaptor.getBScale());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC",
                                 {dst, a, aScale, b, bScale}, rewriter);
     return success();
   }
@@ -9376,7 +9409,7 @@ struct PTOTMatmulMXAccToTMATMUL_MX_ACC
     Value bScale  = peelUnrealized(adaptor.getBScale());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS",
                                 {dst, cIn, a, aScale, b, bScale}, rewriter);
     return success();
   }
@@ -10345,11 +10378,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       if (rows == ShapedType::kDynamic || cols == ShapedType::kDynamic)
         return failure();
 
-      std::string blTok = "BLayout::RowMajor";
-      if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
-        if (static_cast<int32_t>(blAttr.getValue()) == 1)
-          blTok = "BLayout::ColMajor";
-      }
+      std::string blTok = tileBufBLayoutToken(configAttr);
       pto::BLayout blayout = getTileBufBLayoutValue(configAttr);
 
       if (isSubView) {
@@ -11987,8 +12016,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
     PTOTMatmulMXBiasToTMATMUL_MX_BIAS,
     PTOTGemvBiasToTGEMV_BIAS,
     PTOTGemvMXToTGEMV_MX,
-    PTOTGemvMXAccToTGEMV_MX,
-    PTOTGemvMXBiasToTGEMV_MX,
+    PTOTGemvMXAccToTGEMV_MX_ACC,
+    PTOTGemvMXBiasToTGEMV_MX_BIAS,
     PTOBarrierToEmitC
   >(typeConverter, ctx);
 

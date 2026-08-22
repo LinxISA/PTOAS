@@ -232,7 +232,7 @@ jobs:
             include/PTO/IR/PTOOps.td \
             tools/ptobc/generated/ptobc_opcodes_v0.h
           ctest --test-dir build --output-on-failure \
-            -R 'pto_isa_v0581_contract_check|ptobc_v0580_ops_v0_encode|ptobc_v0581_contract_encode|ptobc_tpartarg_v0_encode'
+            -R 'pto_isa_v0583_contract_check|ptobc_v0580_ops_v0_encode|ptobc_v0583_contract_encode|ptobc_tpartarg_v0_encode'
 
       - name: Run sample tests (py -> pto -> cpp)
         shell: bash

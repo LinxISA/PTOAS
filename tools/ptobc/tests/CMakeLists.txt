@@ -44,12 +44,12 @@ add_test(NAME ptobc_v0580_ops_v0_encode
     bash ${CMAKE_CURRENT_LIST_DIR}/v0580_ops_v0_encode.sh
 )
 
-add_test(NAME ptobc_v0581_contract_encode
+add_test(NAME ptobc_v0583_contract_encode
   COMMAND ${CMAKE_COMMAND} -E env
     PTOBC_BIN=$<TARGET_FILE:ptobc>
     TEST_INPUT_DIR=${CMAKE_SOURCE_DIR}/test/lit/pto
-    OUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/ptobc_v0581_contract_out
-    bash ${CMAKE_CURRENT_LIST_DIR}/ptobc_v0581_contract_encode.sh
+    OUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/ptobc_v0583_contract_out
+    bash ${CMAKE_CURRENT_LIST_DIR}/ptobc_v0583_contract_encode.sh
 )
 
 add_test(NAME ptobc_trowexpandsub_v0_encode

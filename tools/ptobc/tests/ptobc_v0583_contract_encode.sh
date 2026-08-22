@@ -12,15 +12,26 @@ set -euo pipefail
 : "${PTOBC_BIN:?PTOBC_BIN not set}"
 : "${TEST_INPUT_DIR:?TEST_INPUT_DIR not set}"
 
-OUT_DIR=${OUT_DIR:-"${PWD}/ptobc_v0581_contract_out"}
+OUT_DIR=${OUT_DIR:-"${PWD}/ptobc_v0583_contract_out"}
 mkdir -p "${OUT_DIR}"
 
-input="${TEST_INPUT_DIR}/v0581_linx_contract.pto"
-bytecode="${OUT_DIR}/v0581_linx_contract.ptobc"
-decoded="${OUT_DIR}/v0581_linx_contract.roundtrip.pto"
+input="${TEST_INPUT_DIR}/v0583_linx_contract.pto"
+bytecode="${OUT_DIR}/v0583_linx_contract.ptobc"
+decoded="${OUT_DIR}/v0583_linx_contract.roundtrip.pto"
 "${PTOBC_BIN}" encode "${input}" -o "${bytecode}"
 "${PTOBC_BIN}" decode "${bytecode}" -o "${decoded}"
 
 grep -F "pto.timg2col ins(" "${decoded}" >/dev/null
 grep -F "pto.tinsert ins(" "${decoded}" >/dev/null
 grep -F "pto.tprefetch ins(" "${decoded}" >/dev/null
+
+cube_input="${TEST_INPUT_DIR}/v0583_linx_cube_contract.pto"
+cube_bytecode="${OUT_DIR}/v0583_linx_cube_contract.ptobc"
+cube_decoded="${OUT_DIR}/v0583_linx_cube_contract.roundtrip.pto"
+"${PTOBC_BIN}" encode "${cube_input}" -o "${cube_bytecode}"
+"${PTOBC_BIN}" decode "${cube_bytecode}" -o "${cube_decoded}"
+
+grep -F "blayout=cube_m16" "${cube_decoded}" >/dev/null
+grep -F "blayout=cube_n8" "${cube_decoded}" >/dev/null
+grep -F "pto.tmatmul ins(" "${cube_decoded}" >/dev/null
+grep -F "pto.tgemv ins(" "${cube_decoded}" >/dev/null

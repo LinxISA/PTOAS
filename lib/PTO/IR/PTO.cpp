@@ -2226,9 +2226,17 @@ LogicalResult AllocTileOp::verify() {
   auto ty = getResult().getType(); // TileBufType
 
   Type elemTy = ty.getElementType();
-  if (isPTOLowPrecisionType(elemTy))
-    return emitOpError() << "result dtype " << elemTy
-                         << " is not supported by pto.alloc_tile yet";
+  if (isPTOLowPrecisionType(elemTy)) {
+    int32_t layout = ty.getBLayoutValueI32();
+    bool isLinxCubeLayout =
+        isVerifierTargetLinx(getOperation()) &&
+        (layout == static_cast<int32_t>(pto::BLayout::CubeM16) ||
+         layout == static_cast<int32_t>(pto::BLayout::CubeM32) ||
+         layout == static_cast<int32_t>(pto::BLayout::CubeN8));
+    if (!isLinxCubeLayout)
+      return emitOpError() << "result dtype " << elemTy
+                           << " is not supported by pto.alloc_tile yet";
+  }
 
   if (failed(verifyTileBufLayoutConstraints(*this, ty, "result")))
     return failure();

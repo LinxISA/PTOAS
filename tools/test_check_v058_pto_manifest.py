@@ -9,6 +9,7 @@
 
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -74,6 +75,33 @@ class LinxIdentityTest(unittest.TestCase):
     def test_linx_target_surface_has_0583_cube_call_contracts(self):
         ptoas_root = Path(__file__).resolve().parents[1]
         CHECKER.validate_linx_target_surface(ptoas_root)
+
+    def test_misrouted_matmul_mx_variant_fails_closed(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        lowering = (ptoas_root / "lib/PTO/Transforms/PTOToEmitC.cpp").read_text()
+        lowering, count = re.subn(
+            r'(struct\s+PTOTMatmulMXToTMATMUL_MX\b.*?\n\s*'
+            r'replaceOrEraseWithOpaqueCall\([^\n]*?)"TMATMUL_MX"',
+            r'\1"TMATMUL_MX_ACC"',
+            lowering,
+            count=1,
+            flags=re.DOTALL,
+        )
+        self.assertEqual(count, 1)
+        with tempfile.TemporaryDirectory() as directory:
+            fake_root = Path(directory)
+            for relative in (
+                "tools/ptoas/ptoas.cpp",
+                "tools/pto_isa_v0_58_3_operation_contracts.json",
+            ):
+                destination = fake_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text((ptoas_root / relative).read_text())
+            destination = fake_root / "lib/PTO/Transforms/PTOToEmitC.cpp"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(lowering)
+            with self.assertRaisesRegex(SystemExit, "PTOTMatmulMXToTMATMUL_MX"):
+                CHECKER.validate_linx_target_surface(fake_root)
 
 
 if __name__ == "__main__":

@@ -9390,7 +9390,7 @@ struct PTOTMatmulMXToTMATMUL_MX
     Value bScale  = peelUnrealized(adaptor.getBScale());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
                                 {dst, a, aScale, b, bScale}, rewriter);
     return success();
   }
@@ -9409,7 +9409,7 @@ struct PTOTMatmulMXAccToTMATMUL_MX_ACC
     Value bScale  = peelUnrealized(adaptor.getBScale());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC",
                                 {dst, cIn, a, aScale, b, bScale}, rewriter);
     return success();
   }
@@ -9428,7 +9428,7 @@ struct PTOTMatmulMXBiasToTMATMUL_MX_BIAS
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS",
                                 {dst, a, aScale, b, bScale, bias}, rewriter);
     return success();
   }

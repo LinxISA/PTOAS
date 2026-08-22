@@ -514,14 +514,43 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
         errors.append(
             "TGEMV_ACC lowering must match TileOP order (dst, acc, matrix-B, vector-A)"
         )
-    for callee in (
-        '"TGEMV_MX_ACC"',
-        '"TGEMV_MX_BIAS"',
-        '"TMATMUL_MX_ACC"',
-        '"TMATMUL_MX_BIAS"',
-    ):
-        if callee not in lowering_text:
-            errors.append(f"missing distinct Linx CUBE TileOP lowering callee {callee}")
+    cube_variant_mappings = {
+        "PTOTGemvMXToTGEMV_MX": ("TGEMV_MX", "{dst,b,bScale,a,aScale}"),
+        "PTOTGemvMXAccToTGEMV_MX_ACC": (
+            "TGEMV_MX_ACC",
+            "{dst,cIn,b,bScale,a,aScale}",
+        ),
+        "PTOTGemvMXBiasToTGEMV_MX_BIAS": (
+            "TGEMV_MX_BIAS",
+            "{dst,b,bScale,a,aScale,bias}",
+        ),
+        "PTOTMatmulMXToTMATMUL_MX": (
+            "TMATMUL_MX",
+            "{dst,a,aScale,b,bScale}",
+        ),
+        "PTOTMatmulMXAccToTMATMUL_MX_ACC": (
+            "TMATMUL_MX_ACC",
+            "{dst,cIn,a,aScale,b,bScale}",
+        ),
+        "PTOTMatmulMXBiasToTMATMUL_MX_BIAS": (
+            "TMATMUL_MX_BIAS",
+            "{dst,a,aScale,b,bScale,bias}",
+        ),
+    }
+    for class_name, (callee, operands) in cube_variant_mappings.items():
+        match = re.search(
+            rf"struct\s+{class_name}\b(?P<body>.*?)\n\}};",
+            lowering_text,
+            re.DOTALL,
+        )
+        if match is None:
+            errors.append(f"missing Linx CUBE lowering class {class_name}")
+            continue
+        compact_body = re.sub(r"\s+", "", match.group("body"))
+        if f'"{callee}"' not in compact_body or operands not in compact_body:
+            errors.append(
+                f"{class_name} must lower only to {callee}{operands}"
+            )
     if errors:
         raise SystemExit("invalid PTOAS Linx v0.58.3 target surface:\n  " + "\n  ".join(errors))
 

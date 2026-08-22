@@ -173,6 +173,16 @@ if(BUILD_TESTING)
     NAME emitc_lvalue_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)
+  set(PTOAS_LINX_TILEOP_ROOT "" CACHE PATH
+      "Merged Linx TileOP checkout used for generated MX C++ compile gates")
+  if(PTOAS_LINX_TILEOP_ROOT)
+    add_test(
+      NAME linx_mx_tileop_compile_check
+      COMMAND ${CMAKE_COMMAND} -E env
+              PTOAS_BIN=$<TARGET_FILE:pto-opt>
+              TILEOP_ROOT=${PTOAS_LINX_TILEOP_ROOT}
+              bash ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_linx_mx_tileop_compile.sh)
+  endif()
   add_subdirectory(tools/ptobc/tests)
 endif()
 

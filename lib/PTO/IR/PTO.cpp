@@ -3395,6 +3395,40 @@ static LogicalResult verifyScaleTileValueMatchesOperand(
   return success();
 }
 
+static bool linxMxInputNeedsScale(Type type) {
+  return pto::isPTOFloat8Type(type) || pto::isPTOFloat4PackedType(type);
+}
+
+static LogicalResult verifyMxScaleSide(Operation *op, Value operand,
+                                       Value scale, StringRef scaleName,
+                                       StringRef operandName) {
+  if (!isVerifierTargetLinx(op)) {
+    if (!scale)
+      return op->emitOpError() << "expects " << scaleName
+                               << " for the A5 MX form";
+    return verifyScaleTileValueMatchesOperand(op, scale, operand, scaleName,
+                                               operandName);
+  }
+
+  Type elementType = getElemTy(operand.getType());
+  bool isUnscaled = elementType.isF16() || elementType.isBF16();
+  bool needsScale = linxMxInputNeedsScale(elementType);
+  if (!isUnscaled && !needsScale)
+    return op->emitOpError() << "expects Linx MX " << operandName
+                             << " dtype to be FP16, BF16, or a compact type";
+  if (needsScale && !scale)
+    return op->emitOpError() << "expects Linx MX " << scaleName
+                             << " because " << operandName
+                             << " uses a compact dtype";
+  if (isUnscaled && scale)
+    return op->emitOpError() << "expects Linx MX " << scaleName
+                             << " to be absent for FP16/BF16 " << operandName;
+  if (!scale)
+    return success();
+  return verifyScaleTileValueMatchesOperand(op, scale, operand, scaleName,
+                                             operandName);
+}
+
 static LogicalResult verifyPartialValidPattern(Operation *op, Type src0Ty,
                                                Type src1Ty, Type dstTy) {
   auto src0Valid = getValidShapeVec(src0Ty);
@@ -5610,10 +5644,19 @@ static LogicalResult verifyA5MxTypeTriple(Operation *op, Type lhsTy, Type rhsTy,
   Type rhsElem = getElemTy(rhsTy);
   Type dstElem = getElemTy(dstTy);
 
-  if (!isA5MxInputType(lhsElem) || !isA5MxInputType(rhsElem))
+  if (isVerifierTargetLinx(op)) {
+    auto isLinxMxInputType = [](Type type) {
+      return type.isF16() || type.isBF16() || linxMxInputNeedsScale(type);
+    };
+    if (!isLinxMxInputType(lhsElem) || !isLinxMxInputType(rhsElem))
+      return op->emitOpError()
+             << "expects Linx MX operands " << lhsName << " and " << rhsName
+             << " to use FP16, BF16, or compact element types";
+  } else if (!isA5MxInputType(lhsElem) || !isA5MxInputType(rhsElem)) {
     return op->emitOpError()
            << "expects A5 mx operands " << lhsName << " and " << rhsName
            << " to use fp8 element types";
+  }
 
   if (!dstElem.isF32())
     return op->emitOpError()
@@ -6545,10 +6588,8 @@ LogicalResult TGemvMxOp::verify() {
     return emitOpError("tgemv.mx is only supported on A5 targets");
   };
   auto verifyA5 = [&]() -> LogicalResult {
-    if (failed(verifyScaleTileValueMatchesOperand(*this, getAScale(),
-                                                  getA(), "a_scale", "a")) ||
-        failed(verifyScaleTileValueMatchesOperand(*this, getBScale(),
-                                                  getB(), "b_scale", "b")) ||
+    if (failed(verifyMxScaleSide(*this, getA(), getAScale(), "a_scale", "a")) ||
+        failed(verifyMxScaleSide(*this, getB(), getBScale(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6573,10 +6614,8 @@ LogicalResult TGemvMxAccOp::verify() {
                                  : verifyAccTileCommon(
                                        *this, getCIn().getType(), "c_in");
     if (failed(accCheck) ||
-        failed(verifyScaleTileValueMatchesOperand(*this, getAScale(),
-                                                  getA(), "a_scale", "a")) ||
-        failed(verifyScaleTileValueMatchesOperand(*this, getBScale(),
-                                                  getB(), "b_scale", "b")) ||
+        failed(verifyMxScaleSide(*this, getA(), getAScale(), "a_scale", "a")) ||
+        failed(verifyMxScaleSide(*this, getB(), getBScale(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6600,10 +6639,8 @@ LogicalResult TGemvMxBiasOp::verify() {
     return emitOpError("tgemv.mx.bias is only supported on A5 targets");
   };
   auto verifyA5 = [&]() -> LogicalResult {
-    if (failed(verifyScaleTileValueMatchesOperand(*this, getAScale(),
-                                                  getA(), "a_scale", "a")) ||
-        failed(verifyScaleTileValueMatchesOperand(*this, getBScale(),
-                                                  getB(), "b_scale", "b")) ||
+    if (failed(verifyMxScaleSide(*this, getA(), getAScale(), "a_scale", "a")) ||
+        failed(verifyMxScaleSide(*this, getB(), getBScale(), "b_scale", "b")) ||
         failed(verifyGemvTileOperands(*this, getA(), getB(), getDst(),
                                       /*allowLowPrecisionInputs=*/true)) ||
         failed(verifyMatBiasTile(*this, getBias(), getDst(),
@@ -6648,10 +6685,8 @@ LogicalResult TMatmulBiasOp::verify() {
 
 LogicalResult TMatmulMxOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyScaleTileValueMatchesOperand(
-            *this, getAScale(), getA(), "a_scale", "a")) ||
-        failed(verifyScaleTileValueMatchesOperand(
-            *this, getBScale(), getB(), "b_scale", "b")) ||
+    if (failed(verifyMxScaleSide(*this, getA(), getAScale(), "a_scale", "a")) ||
+        failed(verifyMxScaleSide(*this, getB(), getBScale(), "b_scale", "b")) ||
         failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
                                      /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6676,10 +6711,8 @@ LogicalResult TMatmulMxAccOp::verify() {
                                  : verifyAccTileCommon(
                                        *this, getCIn().getType(), "c_in");
     if (failed(accCheck) ||
-        failed(verifyScaleTileValueMatchesOperand(
-            *this, getAScale(), getA(), "a_scale", "a")) ||
-        failed(verifyScaleTileValueMatchesOperand(
-            *this, getBScale(), getB(), "b_scale", "b")) ||
+        failed(verifyMxScaleSide(*this, getA(), getAScale(), "a_scale", "a")) ||
+        failed(verifyMxScaleSide(*this, getB(), getBScale(), "b_scale", "b")) ||
         failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
                                      /*allowLowPrecisionInputs=*/true)))
       return failure();
@@ -6703,11 +6736,10 @@ LogicalResult TMatmulMxAccOp::verify() {
 }
 LogicalResult TMatmulMxBiasOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyScaleTileValueMatchesOperand(
-            *this, getAScale(), getA(), "a_scale", "a")) ||
-        failed(verifyScaleTileValueMatchesOperand(
-            *this, getBScale(), getB(), "b_scale", "b")) ||
-        failed(verifyMatTileOperands(*this, getA(), getB(), getDst())) ||
+    if (failed(verifyMxScaleSide(*this, getA(), getAScale(), "a_scale", "a")) ||
+        failed(verifyMxScaleSide(*this, getB(), getBScale(), "b_scale", "b")) ||
+        failed(verifyMatTileOperands(*this, getA(), getB(), getDst(),
+                                     /*allowLowPrecisionInputs=*/true)) ||
         failed(verifyMatBiasTile(*this, getBias(), getDst(),
                               /*requireFloatBias=*/true)))
       return failure();
@@ -10541,6 +10573,13 @@ static void addEffect(
   if (operand)
     effects.emplace_back(effect, operand, SideEffects::DefaultResource::get());
 }
+
+static void addEffect(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects,
+    MutableOperandRange operands, MemoryEffects::Effect *effect) {
+  for (OpOperand &operand : operands)
+    addEffect(effects, &operand, effect);
+}
  
 // 针对结果 (Result) 的重载
 static void addEffect(
@@ -11235,9 +11274,9 @@ void TGemvBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryE
 // Read: a, a_scale, b, b_scale, Write: dst
 void TGemvMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getAScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
@@ -11246,9 +11285,9 @@ void TGemvMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEff
 void TGemvMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getAScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
@@ -11256,9 +11295,9 @@ void TGemvMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<Memory
 // Read: a, a_scale, b, b_scale, bias, Write: dst
 void TGemvMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getAScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
@@ -11266,9 +11305,9 @@ void TGemvMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<Memor
 // === TMatmulOp ===
 void TMatmulMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getAScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
@@ -11277,9 +11316,9 @@ void TMatmulMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryE
 void TMatmulMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getAScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
@@ -11287,9 +11326,9 @@ void TMatmulMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<Memo
 // Read: a, b, bias, Write: dst
 void TMatmulMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getAScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, getBScaleMutable(), MemoryEffects::Read::get());
   // 这里的 bias 是必选的 AnyType:$bias，所以是 Singleton
   addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());

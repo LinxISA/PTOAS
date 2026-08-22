@@ -9322,13 +9322,19 @@ struct PTOTGemvMXToTGEMV_MX
   LogicalResult matchAndRewrite(pto::TGemvMxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
+    SmallVector<Value, 5> operands{dst, b};
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(a);
+    if (aScale)
+      operands.push_back(aScale);
     replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, b, bScale, a, aScale}, rewriter);
+                                             operands, rewriter);
     return success();
   }
 };
@@ -9341,14 +9347,19 @@ struct PTOTGemvMXAccToTGEMV_MX_ACC
                                 ConversionPatternRewriter &rewriter) const override {
     Value cIn     = peelUnrealized(adaptor.getCIn());
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
+    SmallVector<Value, 6> operands{dst, cIn, b};
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(a);
+    if (aScale)
+      operands.push_back(aScale);
     replaceOrEraseWithOpaqueCallAndReturnDst(
-        op.getOperation(), dst, "TGEMV_MX_ACC",
-        {dst, cIn, b, bScale, a, aScale}, rewriter);
+        op.getOperation(), dst, "TGEMV_MX_ACC", operands, rewriter);
     return success();
   }
 };
@@ -9360,15 +9371,21 @@ struct PTOTGemvMXBiasToTGEMV_MX_BIAS
   LogicalResult matchAndRewrite(pto::TGemvMxBiasOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
+    SmallVector<Value, 6> operands{dst, b};
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(a);
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(bias);
     replaceOrEraseWithOpaqueCallAndReturnDst(
-        op.getOperation(), dst, "TGEMV_MX_BIAS",
-        {dst, b, bScale, a, aScale, bias}, rewriter);
+        op.getOperation(), dst, "TGEMV_MX_BIAS", operands, rewriter);
     return success();
   }
 };
@@ -9397,13 +9414,19 @@ struct PTOTMatmulMXToTMATMUL_MX
   LogicalResult matchAndRewrite(pto::TMatmulMxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
-                                {dst, a, aScale, b, bScale}, rewriter);
+    SmallVector<Value, 5> operands{dst, a};
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(b);
+    if (bScale)
+      operands.push_back(bScale);
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX", operands,
+                                 rewriter);
     return success();
   }
 };
@@ -9416,13 +9439,19 @@ struct PTOTMatmulMXAccToTMATMUL_MX_ACC
                                 ConversionPatternRewriter &rewriter) const override {
     Value cIn     = peelUnrealized(adaptor.getCIn());
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC",
-                                {dst, cIn, a, aScale, b, bScale}, rewriter);
+    SmallVector<Value, 6> operands{dst, cIn, a};
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(b);
+    if (bScale)
+      operands.push_back(bScale);
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC", operands,
+                                 rewriter);
     return success();
   }
 };
@@ -9434,14 +9463,21 @@ struct PTOTMatmulMXBiasToTMATMUL_MX_BIAS
   LogicalResult matchAndRewrite(pto::TMatmulMxBiasOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS",
-                                {dst, a, aScale, b, bScale, bias}, rewriter);
+    SmallVector<Value, 6> operands{dst, a};
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(b);
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(bias);
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS", operands,
+                                 rewriter);
     return success();
   }
 };

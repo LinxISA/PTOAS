@@ -1,0 +1,60 @@
+// RUN: awk '/^\/\/--- missing-a/{f=1;next}/^\/\/---/{f=0}f' %s > %t.missing-a.pto
+// RUN: awk '/^\/\/--- missing-b/{f=1;next}/^\/\/---/{f=0}f' %s > %t.missing-b.pto
+// RUN: awk '/^\/\/--- wrong-side/{f=1;next}/^\/\/---/{f=0}f' %s > %t.wrong-side.pto
+// RUN: awk '/^\/\/--- wrong-type/{f=1;next}/^\/\/---/{f=0}f' %s > %t.wrong-type.pto
+// RUN: not ptoas --pto-arch=linx %t.missing-a.pto 2>&1 | FileCheck %s --check-prefix=MISSING-A
+// RUN: not ptoas --pto-arch=linx %t.missing-b.pto 2>&1 | FileCheck %s --check-prefix=MISSING-B
+// RUN: not ptoas --pto-arch=linx %t.wrong-side.pto 2>&1 | FileCheck %s --check-prefix=WRONG-SIDE
+// RUN: not ptoas --pto-arch=linx %t.wrong-type.pto 2>&1 | FileCheck %s --check-prefix=WRONG-TYPE
+
+//--- missing-a.pto
+module attributes {pto.target_arch = "linx"} {
+  func.func @missing_a() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+    %d = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    pto.tmatmul.mx ins(%a, %b : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>) outs(%d : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+// MISSING-A: error: 'pto.tmatmul.mx' op expects Linx MX a_scale because a uses a compact dtype
+
+//--- missing-b.pto
+module attributes {pto.target_arch = "linx"} {
+  func.func @missing_b() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+    %d = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    pto.tmatmul.mx.acc ins(%c, %a, %b : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>) outs(%d : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+// MISSING-B: error: 'pto.tmatmul.mx.acc' op expects Linx MX b_scale because b uses a compact dtype
+
+//--- wrong-side.pto
+module attributes {pto.target_arch = "linx"} {
+  func.func @wrong_side() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %sa = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=1, cols=32, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+    %bias = pto.alloc_tile : !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %d = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    pto.tgemv.mx.bias ins(%a, %b, %bias : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) a_scale(%sa : !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=1, cols=32, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%d : !pto.tile_buf<loc=acc, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+// WRONG-SIDE: error: 'pto.tgemv.mx.bias' op expects Linx MX a_scale to be absent for FP16/BF16 a
+
+//--- wrong-type.pto
+module attributes {pto.target_arch = "linx"} {
+  func.func @wrong_type() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    %sa = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=32, v_row=16, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+    %d = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    pto.tmatmul.mx ins(%a, %b : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>) a_scale(%sa : !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=32, v_row=16, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%d : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+// WRONG-TYPE: error: 'pto.tmatmul.mx' op expects Linx MX a_scale to use !pto.f8E8M0 elements

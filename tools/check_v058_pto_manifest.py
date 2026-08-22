@@ -470,6 +470,16 @@ def load_ptoas_ops(ptoas_root: Path) -> dict[str, dict]:
         body = text[start:end]
         match = re.search(r"let\s+arguments\s*=\s*\(ins(.*?)\);", body, re.DOTALL)
         arguments = tuple(re.findall(r"\$([A-Za-z0-9_]+)", match.group(1))) if match else ()
+        optional_arguments = (
+            tuple(
+                re.findall(
+                    r"Optional<[^>]+>\s*:\s*\$([A-Za-z0-9_]+)",
+                    match.group(1),
+                )
+            )
+            if match
+            else ()
+        )
         key = normalize(mnemonic)
         if key in operations:
             raise SystemExit(f"duplicate normalized PTOAS mnemonic in {ods_path}: {mnemonic}")
@@ -480,6 +490,7 @@ def load_ptoas_ops(ptoas_root: Path) -> dict[str, dict]:
         operations[key] = {
             "mnemonic": mnemonic,
             "arguments": arguments,
+            "optional_arguments": optional_arguments,
             "linx_engine": linx_engine.group(1) if linx_engine else None,
         }
     return operations
@@ -515,26 +526,29 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
             "TGEMV_ACC lowering must match TileOP order (dst, acc, matrix-B, vector-A)"
         )
     cube_variant_mappings = {
-        "PTOTGemvMXToTGEMV_MX": ("TGEMV_MX", "{dst,b,bScale,a,aScale}"),
+        "PTOTGemvMXToTGEMV_MX": (
+            "TGEMV_MX",
+            "SmallVector<Value,5>operands{dst,b};if(bScale)operands.push_back(bScale);operands.push_back(a);if(aScale)operands.push_back(aScale);",
+        ),
         "PTOTGemvMXAccToTGEMV_MX_ACC": (
             "TGEMV_MX_ACC",
-            "{dst,cIn,b,bScale,a,aScale}",
+            "SmallVector<Value,6>operands{dst,cIn,b};if(bScale)operands.push_back(bScale);operands.push_back(a);if(aScale)operands.push_back(aScale);",
         ),
         "PTOTGemvMXBiasToTGEMV_MX_BIAS": (
             "TGEMV_MX_BIAS",
-            "{dst,b,bScale,a,aScale,bias}",
+            "SmallVector<Value,6>operands{dst,b};if(bScale)operands.push_back(bScale);operands.push_back(a);if(aScale)operands.push_back(aScale);operands.push_back(bias);",
         ),
         "PTOTMatmulMXToTMATMUL_MX": (
             "TMATMUL_MX",
-            "{dst,a,aScale,b,bScale}",
+            "SmallVector<Value,5>operands{dst,a};if(aScale)operands.push_back(aScale);operands.push_back(b);if(bScale)operands.push_back(bScale);",
         ),
         "PTOTMatmulMXAccToTMATMUL_MX_ACC": (
             "TMATMUL_MX_ACC",
-            "{dst,cIn,a,aScale,b,bScale}",
+            "SmallVector<Value,6>operands{dst,cIn,a};if(aScale)operands.push_back(aScale);operands.push_back(b);if(bScale)operands.push_back(bScale);",
         ),
         "PTOTMatmulMXBiasToTMATMUL_MX_BIAS": (
             "TMATMUL_MX_BIAS",
-            "{dst,a,aScale,b,bScale,bias}",
+            "SmallVector<Value,6>operands{dst,a};if(aScale)operands.push_back(aScale);operands.push_back(b);if(bScale)operands.push_back(bScale);operands.push_back(bias);",
         ),
     }
     for class_name, (callee, operands) in cube_variant_mappings.items():
@@ -549,7 +563,7 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
         compact_body = re.sub(r"\s+", "", match.group("body"))
         if f'"{callee}"' not in compact_body or operands not in compact_body:
             errors.append(
-                f"{class_name} must lower only to {callee}{operands}"
+                f"{class_name} must preserve the exact optional-scale order for {callee}"
             )
     if errors:
         raise SystemExit("invalid PTOAS Linx v0.58.3 target surface:\n  " + "\n  ".join(errors))
@@ -607,6 +621,16 @@ def main() -> int:
         expected = tuple(contract["ptoas_arguments"])
         if actual != expected:
             contract_errors.append(f"{name}: expected PTOAS arguments {expected}, got {actual}")
+        if "ptoas_optional_arguments" in contract:
+            actual_optional = ptoas_ops[normalize(contract["ptoas_mnemonic"])][
+                "optional_arguments"
+            ]
+            expected_optional = tuple(contract["ptoas_optional_arguments"])
+            if actual_optional != expected_optional:
+                contract_errors.append(
+                    f"{name}: expected optional PTOAS arguments {expected_optional}, "
+                    f"got {actual_optional}"
+                )
     for key, contract in expected_dialect_only.items():
         actual = ptoas_ops[key]["arguments"]
         expected = tuple(contract["ptoas_arguments"])

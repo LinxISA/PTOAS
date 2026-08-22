@@ -46,3 +46,17 @@ grep -F "!pto.f8E8M0" "${mx_decoded}" >/dev/null
 grep -F "pto.tmatmul.mx ins(" "${mx_decoded}" >/dev/null
 grep -F "pto.tmatmul.mx.acc ins(" "${mx_decoded}" >/dev/null
 grep -F "pto.tmatmul.mx.bias ins(" "${mx_decoded}" >/dev/null
+grep -F "a_scale(" "${mx_decoded}" >/dev/null
+grep -F "b_scale(" "${mx_decoded}" >/dev/null
+
+gemv_mx_input="${TEST_INPUT_DIR}/v0583_linx_tgemv_mx_optional_scales.pto"
+gemv_mx_bytecode="${OUT_DIR}/v0583_linx_tgemv_mx_optional_scales.ptobc"
+gemv_mx_decoded="${OUT_DIR}/v0583_linx_tgemv_mx_optional_scales.roundtrip.pto"
+"${PTOBC_BIN}" encode "${gemv_mx_input}" -o "${gemv_mx_bytecode}"
+"${PTOBC_BIN}" decode "${gemv_mx_bytecode}" -o "${gemv_mx_decoded}"
+
+grep -F "pto.tgemv.mx ins(" "${gemv_mx_decoded}" >/dev/null
+grep -F "pto.tgemv.mx.acc ins(" "${gemv_mx_decoded}" >/dev/null
+grep -F "pto.tgemv.mx.bias ins(" "${gemv_mx_decoded}" >/dev/null
+grep -F "a_scale(" "${gemv_mx_decoded}" >/dev/null
+grep -F "b_scale(" "${gemv_mx_decoded}" >/dev/null

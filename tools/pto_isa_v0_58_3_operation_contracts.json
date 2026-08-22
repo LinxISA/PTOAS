@@ -1003,6 +1003,7 @@
         "b_scale",
         "dst"
       ],
+      "ptoas_optional_arguments": ["a_scale", "b_scale"],
       "isa_operands": [
         [
           "destination0",
@@ -1037,6 +1038,7 @@
         "b_scale",
         "dst"
       ],
+      "ptoas_optional_arguments": ["a_scale", "b_scale"],
       "isa_operands": [
         [
           "destination0",
@@ -1075,6 +1077,7 @@
         "bias",
         "dst"
       ],
+      "ptoas_optional_arguments": ["a_scale", "b_scale"],
       "isa_operands": [
         [
           "destination0",
@@ -1327,6 +1330,7 @@
         "b_scale",
         "dst"
       ],
+      "ptoas_optional_arguments": ["a_scale", "b_scale"],
       "isa_operands": [
         [
           "destination0",
@@ -1361,6 +1365,7 @@
         "b_scale",
         "dst"
       ],
+      "ptoas_optional_arguments": ["a_scale", "b_scale"],
       "isa_operands": [
         [
           "destination0",
@@ -1399,6 +1404,7 @@
         "bias",
         "dst"
       ],
+      "ptoas_optional_arguments": ["a_scale", "b_scale"],
       "isa_operands": [
         [
           "destination0",

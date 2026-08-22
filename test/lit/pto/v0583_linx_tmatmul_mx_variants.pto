@@ -8,31 +8,51 @@
 
 // RUN: ptoas --pto-arch=linx %s | FileCheck %s
 
-!a = !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+!a0 = !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+!a1 = !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
 !sa = !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=16, cols=32, v_row=16, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-!b = !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+!b0 = !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+!b1 = !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
 !sb = !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=32, cols=32, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 !d = !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
 !bias = !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 module attributes {pto.target_arch = "linx"} {
   func.func @linx_mx_variants() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
-    %a = pto.alloc_tile : !a
+    %a0 = pto.alloc_tile : !a0
+    %a1 = pto.alloc_tile : !a1
     %sa = pto.alloc_tile : !sa
-    %b = pto.alloc_tile : !b
+    %b0 = pto.alloc_tile : !b0
+    %b1 = pto.alloc_tile : !b1
     %sb = pto.alloc_tile : !sb
     %c = pto.alloc_tile : !d
     %bias = pto.alloc_tile : !bias
-    %d0 = pto.alloc_tile : !d
-    %d1 = pto.alloc_tile : !d
-    %d2 = pto.alloc_tile : !d
-    pto.tmatmul.mx ins(%a, %sa, %b, %sb : !a, !sa, !b, !sb) outs(%d0 : !d)
-    pto.tmatmul.mx.acc ins(%c, %a, %sa, %b, %sb : !d, !a, !sa, !b, !sb) outs(%d1 : !d)
-    pto.tmatmul.mx.bias ins(%a, %sa, %b, %sb, %bias : !a, !sa, !b, !sb, !bias) outs(%d2 : !d)
+    %d = pto.alloc_tile : !d
+    pto.tmatmul.mx ins(%a0, %b0 : !a0, !b0) outs(%d : !d)
+    pto.tmatmul.mx ins(%a1, %b0 : !a1, !b0) a_scale(%sa : !sa) outs(%d : !d)
+    pto.tmatmul.mx ins(%a0, %b1 : !a0, !b1) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tmatmul.mx ins(%a1, %b1 : !a1, !b1) a_scale(%sa : !sa) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tmatmul.mx.acc ins(%c, %a0, %b0 : !d, !a0, !b0) outs(%d : !d)
+    pto.tmatmul.mx.acc ins(%c, %a1, %b0 : !d, !a1, !b0) a_scale(%sa : !sa) outs(%d : !d)
+    pto.tmatmul.mx.acc ins(%c, %a0, %b1 : !d, !a0, !b1) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tmatmul.mx.acc ins(%c, %a1, %b1 : !d, !a1, !b1) a_scale(%sa : !sa) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tmatmul.mx.bias ins(%a0, %b0, %bias : !a0, !b0, !bias) outs(%d : !d)
+    pto.tmatmul.mx.bias ins(%a1, %b0, %bias : !a1, !b0, !bias) a_scale(%sa : !sa) outs(%d : !d)
+    pto.tmatmul.mx.bias ins(%a0, %b1, %bias : !a0, !b1, !bias) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tmatmul.mx.bias ins(%a1, %b1, %bias : !a1, !b1, !bias) a_scale(%sa : !sa) b_scale(%sb : !sb) outs(%d : !d)
     return
   }
 }
 
 // CHECK-COUNT-2: Tile<TileType::Scaling, __fp8_e8m0
-// CHECK: TMATMUL_MX({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});
-// CHECK: TMATMUL_MX_ACC({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});
-// CHECK: TMATMUL_MX_BIAS({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});
+// CHECK: TMATMUL_MX({{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TMATMUL_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});

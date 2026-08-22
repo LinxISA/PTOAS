@@ -1378,9 +1378,9 @@ For each (i, j):
 | Name | Type | Description |
 |------|------|-------------|
 | `lhs` | `pto.tile_buf` | Left matrix |
-| `lhs_scale` | `pto.tile_buf` | Left scaling tile |
+| `lhs_scale` | optional `pto.tile_buf` | Left scaling tile |
 | `rhs` | `pto.tile_buf` | Right matrix |
-| `rhs_scale` | `pto.tile_buf` | Right scaling tile |
+| `rhs_scale` | optional `pto.tile_buf` | Right scaling tile |
 | `dst` | `pto.tile_buf` | Destination |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1390,10 +1390,12 @@ For each (i, j):
 - **Implementation checks (A5)**
   - `m/k/n` are taken from `lhs valid row`, `lhs valid column`, and `rhs valid column`.
 - **Implementation checks (Linx PTO ISA 0.58.3)**
-  - A and B matrix inputs use FP8 CUBE CELL layouts; emitted C++ uses the
-    Linx scalar spellings `__fp8_e4m3` / `__fp8_e5m2`.
-  - Each present scale is independent and must use `!pto.f8E8M0`, emitted as
-    `__fp8_e8m0`, in the scaling address space with ordinary row-major layout.
+  - Each A/B input independently selects its scale schema: FP16/BF16 requires
+    no scale operand; a compact FP8/FP4 input requires its corresponding scale.
+  - Supplying a scale for FP16/BF16, or omitting one for a compact input, is an
+    error. Thus zero-scale, A-only, B-only, and two-scale forms are distinct.
+  - Each present scale must use `!pto.f8E8M0`, emitted as `__fp8_e8m0`, in the
+    scaling address space with ordinary row-major layout.
   - `lhs_scale.valid_shape = [M, ceil(K/32)]`.
   - `rhs_scale.valid_shape = [ceil(K/32), N]`.
   - Base, accumulation, and bias variants lower one-to-one to `TMATMUL_MX`,
@@ -1406,8 +1408,9 @@ For each (i, j):
 **Basic Example:**
 
 ```mlir
-pto.tmatmul.mx ins(%a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                               !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tmatmul.mx ins(%a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>)
+               a_scale(%a_scale : !pto.tile_buf<...>)
+               b_scale(%b_scale : !pto.tile_buf<...>)
                outs(%c : !pto.tile_buf<...>)
 ```
 
@@ -1429,9 +1432,9 @@ dst = acc_in + (lhs * rhs)   // scaling tiles configure target-defined behavior
 |------|------|-------------|
 | `acc_in` | `pto.tile_buf` | Accumulator input |
 | `lhs` | `pto.tile_buf` | Left matrix |
-| `lhs_scale` | `pto.tile_buf` | Left scaling tile |
+| `lhs_scale` | optional `pto.tile_buf` | Left scaling tile |
 | `rhs` | `pto.tile_buf` | Right matrix |
-| `rhs_scale` | `pto.tile_buf` | Right scaling tile |
+| `rhs_scale` | optional `pto.tile_buf` | Right scaling tile |
 | `dst` | `pto.tile_buf` | Destination |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1448,8 +1451,9 @@ dst = acc_in + (lhs * rhs)   // scaling tiles configure target-defined behavior
 **Basic Example:**
 
 ```mlir
-pto.tmatmul.mx.acc ins(%c_in, %a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                      !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tmatmul.mx.acc ins(%c_in, %a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                   a_scale(%a_scale : !pto.tile_buf<...>)
+                   b_scale(%b_scale : !pto.tile_buf<...>)
                    outs(%c_out : !pto.tile_buf<...>)
 ```
 
@@ -1470,9 +1474,9 @@ dst = (lhs * rhs) + bias   // scaling tiles configure target-defined behavior
 | Name | Type | Description |
 |------|------|-------------|
 | `lhs` | `pto.tile_buf` | Left matrix |
-| `lhs_scale` | `pto.tile_buf` | Left scaling tile |
+| `lhs_scale` | optional `pto.tile_buf` | Left scaling tile |
 | `rhs` | `pto.tile_buf` | Right matrix |
-| `rhs_scale` | `pto.tile_buf` | Right scaling tile |
+| `rhs_scale` | optional `pto.tile_buf` | Right scaling tile |
 | `bias` | `pto.tile_buf` | Bias tile |
 | `dst` | `pto.tile_buf` | Destination |
 
@@ -1492,8 +1496,9 @@ dst = (lhs * rhs) + bias   // scaling tiles configure target-defined behavior
 **Basic Example:**
 
 ```mlir
-pto.tmatmul.mx.bias ins(%a, %a_scale, %b, %b_scale, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                            !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tmatmul.mx.bias ins(%a, %b, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                    a_scale(%a_scale : !pto.tile_buf<...>)
+                    b_scale(%b_scale : !pto.tile_buf<...>)
                     outs(%c : !pto.tile_buf<...>)
 ```
 
@@ -1693,10 +1698,10 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 
 | Name | Type | Description |
 |------|------|-------------|
-| `a` | `pto.tile_buf` | Matrix tile (`loc=left`) |
-| `a_scale` | `pto.tile_buf` | Scale tile associated with `a` |
-| `b` | `pto.tile_buf` | Vector tile (`loc=right`) |
-| `b_scale` | `pto.tile_buf` | Scale tile associated with `b` |
+| `a` | `pto.tile_buf` | Left vector tile (`1xK`) |
+| `a_scale` | optional `pto.tile_buf` | Scale tile associated with `a` |
+| `b` | `pto.tile_buf` | Right matrix tile (`KxN`) |
+| `b_scale` | optional `pto.tile_buf` | Scale tile associated with `b` |
 | `dst` | `pto.tile_buf` | Destination accumulator tile (`loc=acc`) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1704,7 +1709,10 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 **Constraints & Verification:**
 
 - `a/b/dst` reuse the same GEMV shape/location checks as `pto.tgemv`.
-- `a_scale` and `b_scale` must be valid tile buffers.
+- The Linx zero/A-only/B-only/two-scale rules are identical to
+  `pto.tmatmul.mx`; each present scale uses `!pto.f8E8M0`.
+- EmitC preserves TileOP's matrix-before-vector order while keeping each scale
+  adjacent to the input it scales.
 
 **Hardware Mapping:**
 
@@ -1713,8 +1721,9 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 **Basic Example:**
 
 ```mlir
-pto.tgemv.mx ins(%a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                            !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tgemv.mx ins(%a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>)
+             a_scale(%a_scale : !pto.tile_buf<...>)
+             b_scale(%b_scale : !pto.tile_buf<...>)
              outs(%c : !pto.tile_buf<...>)
 ```
 
@@ -1730,15 +1739,16 @@ pto.tgemv.mx ins(%a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<
 dst = c_in + gemv(a, b)
 ```
 
-**Arguments:** `c_in, a, a_scale, b, b_scale, dst`
+**Arguments:** `c_in, a, optional a_scale, b, optional b_scale, dst`
 
 **Hardware Mapping:** Matrix pipeline (`PIPE_M`)
 
 **Basic Example:**
 
 ```mlir
-pto.tgemv.mx.acc ins(%c_in, %a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                        !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tgemv.mx.acc ins(%c_in, %a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                 a_scale(%a_scale : !pto.tile_buf<...>)
+                 b_scale(%b_scale : !pto.tile_buf<...>)
                  outs(%c_out : !pto.tile_buf<...>)
 ```
 
@@ -1754,15 +1764,16 @@ pto.tgemv.mx.acc ins(%c_in, %a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pt
 dst = gemv(a, b) + bias
 ```
 
-**Arguments:** `a, a_scale, b, b_scale, bias, dst`
+**Arguments:** `a, optional a_scale, b, optional b_scale, bias, dst`
 
 **Hardware Mapping:** Matrix pipeline (`PIPE_M`)
 
 **Basic Example:**
 
 ```mlir
-pto.tgemv.mx.bias ins(%a, %a_scale, %b, %b_scale, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                            !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tgemv.mx.bias ins(%a, %b, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                  a_scale(%a_scale : !pto.tile_buf<...>)
+                  b_scale(%b_scale : !pto.tile_buf<...>)
                   outs(%c : !pto.tile_buf<...>)
 ```
 

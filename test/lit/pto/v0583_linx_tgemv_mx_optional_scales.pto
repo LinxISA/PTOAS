@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=linx %s | FileCheck %s
+
+!a0 = !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+!a1 = !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=1, cols=32, v_row=1, v_col=32, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+!sa = !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=1, cols=32, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!b0 = !pto.tile_buf<loc=right, dtype=bf16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+!b1 = !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+!sb = !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=32, cols=32, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!d = !pto.tile_buf<loc=acc, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+!bias = !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @linx_gemv_mx_optional_scales() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %a0 = pto.alloc_tile : !a0
+    %a1 = pto.alloc_tile : !a1
+    %sa = pto.alloc_tile : !sa
+    %b0 = pto.alloc_tile : !b0
+    %b1 = pto.alloc_tile : !b1
+    %sb = pto.alloc_tile : !sb
+    %c = pto.alloc_tile : !d
+    %bias = pto.alloc_tile : !bias
+    %d = pto.alloc_tile : !d
+    pto.tgemv.mx ins(%a0, %b0 : !a0, !b0) outs(%d : !d)
+    pto.tgemv.mx ins(%a1, %b0 : !a1, !b0) a_scale(%sa : !sa) outs(%d : !d)
+    pto.tgemv.mx ins(%a0, %b1 : !a0, !b1) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tgemv.mx ins(%a1, %b1 : !a1, !b1) a_scale(%sa : !sa) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tgemv.mx.acc ins(%c, %a0, %b0 : !d, !a0, !b0) outs(%d : !d)
+    pto.tgemv.mx.acc ins(%c, %a1, %b0 : !d, !a1, !b0) a_scale(%sa : !sa) outs(%d : !d)
+    pto.tgemv.mx.acc ins(%c, %a0, %b1 : !d, !a0, !b1) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tgemv.mx.acc ins(%c, %a1, %b1 : !d, !a1, !b1) a_scale(%sa : !sa) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tgemv.mx.bias ins(%a0, %b0, %bias : !a0, !b0, !bias) outs(%d : !d)
+    pto.tgemv.mx.bias ins(%a1, %b0, %bias : !a1, !b0, !bias) a_scale(%sa : !sa) outs(%d : !d)
+    pto.tgemv.mx.bias ins(%a0, %b1, %bias : !a0, !b1, !bias) b_scale(%sb : !sb) outs(%d : !d)
+    pto.tgemv.mx.bias ins(%a1, %b1, %bias : !a1, !b1, !bias) a_scale(%sa : !sa) b_scale(%sb : !sb) outs(%d : !d)
+    return
+  }
+}
+
+// CHECK: TGEMV_MX({{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_ACC({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});
+// CHECK: TGEMV_MX_BIAS({{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,\)]+}});

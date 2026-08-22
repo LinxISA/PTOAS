@@ -76,6 +76,22 @@ class LinxIdentityTest(unittest.TestCase):
         ptoas_root = Path(__file__).resolve().parents[1]
         CHECKER.validate_linx_target_surface(ptoas_root)
 
+    def test_mx_scales_are_independently_optional_in_ods(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        operations = CHECKER.load_ptoas_ops(ptoas_root)
+        for mnemonic in (
+            "TGEMVMX",
+            "TGEMVMXACC",
+            "TGEMVMXBIAS",
+            "TMATMULMX",
+            "TMATMULMXACC",
+            "TMATMULMXBIAS",
+        ):
+            self.assertEqual(
+                operations[mnemonic]["optional_arguments"],
+                ("a_scale", "b_scale"),
+            )
+
     def test_misrouted_matmul_mx_variant_fails_closed(self):
         ptoas_root = Path(__file__).resolve().parents[1]
         lowering = (ptoas_root / "lib/PTO/Transforms/PTOToEmitC.cpp").read_text()
@@ -101,6 +117,35 @@ class LinxIdentityTest(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(lowering)
             with self.assertRaisesRegex(SystemExit, "PTOTMatmulMXToTMATMUL_MX"):
+                CHECKER.validate_linx_target_surface(fake_root)
+
+    def test_misordered_tgemv_mx_optional_scale_fails_closed(self):
+        ptoas_root = Path(__file__).resolve().parents[1]
+        lowering = (ptoas_root / "lib/PTO/Transforms/PTOToEmitC.cpp").read_text()
+        lowering, count = re.subn(
+            r"SmallVector<Value, 5> operands\{dst, b\};\s*"
+            r"if \(bScale\)\s*operands\.push_back\(bScale\);\s*"
+            r"operands\.push_back\(a\);",
+            "SmallVector<Value, 5> operands{dst, b};\n"
+            "    operands.push_back(a);\n"
+            "    if (bScale) operands.push_back(bScale);",
+            lowering,
+            count=1,
+        )
+        self.assertEqual(count, 1)
+        with tempfile.TemporaryDirectory() as directory:
+            fake_root = Path(directory)
+            for relative in (
+                "tools/ptoas/ptoas.cpp",
+                "tools/pto_isa_v0_58_3_operation_contracts.json",
+            ):
+                destination = fake_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text((ptoas_root / relative).read_text())
+            destination = fake_root / "lib/PTO/Transforms/PTOToEmitC.cpp"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(lowering)
+            with self.assertRaisesRegex(SystemExit, "PTOTGemvMXToTGEMV_MX"):
                 CHECKER.validate_linx_target_surface(fake_root)
 
 

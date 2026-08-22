@@ -23,11 +23,13 @@ python3 tools/ptobc/update_v0581_schema.py \
 The second command is the non-mutating CI audit. Historical 0.58.0 opcode
 assignments and their round-trip test remain release evidence.
 
-PTO ISA 0.58.3 keeps those operation opcodes and arities. Its PTO-BC v0 delta
-is the new `BLayout` enum values `cube_m16=2`, `cube_m32=3`, and `cube_n8=4`;
-the generic MLIR bytecode attribute codec preserves them without changing the
-opcode table. The Linx CUBE lit tests and the full PTO-BC round-trip gate cover
-their parse/print stability.
+PTO ISA 0.58.3 keeps those operation opcodes. Its PTO-BC v0 deltas are the new
+`BLayout` enum values `cube_m16=2`, `cube_m32=3`, and `cube_n8=4`, plus dynamic
+operand counts for the `TGEMV` opcode family and `TMATMUL_MX` opcode family.
+The latter preserves the independently optional A/B MX scales; the ordinary
+attribute dictionary retains `operandSegmentSizes`, so A-only and B-only forms
+remain distinguishable during decode. The Linx CUBE lit tests and the full
+PTO-BC round-trip gate cover all zero/A-only/B-only/two-scale forms.
 
 ## Required gates
 Run (or rely on CI):

@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       LLVM_REPOSITORY: https://github.com/LinxISA/llvm-project.git
-      LLVM_COMMIT: 1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
+      LLVM_COMMIT: b7c83f68bf84125e696a70bec4b665c70a3b584d
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-shared
       PTO_INSTALL_DIR: ${{ github.workspace }}/install
       MLIR_PYTHONPATH: ${{ github.workspace }}/llvm-project/llvm/build-shared/tools/mlir/python_packages/mlir_core
@@ -119,7 +119,7 @@ jobs:
             clang lld \
             libedit-dev zlib1g-dev libxml2-dev libzstd-dev
           python3 -m pip install --upgrade pip
-          python3 -m pip install nanobind typing_extensions numpy
+          python3 -m pip install 'nanobind>=2.9,<3' typing_extensions numpy
 
       - name: Define payload paths
         shell: bash
@@ -232,7 +232,7 @@ jobs:
             include/PTO/IR/PTOOps.td \
             tools/ptobc/generated/ptobc_opcodes_v0.h
           ctest --test-dir build --output-on-failure \
-            -R 'pto_isa_v0581_contract_check|ptobc_v0580_ops_v0_encode|ptobc_v0581_contract_encode|ptobc_tpartarg_v0_encode'
+            -R 'pto_isa_v0583_contract_check|ptobc_v0580_ops_v0_encode|ptobc_v0583_contract_encode|ptobc_tpartarg_v0_encode'
 
       - name: Run sample tests (py -> pto -> cpp)
         shell: bash

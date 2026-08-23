@@ -3,8 +3,8 @@
 ## 1. 项目简介 (Introduction)
 
 **ptoas** (`ptoas`) 是一个基于 LinxISA 受控 **LLVM/MLIR**
-（ISA release `linxisa-v0.58.1`，LLVM commit
-`1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`）构建的专用编译器工具链，
+（ISA release `linxisa-v0.58.3`，LLVM commit
+`b7c83f68bf84125e696a70bec4b665c70a3b584d`）构建的专用编译器工具链，
 专为 **PTO Bytecode** (Programming Tiling Operator Bytecode) 设计。
 
 作为连接上层 AI 框架与底层各类NPU/GPGPU/CPU硬件，`ptoas` 采用 **Out-of-Tree** 架构构建，提供了完整的 C++ 与 Python 接口，主要职责包括：
@@ -41,7 +41,7 @@ PTOAS/
 ## 3. 构建指南 (Build Instructions)
 
 ⚠️ **重要提示**：本项目严格依赖 LinxISA LLVM
-`1245c0f89aab24104ea935fa686a0ac5ad9ab2c9`。`linxisa-v0.58.1`
+`b7c83f68bf84125e696a70bec4b665c70a3b584d`。`linxisa-v0.58.3`
 是 ISA release tag，不是 PTOAS 产品版本；不要替换为同名上游 LLVM tag。
 
 
@@ -92,7 +92,7 @@ python3 -m pip install nanobind numpy
 cd $WORKSPACE_DIR
 git clone https://github.com/LinxISA/llvm-project.git
 cd $LLVM_SOURCE_DIR
-git checkout --detach 1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
+git checkout --detach b7c83f68bf84125e696a70bec4b665c70a3b584d
 
 # 2. 配置 CMake (构建动态库并启用 Python 绑定)
 cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
@@ -221,7 +221,7 @@ ptoas --version
 ```
 
 `ptoas --version` 中的 `0.41` 是 PTOAS 产品版本；括号中的 `PTO ISA
-0.58.1` 是独立的 ISA contract 版本。`linx` target 对齐受管的
+0.58.3` 是独立的 ISA contract 版本。`linx` target 对齐受管的
 `Linx-TileOP-API`：生成代码包含
 `jcore/template_asm.hpp`，只接受 v0.58 公共 PTO 操作目录，并在 lowering
 前拒绝仅属于 A3/A5 方言面的操作。
@@ -252,6 +252,36 @@ python3 ./tmatmulk.py > ./tmatmulk.pto
 # 运行ptoas 测试
 $PTO_SOURCE_DIR/build/tools/ptoas/ptoas ./tmatmulk.pto -o ./tmatmulk.cpp
 ```
+
+Linx MX 的真实 C++ 集成门禁默认不启用，因为它必须同时绑定精确的 Linx
+LLVM 构建、musl+libc++ sysroot 和 `Linx-TileOP-API` checkout。该门禁不会使用
+host shim 或替换 `jcore/template_asm.hpp` 的 stub。依赖准备好后，使用已审核并
+合并的 commit/tree 配置独立构建目录：
+
+```bash
+cmake -G Ninja -S . -B build-linx-integration \
+  -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
+  -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
+  -DPTOAS_ENABLE_LINX_TILEOP_INTEGRATION=ON \
+  -DPTOAS_LINX_LLVM_BUILD=$LINX_LLVM_BUILD \
+  -DPTOAS_LINX_SYSROOT=$LINX_SYSROOT \
+  -DPTOAS_LINX_TILEOP_ROOT=$TILEOP_ROOT \
+  -DPTOAS_EXPECTED_LLVM_COMMIT=b7c83f68bf84125e696a70bec4b665c70a3b584d \
+  -DPTOAS_EXPECTED_LLVM_TREE=c11bd80c7dd34ed4438de1da6bde0a01eae8c76d \
+  -DPTOAS_EXPECTED_TILEOP_COMMIT=bd1ecca97ca47da0edc462c1ce19749c6940780e \
+  -DPTOAS_EXPECTED_TILEOP_TREE=854c463c21f9b758186b718105f4b035019cdd30
+ninja -C build-linx-integration ptoas
+ctest --test-dir build-linx-integration \
+  -L linx-target-integration --output-on-failure
+```
+
+门禁先核对两个 checkout 的 commit/tree，再由真实 Linx `clang++` 和指定
+sysroot 对 PTOAS 生成的 TMATMUL/TGEMV base、ACC、BIAS 的 zero/A-only/
+B-only/both 四种形式分别执行 `-fsyntax-only` 和目标对象编译。缺少路径、
+identity 不匹配或真实 TileOP 签名/约束不接受生成代码时，门禁都会失败。
+门禁最后还运行 TileOP 的 phase-C link smoke，并用
+`verify_pto_identity.py` 核对每个 Linx ELF 中唯一且精确的 PTO 0.58.3
+identity note。
 
 ### 5.4 上板验证
 

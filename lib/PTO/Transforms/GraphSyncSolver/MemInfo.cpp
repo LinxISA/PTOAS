@@ -11,6 +11,7 @@
 
 #include "PTO/Transforms/GraphSyncSolver/MemInfo.h"
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "../Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
@@ -29,7 +30,7 @@ static std::optional<int64_t> getBufferBitSize(Value value) {
     return ShapedType::kDynamic;
   }
   Type elementType = shaped.getElementType();
-  auto bitWidth = elementType.getIntOrFloatBitWidth();
+  auto bitWidth = pto::getPTOStorageElemByteSize(elementType) * pto::kBitsToByte;
   if (bitWidth == 0) {
     return ShapedType::kDynamic;
   }

@@ -214,7 +214,7 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
     mlir::Attribute getCompactModeAttr() const;
 
     // 如果你仍然想要“数值枚举”，就提供 int getter（不会依赖 enum 类型）
-    int32_t getBLayoutValueI32() const;   // 0 row_major, 1 col_major
+    int32_t getBLayoutValueI32() const;   // 0/1 row/col, 2/3/4 CUBE M16/M32/N8
     int32_t getSLayoutValueI32() const;   // 0 none_box, 1 row_major, 2 col_major
     int32_t getPadValueI32() const;       // 0 null, 1 zero, 2 max, 3 min
     int32_t getCompactModeI32() const;    // 0 null, 1 normal, 2 row_plus_one
@@ -279,6 +279,17 @@ def HiF8Type : TypeDef<PTO_Dialect, "HiF8", [
 ]> {
   let mnemonic = "hif8";
   let summary = "Ascend A5 HiFloat8 (8-bit, 1 byte per element).";
+}
+
+// ---- !pto.f8E8M0 ---- Corresponding Linx TileOP type: __fp8_e8m0 (1 byte)
+def F8E8M0Type : TypeDef<PTO_Dialect, "F8E8M0", [
+    MemRefElementTypeInterface,
+    DeclareTypeInterfaceMethods<DataLayoutTypeInterface,
+      ["getTypeSizeInBits", "getABIAlignment", "getPreferredAlignment"]>
+]> {
+  let mnemonic = "f8E8M0";
+  let summary =
+      "PTO ISA E8M0 scale element used independently by A and B MX inputs.";
 }
 
 // ---- !pto.f4E1M2x2 ---- Corresponding type name: float4_e1m2x2_t (1 byte = 2 FP4 packed)

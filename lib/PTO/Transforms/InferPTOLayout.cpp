@@ -207,6 +207,10 @@ static std::optional<Layout> tileBLayoutToGlobalLayout(Type tileLikeTy) {
     return Layout::ND;
   case BLayout::ColMajor:
     return Layout::DN;
+  case BLayout::CubeM16:
+  case BLayout::CubeM32:
+  case BLayout::CubeN8:
+    return std::nullopt;
   }
   return std::nullopt;
 }

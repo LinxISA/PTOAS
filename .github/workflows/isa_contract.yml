@@ -1,14 +1,22 @@
-name: PTO ISA v0.58.1 contract
+name: PTO ISA v0.58.3 contract
 
 on:
   push:
     tags:
-      - linxisa-v0.58.1
+      - linxisa-v0.58.3
   pull_request:
     paths:
       - docker/**
       - .dockerignore
       - .github/workflows/isa_contract.yml
+      - include/PTO/IR/**
+      - lib/PTO/IR/**
+      - lib/PTO/Transforms/PTOToEmitC.cpp
+      - test/lit/pto/v0583_**
+      - tools/check_v058_pto_manifest.py
+      - tools/test_check_v058_pto_manifest.py
+      - tools/pto_isa_v0_58_3_**
+      - tools/ptobc/**
       - tools/check_release_delivery_contract.py
       - tools/test_release_delivery_contract.py
   workflow_dispatch:
@@ -22,7 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check exact PTO ISA contract
-        run: python3 tools/check_v058_pto_manifest.py --ptoas-root .
+        run: |
+          python3 tools/check_v058_pto_manifest.py --ptoas-root .
+          python3 tools/test_check_v058_pto_manifest.py
 
   docker-builder:
     runs-on: ubuntu-latest

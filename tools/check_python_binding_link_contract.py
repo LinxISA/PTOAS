@@ -70,26 +70,29 @@ def main() -> int:
 
     contract = re.compile(
         r"if\s*\(UNIX\s+AND\s+NOT\s+APPLE\).*?"
-        r"target_link_options\s*\(nanobind-mlir\s+PRIVATE\s+"
+        r"set\s*\(PTOAS_NANOBIND_RUNTIME_TARGET\s+\"\"\s*\).*?"
+        r"nanobind-mlir.*?nanobind.*?"
+        r"target_link_options\s*\(\$\{PTOAS_NANOBIND_RUNTIME_TARGET\}\s+PRIVATE\s+"
         r'"LINKER:-z,undefs"\s*\).*?endif\s*\(\)',
         re.DOTALL,
     )
     if not contract.search(source):
         raise SystemExit(
-            "error: the ELF nanobind-mlir target must override -z defs with "
-            "LINKER:-z,undefs so CPython resolves its ABI symbols at module load"
+            "error: the ELF nanobind shared runtime resolver must support "
+            "nanobind 2.x/3.x target names and override -z defs with "
+            "LINKER:-z,undefs"
         )
 
     install_contract = re.compile(
-        r"install\s*\(\s*TARGETS\s+nanobind-mlir\s+"
+        r"install\s*\(\s*TARGETS\s+\$\{PTOAS_NANOBIND_RUNTIME_TARGET\}\s+"
         r"LIBRARY\s+DESTINATION\s+lib\s+"
         r"(?:COMPONENT\s+PTOASPythonRuntime\s+)?\)",
         re.DOTALL,
     )
     if not install_contract.search(source):
         raise SystemExit(
-            "error: install nanobind-mlir into lib so auditwheel can locate "
-            "the NB_SHARED runtime"
+            "error: install the resolved nanobind shared runtime into lib so "
+            "auditwheel can locate it"
         )
 
     workflow_path = args.ptoas_root / ".github" / "workflows" / "build_wheel.yml"

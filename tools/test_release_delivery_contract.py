@@ -18,6 +18,10 @@ import unittest
 from pathlib import Path
 
 from check_release_delivery_contract import (
+    EXPECTED_LLVM_COMMIT,
+    EXPECTED_LLVM_TREE,
+    EXPECTED_TILEOP_COMMIT,
+    EXPECTED_TILEOP_TREE,
     local_copy_sources,
     run_packaging_identity_mode,
     validate_local_copy_sources,
@@ -57,6 +61,45 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         readme = (ROOT / "docker/README.md").read_text()
         self.assertIn("docker build -f docker/Dockerfile .", readme)
 
+    def test_docker_llvm_source_build_pins_nanobind_2_9(self) -> None:
+        dockerfile = (ROOT / "docker/Dockerfile").read_text()
+        self.assertIn("'nanobind>=2.9,<3'", dockerfile)
+
+    def test_all_llvm_source_build_lanes_pin_nanobind_2_9(self) -> None:
+        paths = (
+            ROOT / "docker/Dockerfile",
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/build_wheel.yml",
+            ROOT / ".github/workflows/build_wheel_mac.yml",
+        )
+        for path in paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertIn("nanobind>=2.9,<3", path.read_text())
+
+    def test_all_delivery_lanes_pin_merged_reviewed_llvm(self) -> None:
+        paths = (
+            ROOT / "README.md",
+            ROOT / "docker/Dockerfile",
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/build_wheel.yml",
+            ROOT / ".github/workflows/build_wheel_mac.yml",
+        )
+        for path in paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertIn(EXPECTED_LLVM_COMMIT, path.read_text())
+
+    def test_target_integration_pins_merged_llvm_and_tileop_trees(self) -> None:
+        text = (ROOT / "CMakeLists.txt").read_text() + (
+            ROOT / "README.md"
+        ).read_text()
+        for identity in (
+            EXPECTED_LLVM_COMMIT,
+            EXPECTED_LLVM_TREE,
+            EXPECTED_TILEOP_COMMIT,
+            EXPECTED_TILEOP_TREE,
+        ):
+            self.assertIn(identity, text)
+
     def test_hosted_builder_stage_gate_uses_buildkit(self) -> None:
         workflow = (ROOT / ".github/workflows/isa_contract.yml").read_text()
         self.assertIn("docker/setup-buildx-action@", workflow)
@@ -80,22 +123,22 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
 
         invalid_outputs = (
             "ptoas 0.41",
-            "ptoas 0.40 (PTO ISA 0.58.1)",
+            "ptoas 0.40 (PTO ISA 0.58.3)",
             "ptoas 0.41 (PTO ISA 0.58.0)",
-            "warning\nptoas 0.41 (PTO ISA 0.58.1)",
-            "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
+            "warning\nptoas 0.41 (PTO ISA 0.58.3)",
+            "ptoas 0.41 (PTO ISA 0.58.3)\nptoas 0.40",
         )
         for script in scripts:
             with self.subTest(
                 script=script.name, output="valid", product_version="0.41"
             ):
                 self.assertEqual(
-                    run(script, "ptoas 0.41 (PTO ISA 0.58.1)", "0.41").returncode,
+                    run(script, "ptoas 0.41 (PTO ISA 0.58.3)", "0.41").returncode,
                     0,
                 )
             with self.subTest(script=script.name, output="valid", product_version=""):
                 self.assertEqual(
-                    run(script, "ptoas 0.41 (PTO ISA 0.58.1)").returncode, 0
+                    run(script, "ptoas 0.41 (PTO ISA 0.58.3)").returncode, 0
                 )
             for product_version in ("0.41", ""):
                 for invalid in invalid_outputs:

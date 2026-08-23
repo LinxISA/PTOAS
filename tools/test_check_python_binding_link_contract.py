@@ -20,8 +20,15 @@ from pathlib import Path
 CHECKER = Path(__file__).with_name("check_python_binding_link_contract.py")
 VALID_PRODUCER = """
 if(UNIX AND NOT APPLE)
-  target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
-  install(TARGETS nanobind-mlir
+  set(PTOAS_NANOBIND_RUNTIME_TARGET "")
+  foreach(_candidate nanobind-mlir nanobind-abi3-ft nanobind-ft nanobind-abi3 nanobind)
+    if(TARGET ${_candidate})
+      set(PTOAS_NANOBIND_RUNTIME_TARGET ${_candidate})
+      break()
+    endif()
+  endforeach()
+  target_link_options(${PTOAS_NANOBIND_RUNTIME_TARGET} PRIVATE "LINKER:-z,undefs")
+  install(TARGETS ${PTOAS_NANOBIND_RUNTIME_TARGET}
     LIBRARY DESTINATION lib
   )
 endif()
@@ -70,13 +77,16 @@ class PythonBindingLinkContractTest(unittest.TestCase):
         result = self.run_checker(
             """
 if(UNIX AND NOT APPLE)
-  target_link_options(nanobind-mlir PRIVATE "LINKER:-z,undefs")
+  set(PTOAS_NANOBIND_RUNTIME_TARGET "")
+  foreach(_candidate nanobind-mlir nanobind)
+  endforeach()
+  target_link_options(${PTOAS_NANOBIND_RUNTIME_TARGET} PRIVATE "LINKER:-z,undefs")
 endif()
 """,
             "export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH\n",
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("install nanobind-mlir into lib", result.stderr)
+        self.assertIn("install the resolved nanobind shared runtime", result.stderr)
 
     def test_accepts_installed_runtime_and_matching_auditwheel_search_path(
         self,

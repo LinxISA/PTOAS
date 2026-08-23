@@ -8,4 +8,4 @@ module attributes {pto.target_arch = "linx"} {
   }
 }
 
-// CHECK: error: 'pto.acccvt' op is dialect-only and not part of the active Linx PTO ISA v0.58.1 target
+// CHECK: error: 'pto.acccvt' op is dialect-only and not part of the active Linx PTO ISA v0.58.3 target

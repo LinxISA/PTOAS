@@ -79,6 +79,7 @@ PTO IR currently recognizes the following low-precision element types:
 - `f8E5M2` (corresponding C++ type name: `float8_e5m2_t`)
 
 - `!pto.hif8`
+- `!pto.f8E8M0` (Linx MX scale type; emitted as `__fp8_e8m0`)
 - `!pto.f4E1M2x2`
 - `!pto.f4E2M1x2`
 
@@ -88,6 +89,7 @@ basic storage-size plumbing. Their storage size is currently modeled as:
 - `f8E4M3FN`: 1 byte per element
 - `f8E5M2`: 1 byte per element
 - `!pto.hif8`: 1 byte per element
+- `!pto.f8E8M0`: 1 byte per element
 - `!pto.f4E1M2x2`: 1 byte per packed pair of FP4 values
 - `!pto.f4E2M1x2`: 1 byte per packed pair of FP4 values
 
@@ -144,12 +146,12 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `loc` | keyword (`vec/mat/left/right/acc/bias`) | Local memory domain (`vec` maps to UB; use `vec` in textual IR) |
-| `dtype` | `element-type(i1/i8/i16/i32/f16/f32/bf16/!pto.hif8/!pto.f4E1M2x2/!pto.f4E2M1x2...)` | Element data type |
+| `dtype` | `element-type(i1/i8/i16/i32/f16/f32/bf16/!pto.hif8/!pto.f8E8M0/!pto.f4E1M2x2/!pto.f4E2M1x2...)` | Element data type |
 | `rows` | `int64` | Physical row count |
 | `cols` | `int64` | Physical column count |
 | `v_row` | `int64` or `?` | Valid row count |
 | `v_col` | `int64` or `?` | Valid column count |
-| `blayout` | `BLayout` mnemonic | Base layout (`row_major` / `col_major`) |
+| `blayout` | `BLayout` mnemonic | Base layout (`row_major`, `col_major`, or Linx CUBE `cube_m16` / `cube_m32` / `cube_n8`) |
 | `slayout` | `SLayout` mnemonic | Secondary layout (`none_box` / `row_major` / `col_major`) |
 | `fractal` | `int32` | Fractal size |
 | `pad` | `PadValue` mnemonic or integer literal | Padding policy/value selector (tests commonly use `pad=0`) |
@@ -266,7 +268,7 @@ Composite attribute and component enums for tile buffer configuration.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `bLayout` | `BLayoutAttr` | Base layout (RowMajor / ColMajor) |
+| `bLayout` | `BLayoutAttr` | Base layout (RowMajor / ColMajor / CubeM16 / CubeM32 / CubeN8) |
 | `sLayout` | `SLayoutAttr` | Secondary layout (NoneBox / RowMajor / ColMajor) |
 | `sFractalSize` | `IntegerAttr (i32)` | Secondary fractal size |
 | `pad` | `PadValueAttr` | Pad value policy |
@@ -279,6 +281,15 @@ Composite attribute and component enums for tile buffer configuration.
 |-------|-----|----------|
 | `RowMajor` | 0 | `row_major` |
 | `ColMajor` | 1 | `col_major` |
+| `CubeM16` | 2 | `cube_m16` |
+| `CubeM32` | 3 | `cube_m32` |
+| `CubeN8` | 4 | `cube_n8` |
+
+The three CUBE layouts are the PTO ISA 0.58.3 CELL layouts. Linx CUBE A and
+accumulator tiles use `cube_m16` or `cube_m32`; B tiles use `cube_n8`. They
+must use `none_box` secondary layout. Generated Linx TileOP types preserve
+these layouts and therefore select `B.DATR` CUBE conversion codes with
+`DTYPE_NONE` rather than treating encoded datatype zero as inheritance.
 
 **SLayout** (Secondary layout):
 
@@ -754,6 +765,10 @@ For each element (i, j) in the tile valid region:
 
 `partition_tensor_view` and `tile_buf` are both 2-D in this IR profile. `pto.tload` moves data from the global logical view into the local physical tile buffer.
 
+On Linx PTO ISA 0.58.3, the row stride carried by the lowered TLOAD scalar
+operand is measured in bytes. PTOAS derives that byte stride from the global
+tensor descriptor; it must not pass an element count to the TileOP API.
+
 **Arguments:**
 
 | Name | Type | Description |
@@ -779,6 +794,13 @@ For each element (i, j) in the tile valid region:
 - **Implementation checks (A5)**
   - The destination tile element size must be `1`, `2`, `4`, or `8` bytes, and must match the source partition element size.
   - For `i64`, the destination tile `pad` must be `null` or `zero`.
+- **Implementation checks (Linx PTO ISA 0.58.3)**
+  - The source uses `loc=gm`; the destination may use
+    `vec`, `left`, `right`, `acc`, `bias`, or `scaling`.
+  - Source and destination element sizes match. Compact FP8/FP4 and E8M0
+    tiles are valid load destinations.
+  - `left`, `right`, and `acc` CUBE CELL destinations lower to
+    `TLOAD_CUBE`; other local destinations lower to `TLOAD`.
 
 **Hardware Mapping:**
 
@@ -797,7 +819,7 @@ pto.tload ins(%pv : !pto.partition_tensor_view<16x16xf16>)
 
 **Summary:** Probes and prefetches a rectangular global tile region with TLOAD-equivalent
 translation, permission, fault, restart, coherence, and ordering behavior. PTO
-ISA 0.58.1 makes this operation destination-free: it changes
+ISA 0.58.3 makes this operation destination-free: it changes
 target cache or data-movement state without publishing a tile result.
 
 **Semantics:**
@@ -810,7 +832,7 @@ The detailed cache placement is target-defined, but access faults are
 architectural rather than optional hint behavior. Unlike most generated PTO
 intrinsic wrappers, `TPREFETCH` does not add implicit wait-event synchronization.
 
-For Linx ISA 0.58.1, statically known `valid_cols`, `valid_rows`, and
+For Linx ISA 0.58.3, statically known `valid_cols`, `valid_rows`, and
 `physical_cols` values must be in `1..65535`. `physical_cols` must also be a
 power of two and at least `valid_cols`. Dynamic values are accepted by the IR;
 the producer must guarantee the same constraints at runtime before execution.
@@ -864,6 +886,10 @@ pto.tprefetch ins(%address, %stride, %cols, %rows, %physical_cols : i64, index, 
 ---
 
 ##### `pto.tstore` - Store Tile to Partition View
+
+On Linx PTO ISA 0.58.3, the row stride carried by the lowered TSTORE scalar
+operand is measured in bytes, matching TLOAD. CUBE CELL sources retain their
+explicit `cube_m16`, `cube_m32`, or `cube_n8` layout during lowering.
 
 **Summary:** Stores a 2-D tile buffer back to a 2-D partition view. Supports phase/atomic/relu/pre-quant controls that lower to the corresponding `TSTORE` template overload family.
 
@@ -1216,6 +1242,16 @@ For each (i, j):
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - Tile locations: `lhs.loc=left`, `rhs.loc=right`, `dst.loc=acc`.
   - Runtime: `m/k/n` (taken from `lhs valid row`, `lhs valid column`, `rhs valid column`) must be in `[1, 4095]`.
+- **Implementation checks (Linx PTO ISA 0.58.3)**
+  - `lhs.loc=left` with `blayout=cube_m16` or `cube_m32`.
+  - `rhs.loc=right` with `blayout=cube_n8`.
+  - `dst.loc=acc` with the same M16/M32 layout as `lhs`.
+  - All three operands use `slayout=none_box`; CUBE element widths are
+    limited to 4, 8, 16, or 32 bits.
+  - Mixed A/B input types are permitted when the selected TileOP overload
+    supports them. The generated call preserves architectural A/B order.
+  - `pto.tgemv*` keeps A/vector then B/matrix in PTO IR, but emits the public
+    TileOP order `TGEMV(dst, matrix_b, vector_a)`.
 - **Implementation checks (A5)**
   - The destination element type must be `i32` or `f32`.
     - If the destination element type is `i32`, the lhs and rhs element types must both be `i8`.
@@ -1349,9 +1385,9 @@ For each (i, j):
 | Name | Type | Description |
 |------|------|-------------|
 | `lhs` | `pto.tile_buf` | Left matrix |
-| `lhs_scale` | `pto.tile_buf` | Left scaling tile |
+| `lhs_scale` | optional `pto.tile_buf` | Left scaling tile |
 | `rhs` | `pto.tile_buf` | Right matrix |
-| `rhs_scale` | `pto.tile_buf` | Right scaling tile |
+| `rhs_scale` | optional `pto.tile_buf` | Right scaling tile |
 | `dst` | `pto.tile_buf` | Destination |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1360,6 +1396,19 @@ For each (i, j):
 
 - **Implementation checks (A5)**
   - `m/k/n` are taken from `lhs valid row`, `lhs valid column`, and `rhs valid column`.
+- **Implementation checks (Linx PTO ISA 0.58.3)**
+  - Each A/B input independently selects its scale schema: FP16/BF16 requires
+    no scale operand; a compact FP8/FP4 input requires its corresponding scale.
+  - Linx EmitC spells FP16/BF16 as the target frontend types `__half` and
+    `__bf16`; compact inputs use the corresponding `__fp8_*`/`__fp4_*` types.
+  - Supplying a scale for FP16/BF16, or omitting one for a compact input, is an
+    error. Thus zero-scale, A-only, B-only, and two-scale forms are distinct.
+  - Each present scale must use `!pto.f8E8M0`, emitted as `__fp8_e8m0`, in the
+    scaling address space with ordinary row-major layout.
+  - `lhs_scale.valid_shape = [M, ceil(K/32)]`.
+  - `rhs_scale.valid_shape = [ceil(K/32), N]`.
+  - Base, accumulation, and bias variants lower one-to-one to `TMATMUL_MX`,
+    `TMATMUL_MX_ACC`, and `TMATMUL_MX_BIAS` with no operand permutation.
 
 **Hardware Mapping:**
 
@@ -1368,8 +1417,9 @@ For each (i, j):
 **Basic Example:**
 
 ```mlir
-pto.tmatmul.mx ins(%a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                               !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tmatmul.mx ins(%a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>)
+               a_scale(%a_scale : !pto.tile_buf<...>)
+               b_scale(%b_scale : !pto.tile_buf<...>)
                outs(%c : !pto.tile_buf<...>)
 ```
 
@@ -1391,9 +1441,9 @@ dst = acc_in + (lhs * rhs)   // scaling tiles configure target-defined behavior
 |------|------|-------------|
 | `acc_in` | `pto.tile_buf` | Accumulator input |
 | `lhs` | `pto.tile_buf` | Left matrix |
-| `lhs_scale` | `pto.tile_buf` | Left scaling tile |
+| `lhs_scale` | optional `pto.tile_buf` | Left scaling tile |
 | `rhs` | `pto.tile_buf` | Right matrix |
-| `rhs_scale` | `pto.tile_buf` | Right scaling tile |
+| `rhs_scale` | optional `pto.tile_buf` | Right scaling tile |
 | `dst` | `pto.tile_buf` | Destination |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1410,8 +1460,9 @@ dst = acc_in + (lhs * rhs)   // scaling tiles configure target-defined behavior
 **Basic Example:**
 
 ```mlir
-pto.tmatmul.mx.acc ins(%c_in, %a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                      !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tmatmul.mx.acc ins(%c_in, %a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                   a_scale(%a_scale : !pto.tile_buf<...>)
+                   b_scale(%b_scale : !pto.tile_buf<...>)
                    outs(%c_out : !pto.tile_buf<...>)
 ```
 
@@ -1432,9 +1483,9 @@ dst = (lhs * rhs) + bias   // scaling tiles configure target-defined behavior
 | Name | Type | Description |
 |------|------|-------------|
 | `lhs` | `pto.tile_buf` | Left matrix |
-| `lhs_scale` | `pto.tile_buf` | Left scaling tile |
+| `lhs_scale` | optional `pto.tile_buf` | Left scaling tile |
 | `rhs` | `pto.tile_buf` | Right matrix |
-| `rhs_scale` | `pto.tile_buf` | Right scaling tile |
+| `rhs_scale` | optional `pto.tile_buf` | Right scaling tile |
 | `bias` | `pto.tile_buf` | Bias tile |
 | `dst` | `pto.tile_buf` | Destination |
 
@@ -1454,8 +1505,9 @@ dst = (lhs * rhs) + bias   // scaling tiles configure target-defined behavior
 **Basic Example:**
 
 ```mlir
-pto.tmatmul.mx.bias ins(%a, %a_scale, %b, %b_scale, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                            !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tmatmul.mx.bias ins(%a, %b, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                    a_scale(%a_scale : !pto.tile_buf<...>)
+                    b_scale(%b_scale : !pto.tile_buf<...>)
                     outs(%c : !pto.tile_buf<...>)
 ```
 
@@ -1655,10 +1707,10 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 
 | Name | Type | Description |
 |------|------|-------------|
-| `a` | `pto.tile_buf` | Matrix tile (`loc=left`) |
-| `a_scale` | `pto.tile_buf` | Scale tile associated with `a` |
-| `b` | `pto.tile_buf` | Vector tile (`loc=right`) |
-| `b_scale` | `pto.tile_buf` | Scale tile associated with `b` |
+| `a` | `pto.tile_buf` | Left vector tile (`1xK`) |
+| `a_scale` | optional `pto.tile_buf` | Scale tile associated with `a` |
+| `b` | `pto.tile_buf` | Right matrix tile (`KxN`) |
+| `b_scale` | optional `pto.tile_buf` | Scale tile associated with `b` |
 | `dst` | `pto.tile_buf` | Destination accumulator tile (`loc=acc`) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1666,7 +1718,10 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 **Constraints & Verification:**
 
 - `a/b/dst` reuse the same GEMV shape/location checks as `pto.tgemv`.
-- `a_scale` and `b_scale` must be valid tile buffers.
+- The Linx zero/A-only/B-only/two-scale rules are identical to
+  `pto.tmatmul.mx`; each present scale uses `!pto.f8E8M0`.
+- EmitC preserves TileOP's matrix-before-vector order while keeping each scale
+  adjacent to the input it scales.
 
 **Hardware Mapping:**
 
@@ -1675,8 +1730,9 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 **Basic Example:**
 
 ```mlir
-pto.tgemv.mx ins(%a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                            !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tgemv.mx ins(%a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>)
+             a_scale(%a_scale : !pto.tile_buf<...>)
+             b_scale(%b_scale : !pto.tile_buf<...>)
              outs(%c : !pto.tile_buf<...>)
 ```
 
@@ -1692,15 +1748,16 @@ pto.tgemv.mx ins(%a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<
 dst = c_in + gemv(a, b)
 ```
 
-**Arguments:** `c_in, a, a_scale, b, b_scale, dst`
+**Arguments:** `c_in, a, optional a_scale, b, optional b_scale, dst`
 
 **Hardware Mapping:** Matrix pipeline (`PIPE_M`)
 
 **Basic Example:**
 
 ```mlir
-pto.tgemv.mx.acc ins(%c_in, %a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                        !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tgemv.mx.acc ins(%c_in, %a, %b : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                 a_scale(%a_scale : !pto.tile_buf<...>)
+                 b_scale(%b_scale : !pto.tile_buf<...>)
                  outs(%c_out : !pto.tile_buf<...>)
 ```
 
@@ -1716,15 +1773,16 @@ pto.tgemv.mx.acc ins(%c_in, %a, %a_scale, %b, %b_scale : !pto.tile_buf<...>, !pt
 dst = gemv(a, b) + bias
 ```
 
-**Arguments:** `a, a_scale, b, b_scale, bias, dst`
+**Arguments:** `a, optional a_scale, b, optional b_scale, bias, dst`
 
 **Hardware Mapping:** Matrix pipeline (`PIPE_M`)
 
 **Basic Example:**
 
 ```mlir
-pto.tgemv.mx.bias ins(%a, %a_scale, %b, %b_scale, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>,
-                                                            !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+pto.tgemv.mx.bias ins(%a, %b, %bias : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+                  a_scale(%a_scale : !pto.tile_buf<...>)
+                  b_scale(%b_scale : !pto.tile_buf<...>)
                   outs(%c : !pto.tile_buf<...>)
 ```
 

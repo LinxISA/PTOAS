@@ -1777,7 +1777,7 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TMatmulMxOp>(
           op, TypeRange{}, 
-          op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3), op->getOperand(4));
+          op.getA(), op.getAScale(), op.getB(), op.getBScale(), op.getDst());
       }
 
       // --- TMatmulMxAccOp  ---
@@ -1788,7 +1788,8 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TMatmulMxAccOp>(
           op, TypeRange{}, 
-          op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3), op->getOperand(4), op->getOperand(5));
+          op.getCIn(), op.getA(), op.getAScale(), op.getB(), op.getBScale(),
+          op.getDst());
       }
 
       // --- TMatmulMxBiasOp ---
@@ -1799,7 +1800,8 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TMatmulMxBiasOp>(
           op, TypeRange{}, 
-          op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3), op->getOperand(4), op->getOperand(5));
+          op.getA(), op.getAScale(), op.getB(), op.getBScale(), op.getBias(),
+          op.getDst());
       }
 
       // --- TGemvOp [Lhs, Rhs, Dst] ---
@@ -1847,7 +1849,7 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TGemvMxOp>(
           op, TypeRange{},
-          op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3), op->getOperand(4));
+          op.getA(), op.getAScale(), op.getB(), op.getBScale(), op.getDst());
       }
 
       // --- TGemvMxAccOp [CIn, A, AScale, B, BScale, Dst] ---
@@ -1858,8 +1860,8 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TGemvMxAccOp>(
           op, TypeRange{},
-          op->getOperand(0), op->getOperand(1), op->getOperand(2),
-          op->getOperand(3), op->getOperand(4), op->getOperand(5));
+          op.getCIn(), op.getA(), op.getAScale(), op.getB(), op.getBScale(),
+          op.getDst());
       }
 
       // --- TGemvMxBiasOp [A, AScale, B, BScale, Bias, Dst] ---
@@ -1870,8 +1872,8 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TGemvMxBiasOp>(
           op, TypeRange{},
-          op->getOperand(0), op->getOperand(1), op->getOperand(2),
-          op->getOperand(3), op->getOperand(4), op->getOperand(5));
+          op.getA(), op.getAScale(), op.getB(), op.getBScale(), op.getBias(),
+          op.getDst());
       }
 
       // --- TMovOp [Src, Dst] ---

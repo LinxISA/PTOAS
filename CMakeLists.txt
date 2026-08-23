@@ -135,12 +135,12 @@ if(BUILD_TESTING)
   enable_testing()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
-    NAME pto_isa_v0581_contract_check
+    NAME pto_isa_v0583_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v058_pto_manifest.py
             --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(
-    NAME pto_isa_v0581_contract_check_negative
+    NAME pto_isa_v0583_contract_check_negative
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_v058_pto_manifest.py)
   add_test(
@@ -173,6 +173,48 @@ if(BUILD_TESTING)
     NAME emitc_lvalue_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)
+  option(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION
+         "Compile generated Linx MX C++ with the exact target toolchain and TileOP" OFF)
+  set(PTOAS_LINX_LLVM_BUILD "" CACHE PATH "Exact merged Linx LLVM build")
+  set(PTOAS_LINX_SYSROOT "" CACHE PATH "Phase-C Linx musl+libc++ sysroot")
+  set(PTOAS_LINX_TILEOP_ROOT "" CACHE PATH "Exact merged Linx TileOP checkout")
+  set(PTOAS_EXPECTED_LLVM_COMMIT
+      "b7c83f68bf84125e696a70bec4b665c70a3b584d" CACHE STRING
+      "Reviewed merged Linx LLVM commit")
+  set(PTOAS_EXPECTED_LLVM_TREE
+      "c11bd80c7dd34ed4438de1da6bde0a01eae8c76d" CACHE STRING
+      "Reviewed merged Linx LLVM tree")
+  set(PTOAS_EXPECTED_TILEOP_COMMIT
+      "bd1ecca97ca47da0edc462c1ce19749c6940780e" CACHE STRING
+      "Reviewed merged Linx TileOP commit")
+  set(PTOAS_EXPECTED_TILEOP_TREE
+      "854c463c21f9b758186b718105f4b035019cdd30" CACHE STRING
+      "Reviewed merged Linx TileOP tree")
+  if(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION)
+    foreach(required_var IN ITEMS
+            PTOAS_LINX_LLVM_BUILD PTOAS_LINX_SYSROOT PTOAS_LINX_TILEOP_ROOT
+            PTOAS_EXPECTED_LLVM_COMMIT PTOAS_EXPECTED_LLVM_TREE
+            PTOAS_EXPECTED_TILEOP_COMMIT PTOAS_EXPECTED_TILEOP_TREE)
+      if(NOT DEFINED ${required_var} OR "${${required_var}}" STREQUAL "")
+        message(FATAL_ERROR
+                "${required_var} is required for the Linx TileOP integration gate")
+      endif()
+    endforeach()
+    add_test(
+      NAME linx_mx_tileop_compile_check
+      COMMAND ${CMAKE_COMMAND} -E env
+              PTOAS_BIN=$<TARGET_FILE:pto-opt>
+              LINX_LLVM_BUILD=${PTOAS_LINX_LLVM_BUILD}
+              LINX_SYSROOT=${PTOAS_LINX_SYSROOT}
+              TILEOP_ROOT=${PTOAS_LINX_TILEOP_ROOT}
+              EXPECTED_LLVM_COMMIT=${PTOAS_EXPECTED_LLVM_COMMIT}
+              EXPECTED_LLVM_TREE=${PTOAS_EXPECTED_LLVM_TREE}
+              EXPECTED_TILEOP_COMMIT=${PTOAS_EXPECTED_TILEOP_COMMIT}
+              EXPECTED_TILEOP_TREE=${PTOAS_EXPECTED_TILEOP_TREE}
+              bash ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_linx_mx_tileop_compile.sh)
+    set_tests_properties(linx_mx_tileop_compile_check PROPERTIES
+                         LABELS "linx-target-integration")
+  endif()
   add_subdirectory(tools/ptobc/tests)
 endif()
 

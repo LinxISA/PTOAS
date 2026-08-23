@@ -524,7 +524,7 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
 ]> {
   let summary = "Prefetch a rectangular tile region from a global address.";
   let description = [{
-    PTO ISA 0.58.1 models TPREFETCH as a destination-free TLSU operation over
+    PTO ISA 0.58.3 models TPREFETCH as a destination-free TLSU operation over
     a base address, element row stride, valid shape, and physical row width.
   }];
 
@@ -706,8 +706,9 @@ def TMatmulBiasOp : PTO_TOp<"tmatmul.bias", [
   }];
 }
 
-// pto.tmatmul.mx ins(%a,%a_scale,%b,%b_scale) outs(%dst) -> tensor?
+// Linx MX scale operands are independently optional and governed by A/B dtype.
 def TMatmulMxOp : PTO_TOp<"tmatmul.mx", [
+    AttrSizedOperandSegments,
     PTO_DpsInitOpInterface,
     OpPipeInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -716,17 +717,18 @@ def TMatmulMxOp : PTO_TOp<"tmatmul.mx", [
 
   let arguments = (ins
     PTODpsType:$a,
-    PTODpsType:$a_scale,
+    Optional<PTODpsType>:$a_scale,
     PTODpsType:$b,
-    PTODpsType:$b_scale,
+    Optional<PTODpsType>:$b_scale,
     PTODpsType:$dst);
 
   let results = (outs Optional<AnyRankedTensor>:$result);
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale
-          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `ins` `(` $a `,` $b `:` type($a) `,` type($b) `)`
+    (`a_scale` `(` $a_scale^ `:` type($a_scale) `)`)?
+    (`b_scale` `(` $b_scale^ `:` type($b_scale) `)`)?
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?
@@ -741,8 +743,9 @@ def TMatmulMxOp : PTO_TOp<"tmatmul.mx", [
   }];
 }
 
-// pto.tmatmul.mx.acc ins(%c_in,%a,%a_scale,%b,%b_scale) outs(%dst) -> tensor?
+// Accumulating Linx MX form with independent A/B scale operands.
 def TMatmulMxAccOp : PTO_TOp<"tmatmul.mx.acc", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -752,17 +755,18 @@ def TMatmulMxAccOp : PTO_TOp<"tmatmul.mx.acc", [
   let arguments = (ins
     PTODpsType:$c_in,
     PTODpsType:$a,
-    PTODpsType:$a_scale,
+    Optional<PTODpsType>:$a_scale,
     PTODpsType:$b,
-    PTODpsType:$b_scale,
+    Optional<PTODpsType>:$b_scale,
     PTODpsType:$dst);
 
   let results = (outs Optional<AnyRankedTensor>:$result);
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $c_in `,` $a `,` $a_scale `,` $b `,` $b_scale
-          `:` type($c_in) `,` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `ins` `(` $c_in `,` $a `,` $b `:` type($c_in) `,` type($a) `,` type($b) `)`
+    (`a_scale` `(` $a_scale^ `:` type($a_scale) `)`)?
+    (`b_scale` `(` $b_scale^ `:` type($b_scale) `)`)?
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?
@@ -777,8 +781,9 @@ def TMatmulMxAccOp : PTO_TOp<"tmatmul.mx.acc", [
   }];
 }
 
-// pto.tmatmul.mx.bias ins(%a,%a_scale,%b,%b_scale,%bias) outs(%dst)  -> tensor?
+// Bias Linx MX form with independent A/B scale operands.
 def TMatmulMxBiasOp : PTO_TOp<"tmatmul.mx.bias",[
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -787,9 +792,9 @@ def TMatmulMxBiasOp : PTO_TOp<"tmatmul.mx.bias",[
 
   let arguments = (ins
     PTODpsType:$a,
-    PTODpsType:$a_scale,
+    Optional<PTODpsType>:$a_scale,
     PTODpsType:$b,
-    PTODpsType:$b_scale,
+    Optional<PTODpsType>:$b_scale,
     PTODpsType:$bias,
     PTODpsType:$dst);
 
@@ -798,8 +803,10 @@ def TMatmulMxBiasOp : PTO_TOp<"tmatmul.mx.bias",[
 
 
   let assemblyFormat = [{
-    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale `,` $bias
-          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `,` qualified(type($bias)) `)`
+    `ins` `(` $a `,` $b `,` $bias
+          `:` type($a) `,` type($b) `,` qualified(type($bias)) `)`
+    (`a_scale` `(` $a_scale^ `:` type($a_scale) `)`)?
+    (`b_scale` `(` $b_scale^ `:` type($b_scale) `)`)?
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?
@@ -989,17 +996,18 @@ def TGemvBiasOp : PTO_TOp<"tgemv.bias", [
 }
 
 def TGemvMxOp : PTO_TOp<"tgemv.mx", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Mixed-precision GEMV with scale tiles (tile world, ins/outs).";
+  let summary = "Mixed-precision GEMV with independent optional scale tiles.";
 
   let arguments = (ins
     PTODpsType:$a,
-    PTODpsType:$a_scale,
+    Optional<PTODpsType>:$a_scale,
     PTODpsType:$b,
-    PTODpsType:$b_scale,
+    Optional<PTODpsType>:$b_scale,
     PTODpsType:$dst
   );
 
@@ -1007,8 +1015,9 @@ def TGemvMxOp : PTO_TOp<"tgemv.mx", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale
-          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `ins` `(` $a `,` $b `:` type($a) `,` type($b) `)`
+    (`a_scale` `(` $a_scale^ `:` type($a_scale) `)`)?
+    (`b_scale` `(` $b_scale^ `:` type($b_scale) `)`)?
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?
@@ -1022,18 +1031,19 @@ def TGemvMxOp : PTO_TOp<"tgemv.mx", [
 }
 
 def TGemvMxAccOp : PTO_TOp<"tgemv.mx.acc", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Mixed-precision GEMV accumulate with scale tiles (tile world, ins/outs).";
+  let summary = "Mixed-precision GEMV accumulate with optional scale tiles.";
 
   let arguments = (ins
     PTODpsType:$c_in,
     PTODpsType:$a,
-    PTODpsType:$a_scale,
+    Optional<PTODpsType>:$a_scale,
     PTODpsType:$b,
-    PTODpsType:$b_scale,
+    Optional<PTODpsType>:$b_scale,
     PTODpsType:$dst
   );
 
@@ -1041,8 +1051,9 @@ def TGemvMxAccOp : PTO_TOp<"tgemv.mx.acc", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $c_in `,` $a `,` $a_scale `,` $b `,` $b_scale
-          `:` type($c_in) `,` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `ins` `(` $c_in `,` $a `,` $b `:` type($c_in) `,` type($a) `,` type($b) `)`
+    (`a_scale` `(` $a_scale^ `:` type($a_scale) `)`)?
+    (`b_scale` `(` $b_scale^ `:` type($b_scale) `)`)?
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?
@@ -1056,17 +1067,18 @@ def TGemvMxAccOp : PTO_TOp<"tgemv.mx.acc", [
 }
 
 def TGemvMxBiasOp : PTO_TOp<"tgemv.mx.bias", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Mixed-precision GEMV with bias and scale tiles (tile world, ins/outs).";
+  let summary = "Mixed-precision GEMV with bias and optional scale tiles.";
 
   let arguments = (ins
     PTODpsType:$a,
-    PTODpsType:$a_scale,
+    Optional<PTODpsType>:$a_scale,
     PTODpsType:$b,
-    PTODpsType:$b_scale,
+    Optional<PTODpsType>:$b_scale,
     PTODpsType:$bias,
     PTODpsType:$dst
   );
@@ -1075,8 +1087,10 @@ def TGemvMxBiasOp : PTO_TOp<"tgemv.mx.bias", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale `,` $bias
-          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `,` qualified(type($bias)) `)`
+    `ins` `(` $a `,` $b `,` $bias
+          `:` type($a) `,` type($b) `,` qualified(type($bias)) `)`
+    (`a_scale` `(` $a_scale^ `:` type($a_scale) `)`)?
+    (`b_scale` `(` $b_scale^ `:` type($b_scale) `)`)?
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?

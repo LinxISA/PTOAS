@@ -1,0 +1,13 @@
+// RUN: not ptoas --pto-arch=linx %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "linx"} {
+  func.func @reject_row_major_a() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>
+    %d = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>
+    pto.tmatmul ins(%a, %b : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=16, v_row=32, v_col=16, blayout=cube_n8, slayout=none_box, fractal=512, pad=0>) outs(%d : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=cube_m16, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.tmatmul' op expects Linx CUBE lhs to use its architectural CUBE CELL blayout

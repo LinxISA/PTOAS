@@ -11,7 +11,7 @@ ARG ARCH
 # NOTE: change $PY_VER for different Python versions (3.8 - 3.14 available)
 ARG PY_VER=cp311-cp311
 ARG LLVM_REPOSITORY=https://github.com/LinxISA/llvm-project.git
-ARG LLVM_COMMIT=1245c0f89aab24104ea935fa686a0ac5ad9ab2c9
+ARG LLVM_COMMIT=b7c83f68bf84125e696a70bec4b665c70a3b584d
 
 ## -- usually no need to change below --
 
@@ -20,7 +20,10 @@ ENV PATH="${PY_PATH}/bin:${PATH}"
 
 # dependency
 RUN dnf install -y ninja-build cmake git ccache gcc-c++ lld zip binutils patchelf chrpath && dnf clean all
-RUN pip install --no-cache-dir numpy nanobind setuptools wheel auditwheel
+# LLVM 23's MLIR Python build requires the nanobind 2.9 CMake contract.
+# PTOAS itself also supports nanobind 3 in the hosted prebuilt-LLVM lanes, but
+# this source-build stage must stay below the nanobind 3 hard break.
+RUN pip install --no-cache-dir numpy 'nanobind>=2.9,<3' setuptools wheel auditwheel
 
 COPY cmake/LinuxHardeningCache.cmake /tmp/LinuxHardeningCache.cmake
 

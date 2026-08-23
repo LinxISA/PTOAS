@@ -32,12 +32,15 @@ bool mlir::pto::isPTOFloat8Type(Type t) {
 
 bool mlir::pto::isPTOHiFloat8Type(Type t) { return isa<HiF8Type>(t); }
 
+bool mlir::pto::isPTOFloat8E8M0Type(Type t) { return isa<F8E8M0Type>(t); }
+
 bool mlir::pto::isPTOFloat4PackedType(Type t) {
   return isa<F4E1M2x2Type, F4E2M1x2Type>(t);
 }
 
 bool mlir::pto::isPTOLowPrecisionType(Type t) {
-  return isPTOFloat8Type(t) || isPTOHiFloat8Type(t) || isPTOFloat4PackedType(t);
+  return isPTOFloat8Type(t) || isPTOHiFloat8Type(t) ||
+         isPTOFloat8E8M0Type(t) || isPTOFloat4PackedType(t);
 }
 
 unsigned mlir::pto::getPTOStorageElemByteSize(Type t) {

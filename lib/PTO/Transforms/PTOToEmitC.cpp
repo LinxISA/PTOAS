@@ -287,20 +287,24 @@ static bool isEmitCTileLikeType(Type ty) {
 }
 
 static std::string getEmitCScalarTypeToken(Type elemTy) {
+  bool isLinx =
+      getPTOParserTargetArch(elemTy.getContext()) == PTOParserTargetArch::Linx;
   if (pto::isPTOFloat8E4M3FamilyType(elemTy))
-    return "float8_e4m3_t";
+    return isLinx ? "__fp8_e4m3" : "float8_e4m3_t";
   if (pto::isPTOFloat8E5M2FamilyType(elemTy))
-    return "float8_e5m2_t";
+    return isLinx ? "__fp8_e5m2" : "float8_e5m2_t";
   if (isa<pto::HiF8Type>(elemTy))
-    return "hifloat8_t";
+    return isLinx ? "__hif8" : "hifloat8_t";
+  if (isa<pto::F8E8M0Type>(elemTy))
+    return "__fp8_e8m0";
   if (isa<pto::F4E1M2x2Type>(elemTy))
-    return "float4_e1m2x2_t";
+    return isLinx ? "__fp4_e1m2x2" : "float4_e1m2x2_t";
   if (isa<pto::F4E2M1x2Type>(elemTy))
-    return "float4_e2m1x2_t";
+    return isLinx ? "__fp4_e2m1x2" : "float4_e2m1x2_t";
   if (elemTy.isF16())
-    return "half";
+    return isLinx ? "__half" : "half";
   if (elemTy.isBF16())
-    return "bfloat16_t";
+    return isLinx ? "__bf16" : "bfloat16_t";
   if (elemTy.isF32())
     return "float";
   if (elemTy.isF64())
@@ -434,27 +438,43 @@ public:
     // ---------------------------------------------------------
     // 1. 基本类型 (f32, i32, index)
     // ---------------------------------------------------------
-    addConversion([Ctx](FloatType type) -> Type {
+    addConversion([Ctx, targetArch](FloatType type) -> Type {
       if (pto::isPTOFloat8E4M3FamilyType(type))
-        return emitc::OpaqueType::get(Ctx, "float8_e4m3_t");
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__fp8_e4m3"
+                                              : "float8_e4m3_t");
       if (pto::isPTOFloat8E5M2FamilyType(type))
-        return emitc::OpaqueType::get(Ctx, "float8_e5m2_t");
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__fp8_e5m2"
+                                              : "float8_e5m2_t");
       if (type.isF32()) return emitc::OpaqueType::get(Ctx, "float");
-      if (type.isF16()) return emitc::OpaqueType::get(Ctx, "half");
-      if (type.isBF16()) return emitc::OpaqueType::get(Ctx, "bfloat16_t");
+      if (type.isF16())
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__half" : "half");
+      if (type.isBF16())
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__bf16" : "bfloat16_t");
       if (type.isF64()) return emitc::OpaqueType::get(Ctx, "double");
       llvm::errs() << "[Debug] Unsupported FloatType: " << type << "\n";
       return Type{};
     });
 
-    addConversion([Ctx](pto::HiF8Type) -> Type {
-      return emitc::OpaqueType::get(Ctx, "hifloat8_t");
+    addConversion([Ctx, targetArch](pto::HiF8Type) -> Type {
+      return emitc::OpaqueType::get(
+          Ctx, targetArch == PTOArch::Linx ? "__hif8" : "hifloat8_t");
     });
-    addConversion([Ctx](pto::F4E1M2x2Type) -> Type {
-      return emitc::OpaqueType::get(Ctx, "float4_e1m2x2_t");
+    addConversion([Ctx](pto::F8E8M0Type) -> Type {
+      return emitc::OpaqueType::get(Ctx, "__fp8_e8m0");
     });
-    addConversion([Ctx](pto::F4E2M1x2Type) -> Type {
-      return emitc::OpaqueType::get(Ctx, "float4_e2m1x2_t");
+    addConversion([Ctx, targetArch](pto::F4E1M2x2Type) -> Type {
+      return emitc::OpaqueType::get(
+          Ctx, targetArch == PTOArch::Linx ? "__fp4_e1m2x2"
+                                            : "float4_e1m2x2_t");
+    });
+    addConversion([Ctx, targetArch](pto::F4E2M1x2Type) -> Type {
+      return emitc::OpaqueType::get(
+          Ctx, targetArch == PTOArch::Linx ? "__fp4_e2m1x2"
+                                            : "float4_e2m1x2_t");
     });
 
     addConversion([Ctx](IntegerType type) -> Type {
@@ -576,7 +596,8 @@ public:
     // ---------------------------------------------------------
     // 3. MemRef 转换 (Debug 重点)
     // ---------------------------------------------------------
-    addConversion([this, Ctx](MemRefType type) -> std::optional<Type> {
+    addConversion([this, Ctx,
+                   targetArch](MemRefType type) -> std::optional<Type> {
       LLVM_DEBUG(llvm::dbgs() << "Converting MemRef: " << type << "\n");
 
       // A. 转换元素类型
@@ -609,7 +630,11 @@ public:
          qualifier = "__gm__"; // Fallback
       }
 
-      std::string finalTypeStr = qualifier + " " + elemTypeStr;
+      if (targetArch == PTOArch::Linx)
+        qualifier.clear();
+
+      std::string finalTypeStr =
+          qualifier.empty() ? elemTypeStr : qualifier + " " + elemTypeStr;
       LLVM_DEBUG(llvm::dbgs() << "  [Success] -> " << finalTypeStr << "*\n");
       
       return emitc::PointerType::get(emitc::OpaqueType::get(Ctx, finalTypeStr));
@@ -3452,29 +3477,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 //===----------------------------------------------------------------------===//
 
 static std::string getElemTypeStringForGT(Type elemTy) {
-  if (elemTy.isF16()) return "half";
-  if (elemTy.isBF16()) return "bfloat16_t";
-  if (elemTy.isF32()) return "float";
-  if (elemTy.isF64()) return "double";
-  if (elemTy.isInteger(8)) {
-    if (elemTy.isSignlessInteger(8) || elemTy.isSignedInteger(8))
-      return "int8_t";
-    return "uint8_t";
-  }
-  if (elemTy.isInteger(16)) {
-    if (elemTy.isSignlessInteger(16) || elemTy.isSignedInteger(16))
-      return "int16_t";
-    return "uint16_t";
-  }
-  if (elemTy.isInteger(32)) {
-    if (elemTy.isSignlessInteger(32) || elemTy.isSignedInteger(32))
-      return "int32_t";
-    return "uint32_t";
-  }
-  if (elemTy.isInteger(64)) {
-    return cast<IntegerType>(elemTy).isUnsigned() ? "uint64_t" : "int64_t";
-  }
-  return "float";
+  return getEmitCScalarTypeToken(elemTy);
 }
 
 static bool hasStaticShape(MemRefType mrTy) {
@@ -3766,12 +3769,22 @@ static Value materializeTensorViewDataPointer(
 }
 
 static std::string tileBufBLayoutToken(pto::TileBufConfigAttr configAttr) {
-  std::string blTok = "BLayout::RowMajor";
-  if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
-    if (static_cast<int32_t>(blAttr.getValue()) == 1)
-      blTok = "BLayout::ColMajor";
+  auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout());
+  pto::BLayout layout =
+      blAttr ? blAttr.getValue() : pto::BLayout::RowMajor;
+  switch (layout) {
+  case pto::BLayout::RowMajor:
+    return "BLayout::RowMajor";
+  case pto::BLayout::ColMajor:
+    return "BLayout::ColMajor";
+  case pto::BLayout::CubeM16:
+    return "BLayout::CubeM16";
+  case pto::BLayout::CubeM32:
+    return "BLayout::CubeM32";
+  case pto::BLayout::CubeN8:
+    return "BLayout::CubeN8";
   }
-  return blTok;
+  llvm_unreachable("unknown PTO BLayout");
 }
 
 static std::string tileBufSLayoutToken(pto::TileBufConfigAttr configAttr) {
@@ -4022,8 +4035,28 @@ struct PointerCastConversion : public OpConversionPattern<pto::PointerCastOp> {
         if (auto attr = dyn_cast<BLayoutAttr>(config.getBLayout()))
             blVal = static_cast<int32_t>(attr.getValue());
  
-        if (blVal == 1) layoutParams = "BLayout::ColMajor";
-        blayout = blVal == 1 ? pto::BLayout::ColMajor : pto::BLayout::RowMajor;
+        switch (blVal) {
+        case 1:
+          layoutParams = "BLayout::ColMajor";
+          blayout = pto::BLayout::ColMajor;
+          break;
+        case 2:
+          layoutParams = "BLayout::CubeM16";
+          blayout = pto::BLayout::CubeM16;
+          break;
+        case 3:
+          layoutParams = "BLayout::CubeM32";
+          blayout = pto::BLayout::CubeM32;
+          break;
+        case 4:
+          layoutParams = "BLayout::CubeN8";
+          blayout = pto::BLayout::CubeN8;
+          break;
+        default:
+          layoutParams = "BLayout::RowMajor";
+          blayout = pto::BLayout::RowMajor;
+          break;
+        }
 
         int32_t slVal = 0;
         if (auto attr = dyn_cast<SLayoutAttr>(config.getSLayout()))
@@ -4236,8 +4269,22 @@ struct PTOTLoadToTLOAD : public OpConversionPattern<pto::TLoadOp> {
       }
     }
 
+    StringRef callee = "TLOAD";
+    if (getPTOParserTargetArch(rewriter.getContext()) ==
+        PTOParserTargetArch::Linx) {
+      if (auto tileTy = dyn_cast<pto::TileBufType>(op.getDst().getType())) {
+        if (auto space = dyn_cast_or_null<pto::AddressSpaceAttr>(
+                tileTy.getMemorySpace())) {
+          auto value = space.getAddressSpace();
+          if (value == pto::AddressSpace::LEFT ||
+              value == pto::AddressSpace::RIGHT ||
+              value == pto::AddressSpace::ACC)
+            callee = "TLOAD_CUBE";
+        }
+      }
+    }
     rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TLOAD",
+        op.getLoc(), TypeRange{}, callee,
         ArrayAttr{}, ArrayAttr{},
         ValueRange{dst, srcArg});
 
@@ -4485,15 +4532,16 @@ struct PTOTGemvToTGEMV : public OpConversionPattern<pto::TGemvOp> {
   LogicalResult matchAndRewrite(pto::TGemvOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     // 1. 获取操作数 (剥离 Cast)
-    Value lhs = peelUnrealized(adaptor.getLhs()); // A (Matrix)
-    Value rhs = peelUnrealized(adaptor.getRhs()); // B (Vector)
+    Value lhs = peelUnrealized(adaptor.getLhs()); // A (Vector)
+    Value rhs = peelUnrealized(adaptor.getRhs()); // B (Matrix)
     Value dst = peelUnrealized(adaptor.getDst()); // C (Result)
 
-    // 2. 直接生成函数调用 TGEMV(dst, lhs, rhs)
+    // TileOP API order is destination, matrix (architectural B), vector
+    // (architectural A). PTO IR keeps lhs=A/vector and rhs=B/matrix.
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TGEMV",
         ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, lhs, rhs});
+        ValueRange{dst, rhs, lhs});
 
     // 3. 处理 Op 替换/删除
     if (op->getNumResults() == 1) {
@@ -4518,15 +4566,15 @@ struct PTOTGemvAccToTGEMVACC : public OpConversionPattern<pto::TGemvAccOp> {
 
     // 1. 获取操作数
     Value accIn = peelUnrealized(adaptor.getAccIn()); // AccOld
-    Value lhs   = peelUnrealized(adaptor.getLhs());   // A (Matrix)
-    Value rhs   = peelUnrealized(adaptor.getRhs());   // B (Vector)
+    Value lhs   = peelUnrealized(adaptor.getLhs());   // A (Vector)
+    Value rhs   = peelUnrealized(adaptor.getRhs());   // B (Matrix)
     Value dst   = peelUnrealized(adaptor.getDst());   // AccNew
 
-    // 2. 直接生成函数调用 TGEMV_ACC(dst, accIn, lhs, rhs)
+    // Preserve the TileOP matrix-before-vector public API order.
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "TGEMV_ACC",
         ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, accIn, lhs, rhs});
+        ValueRange{dst, accIn, rhs, lhs});
 
     // 3. 处理 Op 替换/删除
     if (op->getNumResults() == 1) {
@@ -9267,7 +9315,7 @@ struct PTOTGemvBiasToTGEMV_BIAS
     Value dst  = peelUnrealized(adaptor.getDst());
 
     replaceOrEraseWithOpaqueCall(op.getOperation(), "TGEMV_BIAS",
-                                {dst, a, b, bias}, rewriter);
+                                {dst, b, a, bias}, rewriter);
     return success();
   }
 };
@@ -9279,18 +9327,24 @@ struct PTOTGemvMXToTGEMV_MX
   LogicalResult matchAndRewrite(pto::TGemvMxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
+    SmallVector<Value, 5> operands{dst, b};
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(a);
+    if (aScale)
+      operands.push_back(aScale);
     replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, a, aScale, b, bScale}, rewriter);
+                                             operands, rewriter);
     return success();
   }
 };
 
-struct PTOTGemvMXAccToTGEMV_MX
+struct PTOTGemvMXAccToTGEMV_MX_ACC
     : public OpConversionPattern<pto::TGemvMxAccOp> {
   using OpConversionPattern<pto::TGemvMxAccOp>::OpConversionPattern;
 
@@ -9298,32 +9352,45 @@ struct PTOTGemvMXAccToTGEMV_MX
                                 ConversionPatternRewriter &rewriter) const override {
     Value cIn     = peelUnrealized(adaptor.getCIn());
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, cIn, a, aScale, b, bScale}, rewriter);
+    SmallVector<Value, 6> operands{dst, cIn, b};
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(a);
+    if (aScale)
+      operands.push_back(aScale);
+    replaceOrEraseWithOpaqueCallAndReturnDst(
+        op.getOperation(), dst, "TGEMV_MX_ACC", operands, rewriter);
     return success();
   }
 };
 
-struct PTOTGemvMXBiasToTGEMV_MX
+struct PTOTGemvMXBiasToTGEMV_MX_BIAS
     : public OpConversionPattern<pto::TGemvMxBiasOp> {
   using OpConversionPattern<pto::TGemvMxBiasOp>::OpConversionPattern;
 
   LogicalResult matchAndRewrite(pto::TGemvMxBiasOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCallAndReturnDst(op.getOperation(), dst, "TGEMV_MX",
-                                             {dst, a, aScale, b, bScale, bias}, rewriter);
+    SmallVector<Value, 6> operands{dst, b};
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(a);
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(bias);
+    replaceOrEraseWithOpaqueCallAndReturnDst(
+        op.getOperation(), dst, "TGEMV_MX_BIAS", operands, rewriter);
     return success();
   }
 };
@@ -9352,13 +9419,19 @@ struct PTOTMatmulMXToTMATMUL_MX
   LogicalResult matchAndRewrite(pto::TMatmulMxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
-                                {dst, a, aScale, b, bScale}, rewriter);
+    SmallVector<Value, 5> operands{dst, a};
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(b);
+    if (bScale)
+      operands.push_back(bScale);
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX", operands,
+                                 rewriter);
     return success();
   }
 };
@@ -9371,13 +9444,19 @@ struct PTOTMatmulMXAccToTMATMUL_MX_ACC
                                 ConversionPatternRewriter &rewriter) const override {
     Value cIn     = peelUnrealized(adaptor.getCIn());
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
-                                {dst, cIn, a, aScale, b, bScale}, rewriter);
+    SmallVector<Value, 6> operands{dst, cIn, a};
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(b);
+    if (bScale)
+      operands.push_back(bScale);
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC", operands,
+                                 rewriter);
     return success();
   }
 };
@@ -9389,14 +9468,21 @@ struct PTOTMatmulMXBiasToTMATMUL_MX_BIAS
   LogicalResult matchAndRewrite(pto::TMatmulMxBiasOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value a       = peelUnrealized(adaptor.getA());
-    Value aScale  = peelUnrealized(adaptor.getAScale());
+    Value aScale  = adaptor.getAScale() ? peelUnrealized(adaptor.getAScale()) : Value();
     Value b       = peelUnrealized(adaptor.getB());
-    Value bScale  = peelUnrealized(adaptor.getBScale());
+    Value bScale  = adaptor.getBScale() ? peelUnrealized(adaptor.getBScale()) : Value();
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
-                                {dst, a, aScale, b, bScale, bias}, rewriter);
+    SmallVector<Value, 6> operands{dst, a};
+    if (aScale)
+      operands.push_back(aScale);
+    operands.push_back(b);
+    if (bScale)
+      operands.push_back(bScale);
+    operands.push_back(bias);
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS", operands,
+                                 rewriter);
     return success();
   }
 };
@@ -10345,11 +10431,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       if (rows == ShapedType::kDynamic || cols == ShapedType::kDynamic)
         return failure();
 
-      std::string blTok = "BLayout::RowMajor";
-      if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
-        if (static_cast<int32_t>(blAttr.getValue()) == 1)
-          blTok = "BLayout::ColMajor";
-      }
+      std::string blTok = tileBufBLayoutToken(configAttr);
       pto::BLayout blayout = getTileBufBLayoutValue(configAttr);
 
       if (isSubView) {
@@ -10767,7 +10849,8 @@ struct PTOAllocTileToEmitC
     }
 
     Value addr = adaptor.getAddr();
-    if (addr) {
+    bool isLinx = getPTOParserTargetArch(ctx) == PTOParserTargetArch::Linx;
+    if (addr && !isLinx) {
       addr = peelUnrealized(addr);
       auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
       if (isa<emitc::PointerType>(addr.getType()) ||
@@ -11987,8 +12070,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
     PTOTMatmulMXBiasToTMATMUL_MX_BIAS,
     PTOTGemvBiasToTGEMV_BIAS,
     PTOTGemvMXToTGEMV_MX,
-    PTOTGemvMXAccToTGEMV_MX,
-    PTOTGemvMXBiasToTGEMV_MX,
+    PTOTGemvMXAccToTGEMV_MX_ACC,
+    PTOTGemvMXBiasToTGEMV_MX_BIAS,
     PTOBarrierToEmitC
   >(typeConverter, ctx);
 
@@ -12025,6 +12108,12 @@ struct EmitPTOManualPass
     LLVM_DEBUG(llvm::dbgs() << "DEBUG: Start PTOToEmitC Pass\n");
     MLIRContext *ctx = &getContext();
     ModuleOp mop = getOperation();
+    PTOParserTargetArch parserArch =
+        targetArch == PTOArch::Linx
+            ? PTOParserTargetArch::Linx
+            : targetArch == PTOArch::A5 ? PTOParserTargetArch::A5
+                                         : PTOParserTargetArch::A3;
+    ScopedPTOParserTargetArch parserArchScope(ctx, parserArch);
 
     if (failed(pto::validatePTOEntryFunctions(mop)))
       return signalPassFailure();

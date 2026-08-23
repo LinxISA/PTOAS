@@ -9,4 +9,4 @@ module attributes {pto.target_arch = "linx"} {
   }
 }
 
-// CHECK: error: 'pto.tload' op expects Linx tload dst to use loc=vec
+// CHECK: error: 'pto.tload' op expects Linx tload dst to use loc=vec/left/right/acc/bias/scaling

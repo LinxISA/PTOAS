@@ -192,7 +192,7 @@ static std::pair<int64_t, int64_t> getStaticOffsetAndSize(Operation *op, Value s
   auto srcType = dyn_cast<MemRefType>(src.getType());
   if (!srcType) return {0, 0};
   
-  int64_t elemSize = srcType.getElementType().getIntOrFloatBitWidth() / 8;
+  int64_t elemSize = pto::getPTOStorageElemByteSize(srcType.getElementType());
   if (elemSize == 0) elemSize = 1;
  
   // === Case 1: memref.subview ===
@@ -395,7 +395,7 @@ LogicalResult PTOIRTranslator::UpdateAllocTileOpMemInfo(pto::AllocTileOp op) {
     }
 
     if (isStatic) {
-      int64_t elemSize = tileType.getElementType().getIntOrFloatBitWidth() / 8;
+      int64_t elemSize = pto::getPTOStorageElemByteSize(tileType.getElementType());
       int64_t numElements = 1;
       for (auto dim : shape) numElements *= dim;
       sizeInBytes = numElements * elemSize;
@@ -440,7 +440,7 @@ LogicalResult PTOIRTranslator::UpdatePointerCastOpMemInfo(pto::PointerCastOp op)
  
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
+    int64_t elemSize = pto::getPTOStorageElemByteSize(memRefType.getElementType());
     int64_t numElements = 1;
     for (auto dim : memRefType.getShape()) numElements *= dim;
     sizeInBytes = numElements * elemSize;
@@ -474,7 +474,7 @@ PTOIRTranslator::UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op) {
 
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
+    int64_t elemSize = pto::getPTOStorageElemByteSize(memRefType.getElementType());
     if (elemSize == 0)
       elemSize = 1;
 
@@ -885,7 +885,7 @@ LogicalResult PTOIRTranslator::UpdateMemrefAllocOpMemInfo(memref::AllocOp op) {
   // 1. 计算大小 (Bytes)
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
+    int64_t elemSize = pto::getPTOStorageElemByteSize(memRefType.getElementType());
     if (elemSize == 0) elemSize = 1; // bool case
     
     int64_t numElements = 1;

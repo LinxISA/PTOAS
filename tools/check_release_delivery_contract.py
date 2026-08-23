@@ -18,6 +18,12 @@ import subprocess
 from pathlib import Path
 
 
+EXPECTED_LLVM_COMMIT = "b7c83f68bf84125e696a70bec4b665c70a3b584d"
+EXPECTED_LLVM_TREE = "c11bd80c7dd34ed4438de1da6bde0a01eae8c76d"
+EXPECTED_TILEOP_COMMIT = "bd1ecca97ca47da0edc462c1ce19749c6940780e"
+EXPECTED_TILEOP_TREE = "854c463c21f9b758186b718105f4b035019cdd30"
+
+
 def local_copy_sources(dockerfile: str) -> list[tuple[int, str]]:
     """Return local Docker COPY sources and reject unvalidated syntax."""
     sources: list[tuple[int, str]] = []
@@ -90,8 +96,8 @@ def validate_packaging_identity_mode(script: Path) -> None:
     """Exercise a packaging script with valid and adversarial identity outputs."""
 
     for output, product_version in (
-        ("ptoas 0.41 (PTO ISA 0.58.1)", "0.41"),
-        ("ptoas 0.41 (PTO ISA 0.58.1)", ""),
+        ("ptoas 0.41 (PTO ISA 0.58.3)", "0.41"),
+        ("ptoas 0.41 (PTO ISA 0.58.3)", ""),
     ):
         result = run_packaging_identity_mode(script, output, product_version)
         if result.returncode != 0:
@@ -101,10 +107,10 @@ def validate_packaging_identity_mode(script: Path) -> None:
 
     invalid_outputs = (
         "ptoas 0.41",
-        "ptoas 0.40 (PTO ISA 0.58.1)",
+        "ptoas 0.40 (PTO ISA 0.58.3)",
         "ptoas 0.41 (PTO ISA 0.58.0)",
-        "warning\nptoas 0.41 (PTO ISA 0.58.1)",
-        "ptoas 0.41 (PTO ISA 0.58.1)\nptoas 0.40",
+        "warning\nptoas 0.41 (PTO ISA 0.58.3)",
+        "ptoas 0.41 (PTO ISA 0.58.3)\nptoas 0.40",
     )
     for product_version in ("0.41", ""):
         for output in invalid_outputs:
@@ -132,6 +138,53 @@ def main() -> int:
         raise SystemExit("Docker build must COPY the reviewed PTOAS checkout")
     if "git clone https://github.com/zhangstevenunity/PTOAS.git" in dockerfile:
         raise SystemExit("Docker build must not clone an unpinned PTOAS fork")
+    if "'nanobind>=2.9,<3'" not in dockerfile:
+        raise SystemExit(
+            "Docker LLVM source build must pin nanobind to the MLIR 23 "
+            "compatible >=2.9,<3 range"
+        )
+
+    llvm_pin_paths = (
+        root / "README.md",
+        root / "docker/Dockerfile",
+        root / ".github/workflows/ci.yml",
+        root / ".github/workflows/build_wheel.yml",
+        root / ".github/workflows/build_wheel_mac.yml",
+    )
+    for path in llvm_pin_paths:
+        text = path.read_text()
+        if EXPECTED_LLVM_COMMIT not in text:
+            raise SystemExit(
+                f"{path.relative_to(root)} does not pin reviewed merged LLVM "
+                f"commit {EXPECTED_LLVM_COMMIT}"
+            )
+
+    integration_pin_text = (root / "CMakeLists.txt").read_text() + (
+        root / "README.md"
+    ).read_text()
+    for identity in (
+        EXPECTED_LLVM_COMMIT,
+        EXPECTED_LLVM_TREE,
+        EXPECTED_TILEOP_COMMIT,
+        EXPECTED_TILEOP_TREE,
+    ):
+        if identity not in integration_pin_text:
+            raise SystemExit(
+                f"Linx target integration gate does not pin reviewed identity {identity}"
+            )
+
+    nanobind_pin_paths = (
+        root / "docker/Dockerfile",
+        root / ".github/workflows/ci.yml",
+        root / ".github/workflows/build_wheel.yml",
+        root / ".github/workflows/build_wheel_mac.yml",
+    )
+    for path in nanobind_pin_paths:
+        if "nanobind>=2.9,<3" not in path.read_text():
+            raise SystemExit(
+                f"{path.relative_to(root)} must pin nanobind >=2.9,<3 for "
+                "the LLVM 23 MLIR Python source build"
+            )
     if (
         'test "$(git -C pto-isa rev-parse HEAD)" = "${PTO_ISA_COMMIT}"'
         not in dockerfile
@@ -143,8 +196,8 @@ def main() -> int:
         raise SystemExit("Docker README must document repository-root context")
 
     workflow = (root / ".github/workflows/isa_contract.yml").read_text()
-    if "linxisa-v0.58.1" not in workflow:
-        raise SystemExit("raw linxisa-v0.58.1 tag is not an ISA checker trigger")
+    if "linxisa-v0.58.3" not in workflow:
+        raise SystemExit("raw linxisa-v0.58.3 tag is not an ISA checker trigger")
     exact_command = "python3 tools/check_v058_pto_manifest.py --ptoas-root ."
     if exact_command not in workflow:
         raise SystemExit("ISA tag workflow does not run the exact contract checker")
@@ -161,7 +214,7 @@ def main() -> int:
 
     for name in ("build_wheel.yml", "build_wheel_mac.yml"):
         text = (root / ".github/workflows" / name).read_text()
-        if 'GITHUB_REF_NAME}" = "linxisa-v0.58.1"' in text:
+        if 'GITHUB_REF_NAME}" = "linxisa-v0.58.3"' in text:
             raise SystemExit(
                 f"{name} conflates ISA identity with PTOAS product version"
             )

@@ -185,10 +185,10 @@ if(BUILD_TESTING)
       "c11bd80c7dd34ed4438de1da6bde0a01eae8c76d" CACHE STRING
       "Reviewed merged Linx LLVM tree")
   set(PTOAS_EXPECTED_TILEOP_COMMIT
-      "1e63705463227598c445cef96755e6e7b85db2e2" CACHE STRING
+      "bd1ecca97ca47da0edc462c1ce19749c6940780e" CACHE STRING
       "Reviewed merged Linx TileOP commit")
   set(PTOAS_EXPECTED_TILEOP_TREE
-      "6a7752d86f48a2ad8ae468a6613bee7d8f6eb879" CACHE STRING
+      "854c463c21f9b758186b718105f4b035019cdd30" CACHE STRING
       "Reviewed merged Linx TileOP tree")
   if(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION)
     foreach(required_var IN ITEMS

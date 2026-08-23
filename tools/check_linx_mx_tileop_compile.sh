@@ -27,7 +27,9 @@ for required_file in \
   "${LLVM_CACHE}" \
   "${LINX_SYSROOT}/include/c++/v1/cstdint" \
   "${TILEOP_ROOT}/include/jcore/template_asm.hpp" \
-  "${TILEOP_ROOT}/test/tileop_api/verify_target_cxx_frontend.sh"; do
+  "${TILEOP_ROOT}/test/tileop_api/verify_target_cxx_frontend.sh" \
+  "${TILEOP_ROOT}/test/tileop_api/compile.all" \
+  "${TILEOP_ROOT}/test/tileop_api/verify_pto_identity.py"; do
   if [[ ! -e "${required_file}" ]]; then
     echo "required integration input is missing: ${required_file}" >&2
     exit 1
@@ -110,3 +112,11 @@ done
 
 TC_DIR=${LINX_LLVM_BUILD}/bin LINX_SYSROOT=${LINX_SYSROOT} \
   bash "${TILEOP_ROOT}/test/tileop_api/verify_target_cxx_frontend.sh"
+
+(
+  cd "${TILEOP_ROOT}/test/tileop_api"
+  COMPILER_DIR=${LINX_LLVM_BUILD}/bin \
+    LINX_SYSROOT=${LINX_SYSROOT} \
+    LINX_TARGET=linx64-unknown-linux-musl \
+    bash ./compile.all link-smoke
+)

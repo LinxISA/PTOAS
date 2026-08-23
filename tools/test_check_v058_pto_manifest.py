@@ -100,6 +100,7 @@ class LinxIdentityTest(unittest.TestCase):
         for required in (
             'LINX_CXX=${LINX_LLVM_BUILD}/bin/clang++',
             '"${TILEOP_ROOT}/include/jcore/template_asm.hpp"',
+            '"${TILEOP_ROOT}/test/tileop_api/verify_pto_identity.py"',
             '--target=linx64-unknown-linux-musl',
             '-fsyntax-only',
             '-c "${generated}"',
@@ -107,6 +108,7 @@ class LinxIdentityTest(unittest.TestCase):
             "EXPECTED_LLVM_TREE",
             "EXPECTED_TILEOP_COMMIT",
             "EXPECTED_TILEOP_TREE",
+            "bash ./compile.all link-smoke",
         ):
             self.assertIn(required, gate)
 

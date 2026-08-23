@@ -176,7 +176,7 @@ if(BUILD_TESTING)
   option(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION
          "Compile generated Linx MX C++ with the exact target toolchain and TileOP" OFF)
   set(PTOAS_LINX_LLVM_BUILD "" CACHE PATH "Exact merged Linx LLVM build")
-  set(PTOAS_LINX_SYSROOT "" CACHE PATH "Phase-B Linx musl+libc++ sysroot")
+  set(PTOAS_LINX_SYSROOT "" CACHE PATH "Phase-C Linx musl+libc++ sysroot")
   set(PTOAS_LINX_TILEOP_ROOT "" CACHE PATH "Exact merged Linx TileOP checkout")
   set(PTOAS_EXPECTED_LLVM_COMMIT
       "b7c83f68bf84125e696a70bec4b665c70a3b584d" CACHE STRING
@@ -185,10 +185,10 @@ if(BUILD_TESTING)
       "c11bd80c7dd34ed4438de1da6bde0a01eae8c76d" CACHE STRING
       "Reviewed merged Linx LLVM tree")
   set(PTOAS_EXPECTED_TILEOP_COMMIT
-      "d13a9c803e4b0f9600fc2e9bf75a7d11bda6c1ce" CACHE STRING
+      "1e63705463227598c445cef96755e6e7b85db2e2" CACHE STRING
       "Reviewed merged Linx TileOP commit")
   set(PTOAS_EXPECTED_TILEOP_TREE
-      "8f16235d6d0565be7430c29eb098bee59903c1aa" CACHE STRING
+      "6a7752d86f48a2ad8ae468a6613bee7d8f6eb879" CACHE STRING
       "Reviewed merged Linx TileOP tree")
   if(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION)
     foreach(required_var IN ITEMS

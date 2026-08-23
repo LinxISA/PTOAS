@@ -268,8 +268,8 @@ cmake -G Ninja -S . -B build-linx-integration \
   -DPTOAS_LINX_TILEOP_ROOT=$TILEOP_ROOT \
   -DPTOAS_EXPECTED_LLVM_COMMIT=b7c83f68bf84125e696a70bec4b665c70a3b584d \
   -DPTOAS_EXPECTED_LLVM_TREE=c11bd80c7dd34ed4438de1da6bde0a01eae8c76d \
-  -DPTOAS_EXPECTED_TILEOP_COMMIT=d13a9c803e4b0f9600fc2e9bf75a7d11bda6c1ce \
-  -DPTOAS_EXPECTED_TILEOP_TREE=8f16235d6d0565be7430c29eb098bee59903c1aa
+  -DPTOAS_EXPECTED_TILEOP_COMMIT=1e63705463227598c445cef96755e6e7b85db2e2 \
+  -DPTOAS_EXPECTED_TILEOP_TREE=6a7752d86f48a2ad8ae468a6613bee7d8f6eb879
 ninja -C build-linx-integration ptoas
 ctest --test-dir build-linx-integration \
   -L linx-target-integration --output-on-failure
@@ -279,6 +279,9 @@ ctest --test-dir build-linx-integration \
 sysroot 对 PTOAS 生成的 TMATMUL/TGEMV base、ACC、BIAS 的 zero/A-only/
 B-only/both 四种形式分别执行 `-fsyntax-only` 和目标对象编译。缺少路径、
 identity 不匹配或真实 TileOP 签名/约束不接受生成代码时，门禁都会失败。
+门禁最后还运行 TileOP 的 phase-C link smoke，并用
+`verify_pto_identity.py` 核对每个 Linx ELF 中唯一且精确的 PTO 0.58.3
+identity note。
 
 ### 5.4 上板验证
 

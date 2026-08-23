@@ -294,17 +294,17 @@ static std::string getEmitCScalarTypeToken(Type elemTy) {
   if (pto::isPTOFloat8E5M2FamilyType(elemTy))
     return isLinx ? "__fp8_e5m2" : "float8_e5m2_t";
   if (isa<pto::HiF8Type>(elemTy))
-    return "hifloat8_t";
+    return isLinx ? "__hif8" : "hifloat8_t";
   if (isa<pto::F8E8M0Type>(elemTy))
     return "__fp8_e8m0";
   if (isa<pto::F4E1M2x2Type>(elemTy))
-    return "float4_e1m2x2_t";
+    return isLinx ? "__fp4_e1m2x2" : "float4_e1m2x2_t";
   if (isa<pto::F4E2M1x2Type>(elemTy))
-    return "float4_e2m1x2_t";
+    return isLinx ? "__fp4_e2m1x2" : "float4_e2m1x2_t";
   if (elemTy.isF16())
-    return "half";
+    return isLinx ? "__half" : "half";
   if (elemTy.isBF16())
-    return "bfloat16_t";
+    return isLinx ? "__bf16" : "bfloat16_t";
   if (elemTy.isF32())
     return "float";
   if (elemTy.isF64())
@@ -448,24 +448,33 @@ public:
             Ctx, targetArch == PTOArch::Linx ? "__fp8_e5m2"
                                               : "float8_e5m2_t");
       if (type.isF32()) return emitc::OpaqueType::get(Ctx, "float");
-      if (type.isF16()) return emitc::OpaqueType::get(Ctx, "half");
-      if (type.isBF16()) return emitc::OpaqueType::get(Ctx, "bfloat16_t");
+      if (type.isF16())
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__half" : "half");
+      if (type.isBF16())
+        return emitc::OpaqueType::get(
+            Ctx, targetArch == PTOArch::Linx ? "__bf16" : "bfloat16_t");
       if (type.isF64()) return emitc::OpaqueType::get(Ctx, "double");
       llvm::errs() << "[Debug] Unsupported FloatType: " << type << "\n";
       return Type{};
     });
 
-    addConversion([Ctx](pto::HiF8Type) -> Type {
-      return emitc::OpaqueType::get(Ctx, "hifloat8_t");
+    addConversion([Ctx, targetArch](pto::HiF8Type) -> Type {
+      return emitc::OpaqueType::get(
+          Ctx, targetArch == PTOArch::Linx ? "__hif8" : "hifloat8_t");
     });
     addConversion([Ctx](pto::F8E8M0Type) -> Type {
       return emitc::OpaqueType::get(Ctx, "__fp8_e8m0");
     });
-    addConversion([Ctx](pto::F4E1M2x2Type) -> Type {
-      return emitc::OpaqueType::get(Ctx, "float4_e1m2x2_t");
+    addConversion([Ctx, targetArch](pto::F4E1M2x2Type) -> Type {
+      return emitc::OpaqueType::get(
+          Ctx, targetArch == PTOArch::Linx ? "__fp4_e1m2x2"
+                                            : "float4_e1m2x2_t");
     });
-    addConversion([Ctx](pto::F4E2M1x2Type) -> Type {
-      return emitc::OpaqueType::get(Ctx, "float4_e2m1x2_t");
+    addConversion([Ctx, targetArch](pto::F4E2M1x2Type) -> Type {
+      return emitc::OpaqueType::get(
+          Ctx, targetArch == PTOArch::Linx ? "__fp4_e2m1x2"
+                                            : "float4_e2m1x2_t");
     });
 
     addConversion([Ctx](IntegerType type) -> Type {
@@ -587,7 +596,8 @@ public:
     // ---------------------------------------------------------
     // 3. MemRef 转换 (Debug 重点)
     // ---------------------------------------------------------
-    addConversion([this, Ctx](MemRefType type) -> std::optional<Type> {
+    addConversion([this, Ctx,
+                   targetArch](MemRefType type) -> std::optional<Type> {
       LLVM_DEBUG(llvm::dbgs() << "Converting MemRef: " << type << "\n");
 
       // A. 转换元素类型
@@ -620,7 +630,11 @@ public:
          qualifier = "__gm__"; // Fallback
       }
 
-      std::string finalTypeStr = qualifier + " " + elemTypeStr;
+      if (targetArch == PTOArch::Linx)
+        qualifier.clear();
+
+      std::string finalTypeStr =
+          qualifier.empty() ? elemTypeStr : qualifier + " " + elemTypeStr;
       LLVM_DEBUG(llvm::dbgs() << "  [Success] -> " << finalTypeStr << "*\n");
       
       return emitc::PointerType::get(emitc::OpaqueType::get(Ctx, finalTypeStr));
@@ -3463,30 +3477,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 //===----------------------------------------------------------------------===//
 
 static std::string getElemTypeStringForGT(Type elemTy) {
-  if (isa<pto::F8E8M0Type>(elemTy)) return "__fp8_e8m0";
-  if (elemTy.isF16()) return "half";
-  if (elemTy.isBF16()) return "bfloat16_t";
-  if (elemTy.isF32()) return "float";
-  if (elemTy.isF64()) return "double";
-  if (elemTy.isInteger(8)) {
-    if (elemTy.isSignlessInteger(8) || elemTy.isSignedInteger(8))
-      return "int8_t";
-    return "uint8_t";
-  }
-  if (elemTy.isInteger(16)) {
-    if (elemTy.isSignlessInteger(16) || elemTy.isSignedInteger(16))
-      return "int16_t";
-    return "uint16_t";
-  }
-  if (elemTy.isInteger(32)) {
-    if (elemTy.isSignlessInteger(32) || elemTy.isSignedInteger(32))
-      return "int32_t";
-    return "uint32_t";
-  }
-  if (elemTy.isInteger(64)) {
-    return cast<IntegerType>(elemTy).isUnsigned() ? "uint64_t" : "int64_t";
-  }
-  return "float";
+  return getEmitCScalarTypeToken(elemTy);
 }
 
 static bool hasStaticShape(MemRefType mrTy) {
@@ -4278,8 +4269,22 @@ struct PTOTLoadToTLOAD : public OpConversionPattern<pto::TLoadOp> {
       }
     }
 
+    StringRef callee = "TLOAD";
+    if (getPTOParserTargetArch(rewriter.getContext()) ==
+        PTOParserTargetArch::Linx) {
+      if (auto tileTy = dyn_cast<pto::TileBufType>(op.getDst().getType())) {
+        if (auto space = dyn_cast_or_null<pto::AddressSpaceAttr>(
+                tileTy.getMemorySpace())) {
+          auto value = space.getAddressSpace();
+          if (value == pto::AddressSpace::LEFT ||
+              value == pto::AddressSpace::RIGHT ||
+              value == pto::AddressSpace::ACC)
+            callee = "TLOAD_CUBE";
+        }
+      }
+    }
     rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TLOAD",
+        op.getLoc(), TypeRange{}, callee,
         ArrayAttr{}, ArrayAttr{},
         ValueRange{dst, srcArg});
 
@@ -10844,7 +10849,8 @@ struct PTOAllocTileToEmitC
     }
 
     Value addr = adaptor.getAddr();
-    if (addr) {
+    bool isLinx = getPTOParserTargetArch(ctx) == PTOParserTargetArch::Linx;
+    if (addr && !isLinx) {
       addr = peelUnrealized(addr);
       auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
       if (isa<emitc::PointerType>(addr.getType()) ||

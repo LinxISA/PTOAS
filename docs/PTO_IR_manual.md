@@ -794,6 +794,13 @@ tensor descriptor; it must not pass an element count to the TileOP API.
 - **Implementation checks (A5)**
   - The destination tile element size must be `1`, `2`, `4`, or `8` bytes, and must match the source partition element size.
   - For `i64`, the destination tile `pad` must be `null` or `zero`.
+- **Implementation checks (Linx PTO ISA 0.58.3)**
+  - The source uses `loc=gm`; the destination may use
+    `vec`, `left`, `right`, `acc`, `bias`, or `scaling`.
+  - Source and destination element sizes match. Compact FP8/FP4 and E8M0
+    tiles are valid load destinations.
+  - `left`, `right`, and `acc` CUBE CELL destinations lower to
+    `TLOAD_CUBE`; other local destinations lower to `TLOAD`.
 
 **Hardware Mapping:**
 
@@ -1392,6 +1399,8 @@ For each (i, j):
 - **Implementation checks (Linx PTO ISA 0.58.3)**
   - Each A/B input independently selects its scale schema: FP16/BF16 requires
     no scale operand; a compact FP8/FP4 input requires its corresponding scale.
+  - Linx EmitC spells FP16/BF16 as the target frontend types `__half` and
+    `__bf16`; compact inputs use the corresponding `__fp8_*`/`__fp4_*` types.
   - Supplying a scale for FP16/BF16, or omitting one for a compact input, is an
     error. Thus zero-scale, A-only, B-only, and two-scale forms are distinct.
   - Each present scale must use `!pto.f8E8M0`, emitted as `__fp8_e8m0`, in the

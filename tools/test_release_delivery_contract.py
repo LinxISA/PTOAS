@@ -19,6 +19,9 @@ from pathlib import Path
 
 from check_release_delivery_contract import (
     EXPECTED_LLVM_COMMIT,
+    EXPECTED_LLVM_TREE,
+    EXPECTED_TILEOP_COMMIT,
+    EXPECTED_TILEOP_TREE,
     local_copy_sources,
     run_packaging_identity_mode,
     validate_local_copy_sources,
@@ -84,6 +87,18 @@ class ReleaseDeliveryContractTest(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path.relative_to(ROOT)):
                 self.assertIn(EXPECTED_LLVM_COMMIT, path.read_text())
+
+    def test_target_integration_pins_merged_llvm_and_tileop_trees(self) -> None:
+        text = (ROOT / "CMakeLists.txt").read_text() + (
+            ROOT / "README.md"
+        ).read_text()
+        for identity in (
+            EXPECTED_LLVM_COMMIT,
+            EXPECTED_LLVM_TREE,
+            EXPECTED_TILEOP_COMMIT,
+            EXPECTED_TILEOP_TREE,
+        ):
+            self.assertIn(identity, text)
 
     def test_hosted_builder_stage_gate_uses_buildkit(self) -> None:
         workflow = (ROOT / ".github/workflows/isa_contract.yml").read_text()

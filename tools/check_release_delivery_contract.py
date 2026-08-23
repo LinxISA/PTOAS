@@ -18,7 +18,10 @@ import subprocess
 from pathlib import Path
 
 
-EXPECTED_LLVM_COMMIT = "63c5c485b58a1e3fb9c9f35428108cee5c387a2a"
+EXPECTED_LLVM_COMMIT = "b7c83f68bf84125e696a70bec4b665c70a3b584d"
+EXPECTED_LLVM_TREE = "c11bd80c7dd34ed4438de1da6bde0a01eae8c76d"
+EXPECTED_TILEOP_COMMIT = "d13a9c803e4b0f9600fc2e9bf75a7d11bda6c1ce"
+EXPECTED_TILEOP_TREE = "8f16235d6d0565be7430c29eb098bee59903c1aa"
 
 
 def local_copy_sources(dockerfile: str) -> list[tuple[int, str]]:
@@ -154,6 +157,20 @@ def main() -> int:
             raise SystemExit(
                 f"{path.relative_to(root)} does not pin reviewed merged LLVM "
                 f"commit {EXPECTED_LLVM_COMMIT}"
+            )
+
+    integration_pin_text = (root / "CMakeLists.txt").read_text() + (
+        root / "README.md"
+    ).read_text()
+    for identity in (
+        EXPECTED_LLVM_COMMIT,
+        EXPECTED_LLVM_TREE,
+        EXPECTED_TILEOP_COMMIT,
+        EXPECTED_TILEOP_TREE,
+    ):
+        if identity not in integration_pin_text:
+            raise SystemExit(
+                f"Linx target integration gate does not pin reviewed identity {identity}"
             )
 
     nanobind_pin_paths = (

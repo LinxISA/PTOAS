@@ -175,6 +175,21 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_emitc_lvalue_contract.py)
   option(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION
          "Compile generated Linx MX C++ with the exact target toolchain and TileOP" OFF)
+  set(PTOAS_LINX_LLVM_BUILD "" CACHE PATH "Exact merged Linx LLVM build")
+  set(PTOAS_LINX_SYSROOT "" CACHE PATH "Phase-B Linx musl+libc++ sysroot")
+  set(PTOAS_LINX_TILEOP_ROOT "" CACHE PATH "Exact merged Linx TileOP checkout")
+  set(PTOAS_EXPECTED_LLVM_COMMIT
+      "b7c83f68bf84125e696a70bec4b665c70a3b584d" CACHE STRING
+      "Reviewed merged Linx LLVM commit")
+  set(PTOAS_EXPECTED_LLVM_TREE
+      "c11bd80c7dd34ed4438de1da6bde0a01eae8c76d" CACHE STRING
+      "Reviewed merged Linx LLVM tree")
+  set(PTOAS_EXPECTED_TILEOP_COMMIT
+      "d13a9c803e4b0f9600fc2e9bf75a7d11bda6c1ce" CACHE STRING
+      "Reviewed merged Linx TileOP commit")
+  set(PTOAS_EXPECTED_TILEOP_TREE
+      "8f16235d6d0565be7430c29eb098bee59903c1aa" CACHE STRING
+      "Reviewed merged Linx TileOP tree")
   if(PTOAS_ENABLE_LINX_TILEOP_INTEGRATION)
     foreach(required_var IN ITEMS
             PTOAS_LINX_LLVM_BUILD PTOAS_LINX_SYSROOT PTOAS_LINX_TILEOP_ROOT

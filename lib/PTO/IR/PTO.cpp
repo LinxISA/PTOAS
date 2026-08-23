@@ -2424,15 +2424,23 @@ LogicalResult TLoadOp::verify() {
       return emitOpError(
           "expects Linx tload src to be a memref/partition tensor view and "
           "dst to be a memref/tile buffer");
-    if (failed(verifyTileBufCommon(*this, dstTy, "dst")))
+    if (failed(verifyTileBufCommon(*this, dstTy, "dst",
+                                   /*allowLowPrecision=*/true)))
       return failure();
 
     auto srcSpace = getPTOMemorySpaceEnum(srcTy);
     auto dstSpace = getPTOMemorySpaceEnum(dstTy);
     if (!srcSpace || *srcSpace != pto::AddressSpace::GM)
       return emitOpError("expects Linx tload src to use loc=gm");
-    if (!dstSpace || *dstSpace != pto::AddressSpace::VEC)
-      return emitOpError("expects Linx tload dst to use loc=vec");
+    if (!dstSpace ||
+        (*dstSpace != pto::AddressSpace::VEC &&
+         *dstSpace != pto::AddressSpace::LEFT &&
+         *dstSpace != pto::AddressSpace::RIGHT &&
+         *dstSpace != pto::AddressSpace::ACC &&
+         *dstSpace != pto::AddressSpace::BIAS &&
+         *dstSpace != pto::AddressSpace::SCALING))
+      return emitOpError(
+          "expects Linx tload dst to use loc=vec/left/right/acc/bias/scaling");
     if (getElemByteSize(getElemTy(srcTy)) != getElemByteSize(getElemTy(dstTy)))
       return emitOpError(
           "expects Linx tload src and dst element sizes to match");
@@ -6656,7 +6664,12 @@ LogicalResult TGemvMxBiasOp::verify() {
     if (biasShape[1] != ShapedType::kDynamic && dstShape[1] != ShapedType::kDynamic &&
         biasShape[1] != dstShape[1])
       return emitOpError("expects bias and dst to have the same column shape");
-    if (failed(verifyTileBufSameValidShape(*this, getBias().getType(),
+    bool linxDecodedMemrefs =
+        isVerifierTargetLinx(getOperation()) &&
+        isa<MemRefType>(getBias().getType()) &&
+        isa<MemRefType>(getDst().getType());
+    if (!linxDecodedMemrefs &&
+        failed(verifyTileBufSameValidShape(*this, getBias().getType(),
                                            getDst().getType(), "bias", "dst")))
       return failure();
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),

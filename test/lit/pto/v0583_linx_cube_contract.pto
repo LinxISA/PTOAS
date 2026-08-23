@@ -14,8 +14,8 @@ module attributes {pto.target_arch = "linx"} {
   }
 }
 
-// CHECK: Tile<TileType::Left, half, 16, 32, BLayout::CubeM16
-// CHECK: Tile<TileType::Right, bfloat16_t, 32, 16, BLayout::CubeN8
+// CHECK: Tile<TileType::Left, __half, 16, 32, BLayout::CubeM16
+// CHECK: Tile<TileType::Right, __bf16, 32, 16, BLayout::CubeN8
 // CHECK: Tile<TileType::Acc, float, 16, 16, BLayout::CubeM16
 // CHECK: TMATMUL([[D:v[0-9]+]], [[A:v[0-9]+]], [[B:v[0-9]+]]);
 // CHECK: TGEMV([[G:v[0-9]+]], [[B]], [[V:v[0-9]+]]);

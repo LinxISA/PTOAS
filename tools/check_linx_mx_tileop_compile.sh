@@ -108,5 +108,5 @@ for generated in "${TMP_DIR}/tmatmul.cpp" "${TMP_DIR}/tgemv.cpp"; do
   fi
 done
 
-TC_DIR=${LINX_LLVM_BUILD} LINX_SYSROOT=${LINX_SYSROOT} \
+TC_DIR=${LINX_LLVM_BUILD}/bin LINX_SYSROOT=${LINX_SYSROOT} \
   bash "${TILEOP_ROOT}/test/tileop_api/verify_target_cxx_frontend.sh"

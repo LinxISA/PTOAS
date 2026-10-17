@@ -4,11 +4,11 @@
 
 - Treats the unpublished PTO-SPEC development manifest as the architectural
   golden without presenting it as a published release.
-- Records the exact PTOAS capability boundary: 94 golden Tile operations are
-  supported, 25 remain unavailable pending reviewed semantics, and 15 retired
-  public operations remain dialect-only compatibility forms.
+- Records the exact PTOAS capability boundary: 94 golden Tile operation names
+  are present but semantic/schema parity is unproven, 25 remain unavailable,
+  and 15 retired public operations remain dialect-only compatibility forms.
 - Rejects every retired public operation on the Linx target and verifies that
-  unsupported golden operations have neither an ODS declaration nor a PTO-BC
+  missing golden operations have neither an ODS declaration nor a PTO-BC
   opcode assignment.
 - Records that PTOAS does not assemble or encode scalar machine instructions;
   the 0.58.7 scalar atomic encoding change is consumed by scalar toolchains,

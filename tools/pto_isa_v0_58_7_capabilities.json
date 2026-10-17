@@ -2,7 +2,8 @@
   "schema_version": 1,
   "golden_lock": "pto_isa_v0_58_7_development_lock.json",
   "golden_operation_count": 119,
-  "supported_base_contract": "pto_isa_v0_58_3_operation_contracts.json",
+  "present_base_contract": "pto_isa_v0_58_3_operation_contracts.json",
+  "present_schema_parity_unproven_count": 94,
   "retired_public_operations": [
     "TCONCAT",
     "TDEQUANT",
@@ -20,7 +21,7 @@
     "TSORT",
     "TTRANS"
   ],
-  "unsupported_golden_operations": [
+  "missing_golden_operations": [
     "MGATHER_ADD",
     "MGATHER_AND",
     "MGATHER_DEC",
@@ -46,5 +47,40 @@
     "TPERMUTE",
     "TSHUF",
     "TUNPACK"
-  ]
+  ],
+  "catalog_drift_audit": {
+    "reference_source_commit": "e599a3d36ebfad43362ff591ea5e128816c684c7",
+    "reference_release": "0.58.3",
+    "exact_catalog_unchanged_count": 7,
+    "exact_catalog_unchanged_operations": [
+      "GMOV",
+      "TCVT",
+      "TGATHER",
+      "TMOV",
+      "TPREFETCH",
+      "TSCATTER",
+      "TTRI"
+    ],
+    "catalog_changed_count": 87,
+    "changed_field_counts": {
+      "arguments": 1,
+      "catalog_indices": 1,
+      "datr_contract": 80,
+      "effect_contract": 1,
+      "legality_handler": 1,
+      "operands": 33,
+      "semantic_handler": 1,
+      "semantic_summary": 5,
+      "state_effects": 44
+    },
+    "cross_cutting_unproven_contracts": [
+      "B.IOR ExecMaskPresent encoding and mask-role selection",
+      "indexed TLSU byte-displacement and atomic-family behavior",
+      "row and column expansion ByteId and CUBE slot selection",
+      "TCI destination types and RegSrc1 direction/Step2D control",
+      "row and column reduction destination typing and state effects",
+      "PredicateCell and GPR-mask carrier behavior",
+      "DATR applicability changes across 80 retained operations"
+    ]
+  }
 }

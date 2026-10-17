@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Audit PTOAS against the unpublished PTO ISA 0.58.7 development snapshot.
 
-PTO-SPEC is the sole architectural golden.  PTOAS intentionally implements a
-bounded Tile subset: unsupported golden operations must remain unavailable,
-and operations retired by the golden may remain parseable only as explicitly
-rejected dialect compatibility forms.
+PTO-SPEC is the sole architectural golden.  This checker distinguishes mere
+ODS/PTO-BC presence from proven semantic compatibility: missing golden
+operations must remain unavailable, and operations retired by the golden may
+remain parseable only as explicitly rejected dialect compatibility forms.
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import importlib.util
 import json
@@ -71,17 +72,26 @@ def load_capabilities(ptoas_root: Path) -> dict:
         raise SystemExit(f"unexpected capability schema in {path}")
     if data.get("golden_operation_count") != EXPECTED_IDENTITY["tile_operations_count"]:
         raise SystemExit(f"unexpected golden operation count in {path}")
-    if data.get("supported_base_contract") != "pto_isa_v0_58_3_operation_contracts.json":
-        raise SystemExit(f"unexpected supported base contract in {path}")
+    if data.get("present_base_contract") != "pto_isa_v0_58_3_operation_contracts.json":
+        raise SystemExit(f"unexpected present base contract in {path}")
     if data.get("golden_lock") != "pto_isa_v0_58_7_development_lock.json":
         raise SystemExit(f"unexpected golden lock in {path}")
     retired = data.get("retired_public_operations", [])
-    unsupported = data.get("unsupported_golden_operations", [])
-    for label, names in (("retired", retired), ("unsupported", unsupported)):
+    missing_golden = data.get("missing_golden_operations", [])
+    for label, names in (("retired", retired), ("missing", missing_golden)):
         if len(names) != len(set(names)):
             raise SystemExit(f"duplicate {label} operation in {path}")
-    if set(retired) & set(unsupported):
-        raise SystemExit(f"retired/unsupported operation overlap in {path}")
+    if set(retired) & set(missing_golden):
+        raise SystemExit(f"retired/missing operation overlap in {path}")
+    if data.get("present_schema_parity_unproven_count") != 94:
+        raise SystemExit(f"unexpected present operation count in {path}")
+    drift = data.get("catalog_drift_audit", {})
+    if drift.get("reference_source_commit") != "e599a3d36ebfad43362ff591ea5e128816c684c7":
+        raise SystemExit(f"unexpected catalog drift reference in {path}")
+    if drift.get("exact_catalog_unchanged_count") != 7:
+        raise SystemExit(f"unexpected exact-unchanged count in {path}")
+    if drift.get("catalog_changed_count") != 87:
+        raise SystemExit(f"unexpected catalog-changed count in {path}")
     return data
 
 
@@ -120,24 +130,24 @@ def load_lock(ptoas_root: Path, capabilities: dict) -> dict:
 
 
 def load_base_contracts(ptoas_root: Path, capabilities: dict) -> dict:
-    path = ptoas_root / "tools" / capabilities["supported_base_contract"]
+    path = ptoas_root / "tools" / capabilities["present_base_contract"]
     data = json.loads(path.read_text())
     operations = data.get("operations", {})
     retired = set(capabilities["retired_public_operations"])
     missing = sorted(retired - set(operations))
     if missing:
         raise SystemExit(f"retired operations absent from base contract: {missing}")
-    supported = {name: value for name, value in operations.items() if name not in retired}
-    if len(supported) != 94:
-        raise SystemExit(f"expected 94 supported operations, got {len(supported)}")
+    present = {name: value for name, value in operations.items() if name not in retired}
+    if len(present) != capabilities["present_schema_parity_unproven_count"]:
+        raise SystemExit(f"expected 94 present operations, got {len(present)}")
     return data
 
 
 def validate_ptoas_boundary(ptoas_root: Path, capabilities: dict, base: dict) -> None:
     operations = BASE_CHECKER.load_ptoas_ops(ptoas_root)
     retired = set(capabilities["retired_public_operations"])
-    unsupported = set(capabilities["unsupported_golden_operations"])
-    supported_contracts = {
+    missing_golden = set(capabilities["missing_golden_operations"])
+    present_contracts = {
         name: contract
         for name, contract in base["operations"].items()
         if name not in retired
@@ -145,9 +155,9 @@ def validate_ptoas_boundary(ptoas_root: Path, capabilities: dict, base: dict) ->
     base_dialect_only = base.get("dialect_only_operations", {})
     retired_contracts = {name: base["operations"][name] for name in retired}
 
-    expected_supported = {
+    expected_present = {
         normalize(contract["ptoas_mnemonic"]): contract
-        for contract in supported_contracts.values()
+        for contract in present_contracts.values()
     }
     expected_dialect_only = {
         normalize(name): {"ptoas_mnemonic": name, "ptoas_arguments": arguments}
@@ -160,16 +170,16 @@ def validate_ptoas_boundary(ptoas_root: Path, capabilities: dict, base: dict) ->
         }
     )
 
-    unsupported_present = sorted(
-        name for name in unsupported if normalize(name) in operations
+    missing_present = sorted(
+        name for name in missing_golden if normalize(name) in operations
     )
-    if unsupported_present:
+    if missing_present:
         raise SystemExit(
-            "unsupported PTO ISA 0.58.7 operations became available without "
-            f"reviewed semantics: {unsupported_present}"
+            "missing PTO ISA 0.58.7 operations became available without "
+            f"reviewed semantics: {missing_present}"
         )
 
-    expected_all = set(expected_supported) | set(expected_dialect_only)
+    expected_all = set(expected_present) | set(expected_dialect_only)
     missing = sorted(expected_all - set(operations))
     undeclared = sorted(set(operations) - expected_all)
     if missing or undeclared:
@@ -179,7 +189,7 @@ def validate_ptoas_boundary(ptoas_root: Path, capabilities: dict, base: dict) ->
         )
 
     argument_errors = []
-    for key, contract in {**expected_supported, **expected_dialect_only}.items():
+    for key, contract in {**expected_present, **expected_dialect_only}.items():
         actual = operations[key]["arguments"]
         expected = tuple(contract["ptoas_arguments"])
         if actual != expected:
@@ -225,13 +235,13 @@ def validate_ptoas_boundary(ptoas_root: Path, capabilities: dict, base: dict) ->
         normalize(name)
         for name in re.findall(r'"pto\.([A-Za-z0-9_.]+)"', bytecode)
     }
-    unsupported_bytecode = sorted(
-        name for name in unsupported if normalize(name) in bytecode_names
+    missing_bytecode = sorted(
+        name for name in missing_golden if normalize(name) in bytecode_names
     )
-    if unsupported_bytecode:
+    if missing_bytecode:
         raise SystemExit(
-            "unsupported PTO ISA 0.58.7 operations have bytecode assignments: "
-            f"{unsupported_bytecode}"
+            "missing PTO ISA 0.58.7 operations have bytecode assignments: "
+            f"{missing_bytecode}"
         )
 
 
@@ -303,17 +313,17 @@ def validate_golden_source(
         raise SystemExit("duplicate golden Tile operation name")
 
     retired = set(capabilities["retired_public_operations"])
-    unsupported = set(capabilities["unsupported_golden_operations"])
-    supported = set(base["operations"]) - retired
-    if set(tile_by_name) != supported | unsupported:
+    missing_golden = set(capabilities["missing_golden_operations"])
+    present = set(base["operations"]) - retired
+    if set(tile_by_name) != present | missing_golden:
         raise SystemExit(
             "golden/capability operation boundary mismatch: "
-            f"missing={sorted((supported | unsupported) - set(tile_by_name))}, "
-            f"unexpected={sorted(set(tile_by_name) - (supported | unsupported))}"
+            f"missing={sorted((present | missing_golden) - set(tile_by_name))}, "
+            f"unexpected={sorted(set(tile_by_name) - (present | missing_golden))}"
         )
 
     schema_errors = []
-    for name in sorted(supported):
+    for name in sorted(present):
         golden = tile_by_name[name]
         contract = base["operations"][name]
         if golden.get("engine") != contract.get("engine"):
@@ -330,9 +340,91 @@ def validate_golden_source(
             )
     if schema_errors:
         raise SystemExit(
-            "supported PTOAS schema differs from PTO-SPEC golden:\n  "
+            "present PTOAS structural operand schema differs from PTO-SPEC golden:\n  "
             + "\n  ".join(schema_errors)
         )
+
+    drift = capabilities["catalog_drift_audit"]
+    reference_commit = drift["reference_source_commit"]
+    old_tile_text = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source_root),
+            "show",
+            f"{reference_commit}:spec/catalog/tile-operations.json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    old_tile_entries = json.loads(old_tile_text)["operations"]
+    old_tile_by_name = {entry["name"]: entry for entry in old_tile_entries}
+    exact_unchanged = sorted(
+        name for name in present if tile_by_name[name] == old_tile_by_name[name]
+    )
+    if exact_unchanged != drift["exact_catalog_unchanged_operations"]:
+        raise SystemExit(
+            "exact-unchanged Tile audit drift: "
+            f"expected {drift['exact_catalog_unchanged_operations']}, "
+            f"got {exact_unchanged}"
+        )
+
+    changed_fields = collections.Counter()
+    changed_names = []
+    for name in sorted(present):
+        old = old_tile_by_name[name]
+        new = tile_by_name[name]
+        fields = [
+            field
+            for field in sorted(set(old) | set(new))
+            if old.get(field) != new.get(field)
+        ]
+        if fields:
+            changed_names.append(name)
+            changed_fields.update(fields)
+    if len(changed_names) != drift["catalog_changed_count"]:
+        raise SystemExit(
+            f"expected {drift['catalog_changed_count']} changed Tile operations, "
+            f"got {len(changed_names)}"
+        )
+    if dict(changed_fields) != drift["changed_field_counts"]:
+        raise SystemExit(
+            "Tile catalog changed-field audit mismatch: "
+            f"expected {drift['changed_field_counts']}, got {dict(changed_fields)}"
+        )
+
+    command_path = source_root / manifest["catalogs"]["command_forms"]["path"]
+    command_entries = json.loads(command_path.read_text())["forms"]
+    old_command_text = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source_root),
+            "show",
+            f"{reference_commit}:spec/catalog/command-forms.json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    old_command_entries = json.loads(old_command_text)["forms"]
+    new_ior = [entry for entry in command_entries if entry["mnemonic"] == "B.IOR"]
+    old_ior = [entry for entry in old_command_entries if entry["mnemonic"] == "B.IOR"]
+    if len(new_ior) != 1 or len(old_ior) != 1:
+        raise SystemExit("expected exactly one old and current B.IOR form")
+    old_fields = {field["name"] for field in old_ior[0]["fields"]}
+    new_fields = {field["name"] for field in new_ior[0]["fields"]}
+    if "ExecMaskPresent" in old_fields or "ExecMaskPresent" not in new_fields:
+        raise SystemExit("B.IOR ExecMaskPresent drift audit mismatch")
+    if old_ior[0]["encoding"] != [
+        {"index": 0, "mask": "0x0600707f", "match": "0x00000013", "width_bits": 32}
+    ]:
+        raise SystemExit("unexpected reference B.IOR encoding")
+    if new_ior[0]["encoding"] != [
+        {"index": 0, "mask": "0x0200707f", "match": "0x00000013", "width_bits": 32}
+    ]:
+        raise SystemExit("unexpected current B.IOR encoding")
 
 
 def main() -> int:
@@ -351,7 +443,8 @@ def main() -> int:
 
     print(
         "PTOAS/PTO-SPEC 0.58.7 development capability check OK: "
-        "94 golden Tile operations supported, 25 explicitly unavailable, "
+        "94 golden Tile operation names are present with semantic/schema parity "
+        "unproven, 25 are missing and explicitly unavailable, "
         "15 retired public operations rejected by the Linx target; "
         "PTOAS has no scalar machine-code encoder"
     )

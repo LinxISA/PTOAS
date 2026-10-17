@@ -12115,6 +12115,9 @@ struct EmitPTOManualPass
                                          : PTOParserTargetArch::A3;
     ScopedPTOParserTargetArch parserArchScope(ctx, parserArch);
 
+    if (targetArch == PTOArch::Linx &&
+        failed(pto::verifyLinxOperationBoundary(mop)))
+      return signalPassFailure();
     if (failed(pto::validatePTOEntryFunctions(mop)))
       return signalPassFailure();
     pto::annotatePTOEntryFunctions(mop);

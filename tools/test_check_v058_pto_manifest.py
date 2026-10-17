@@ -127,6 +127,7 @@ class LinxIdentityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fake_root = Path(directory)
             for relative in (
+                "lib/PTO/IR/PTO.cpp",
                 "tools/ptoas/ptoas.cpp",
                 "tools/pto_isa_v0_58_3_operation_contracts.json",
             ):
@@ -156,6 +157,7 @@ class LinxIdentityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fake_root = Path(directory)
             for relative in (
+                "lib/PTO/IR/PTO.cpp",
                 "tools/ptoas/ptoas.cpp",
                 "tools/pto_isa_v0_58_3_operation_contracts.json",
             ):

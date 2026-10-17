@@ -241,33 +241,6 @@ enum class PTOBuildLevel {
   Level3,
 };
 
-static LogicalResult validateLinxOperationBoundary(ModuleOp module) {
-  if (!pto::isTargetArchLinx(module))
-    return success();
-
-  static constexpr llvm::StringLiteral linxDialectOnlyOps[] = {
-      "pto.acccvt",       "pto.talloc",      "pto.taxpy",
-      "pto.tdeinterleave", "pto.tfree",       "pto.tgatherb",
-      "pto.tinterleave",  "pto.tpartargmax", "pto.tpartargmin",
-      "pto.tpop",         "pto.tprelu",      "pto.tpush",
-      "pto.treshape",
-  };
-
-  llvm::SmallVector<Operation *, 4> invalid;
-  module.walk([&](Operation *op) {
-    StringRef name = op->getName().getStringRef();
-    if (llvm::is_contained(linxDialectOnlyOps, name))
-      invalid.push_back(op);
-  });
-  for (Operation *op : invalid) {
-    StringRef name = op->getName().getStringRef();
-    op->emitError() << "'" << name
-                    << "' op is dialect-only and not part of the active Linx "
-                       "PTO ISA v0.58.3 target";
-  }
-  return invalid.empty() ? success() : failure();
-}
-
 static PTOBuildLevel defaultBuildLevel() {
   return PTOBuildLevel::Level2;
 }
@@ -1084,7 +1057,8 @@ int main(int argc, char **argv) {
                                     mlir::StringAttr::get(&context, arch));
   }
 
-  if (failed(validateLinxOperationBoundary(*module)))
+  if (pto::isTargetArchLinx(*module) &&
+      failed(pto::verifyLinxOperationBoundary(*module)))
     return 1;
 
   PTOBuildLevel effectiveLevel = defaultBuildLevel();

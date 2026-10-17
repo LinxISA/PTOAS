@@ -15,6 +15,9 @@ on:
       - test/lit/pto/v0583_**
       - tools/check_v058_pto_manifest.py
       - tools/test_check_v058_pto_manifest.py
+      - tools/check_v0587_development_contract.py
+      - tools/test_check_v0587_development_contract.py
+      - tools/pto_isa_v0_58_7_**
       - tools/pto_isa_v0_58_3_**
       - tools/ptobc/**
       - tools/check_release_delivery_contract.py
@@ -29,10 +32,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout exact PTO-SPEC development golden
+        shell: bash
+        run: |
+          git clone https://github.com/PTO-ISA/pto-spec.git "${RUNNER_TEMP}/pto-spec"
+          git -C "${RUNNER_TEMP}/pto-spec" checkout --detach f0a876e449a95d26841c5ee7affb4c905ebc5f5b
+          test "$(git -C "${RUNNER_TEMP}/pto-spec" rev-parse HEAD)" = f0a876e449a95d26841c5ee7affb4c905ebc5f5b
       - name: Check exact PTO ISA contract
         run: |
           python3 tools/check_v058_pto_manifest.py --ptoas-root .
           python3 tools/test_check_v058_pto_manifest.py
+          python3 tools/check_v0587_development_contract.py \
+            --ptoas-root . \
+            --pto-spec-root "${RUNNER_TEMP}/pto-spec"
+          python3 tools/test_check_v0587_development_contract.py
 
   docker-builder:
     runs-on: ubuntu-latest

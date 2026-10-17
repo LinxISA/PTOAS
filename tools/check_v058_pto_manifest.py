@@ -498,6 +498,7 @@ def load_ptoas_ops(ptoas_root: Path) -> dict[str, dict]:
 
 def validate_linx_target_surface(ptoas_root: Path) -> None:
     cli_text = (ptoas_root / "tools/ptoas/ptoas.cpp").read_text()
+    ir_text = (ptoas_root / "lib/PTO/IR/PTO.cpp").read_text()
     lowering_text = (ptoas_root / "lib/PTO/Transforms/PTOToEmitC.cpp").read_text()
     errors = []
     for token in (
@@ -513,8 +514,12 @@ def validate_linx_target_surface(ptoas_root: Path) -> None:
     )
     for mnemonic_name in contracts.get("linx_rejected_mnemonics", []):
         mnemonic = f'"pto.{mnemonic_name}"'
-        if mnemonic not in cli_text:
+        if mnemonic not in ir_text:
             errors.append(f"Linx target boundary does not explicitly reject dialect-only {mnemonic}")
+    if "pto::verifyLinxOperationBoundary" not in cli_text:
+        errors.append("PTOAS CLI bypasses the shared Linx operation boundary")
+    if "pto::verifyLinxOperationBoundary" not in lowering_text:
+        errors.append("PTO-to-EmitC pass bypasses the shared Linx operation boundary")
     if 'ValueRange{dst, peerTid, src}' not in lowering_text:
         errors.append("GMOV lowering must match Linx-TileOP-API order (dst, peer_tid, src)")
     if 'ValueRange{dst, src0, src1, src2}' not in lowering_text:

@@ -144,6 +144,15 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_v058_pto_manifest.py)
   add_test(
+    NAME pto_isa_v0587_development_capability_check
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_v0587_development_contract.py
+            --ptoas-root ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME pto_isa_v0587_development_capability_unit
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_check_v0587_development_contract.py)
+  add_test(
     NAME python_binding_link_contract_check
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_python_binding_link_contract.py

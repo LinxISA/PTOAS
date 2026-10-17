@@ -105,6 +105,12 @@ bool isTargetArchA3(Operation *op);
 bool isTargetArchA5(Operation *op);
 bool isTargetArchLinx(Operation *op);
 
+/// Reject operations that are retained only for non-Linx dialect
+/// compatibility.  Linx lowering entry points must call this before
+/// transforming the module so library/pass users get the same fail-closed
+/// boundary as the PTOAS CLI.  The caller owns target selection.
+LogicalResult verifyLinxOperationBoundary(ModuleOp module);
+
 enum class PTOParserTargetArch {
   Unspecified,
   A3,

@@ -287,6 +287,35 @@ bool mlir::pto::isTargetArchLinx(Operation *op) {
   return getTargetArch(op) == PTOArch::Linx;
 }
 
+LogicalResult mlir::pto::verifyLinxOperationBoundary(ModuleOp module) {
+  static constexpr llvm::StringLiteral linxDialectOnlyOps[] = {
+      "pto.acccvt",      "pto.talloc",       "pto.taxpy",
+      "pto.tconcat",     "pto.tdeinterleave", "pto.tdequant",
+      "pto.textract",    "pto.tfillpad",     "pto.tfree",
+      "pto.tgatherb",    "pto.thistogram",   "pto.timg2col",
+      "pto.tinsert",     "pto.tinterleave",  "pto.tmrgsort",
+      "pto.tpartadd",    "pto.tpartargmax",  "pto.tpartargmin",
+      "pto.tpartmax",    "pto.tpartmin",     "pto.tpartmul",
+      "pto.tpop",        "pto.tprelu",       "pto.tpush",
+      "pto.tquant",      "pto.treshape",     "pto.tsort",
+      "pto.ttrans",
+  };
+
+  SmallVector<Operation *, 4> invalid;
+  module.walk([&](Operation *op) {
+    if (llvm::is_contained(linxDialectOnlyOps,
+                           op->getName().getStringRef()))
+      invalid.push_back(op);
+  });
+  for (Operation *op : invalid) {
+    StringRef name = op->getName().getStringRef();
+    op->emitError() << "'" << name
+                    << "' op is dialect-only and not part of the active Linx "
+                       "PTO ISA target";
+  }
+  return invalid.empty() ? success() : failure();
+}
+
 static llvm::TypeSize getOneByteTypeSize() {
   return llvm::TypeSize::getFixed(8);
 }

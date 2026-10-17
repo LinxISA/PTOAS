@@ -1,5 +1,19 @@
 # PTOAS (PTO Assembler & Optimizer)
 
+## Unreleased: PTO ISA 0.58.7 development audit
+
+- Treats the unpublished PTO-SPEC development manifest as the architectural
+  golden without presenting it as a published release.
+- Records the exact PTOAS capability boundary: 94 golden Tile operation names
+  are present but semantic/schema parity is unproven, 25 remain unavailable,
+  and 15 retired public operations remain dialect-only compatibility forms.
+- Rejects every retired public operation on the Linx target and verifies that
+  missing golden operations have neither an ODS declaration nor a PTO-BC
+  opcode assignment.
+- Records that PTOAS does not assemble or encode scalar machine instructions;
+  the 0.58.7 scalar atomic encoding change is consumed by scalar toolchains,
+  while PTOAS audits its catalog identity only.
+
 ## Unreleased: PTO ISA 0.58.3 alignment
 
 - Locks the exact PTO-SPEC v0.58.3 release identity and all four catalogs.
